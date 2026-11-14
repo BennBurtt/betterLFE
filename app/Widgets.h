@@ -98,6 +98,28 @@ private:
     std::vector<double> freqs, facadeDb, lfeDb, grid, heatLevel, heatSign;
 };
 
+/** Last attack found in each screen channel and how the LFE lines up with it. */
+class TransientStrip : public juce::Component
+{
+public:
+    static constexpr double alignedToleranceMs = 2.5;   // quarter period at 100 Hz
+    static constexpr double unmeasurableMs = 8.0;       // precision too poor to say anything about timing
+    static constexpr double holdSeconds = 4.0, fadeSeconds = 1.5;
+
+    void show (const TransientEvent&, double severity);
+    void advance (double seconds);
+    void paint (juce::Graphics&) override;
+
+private:
+    struct Cell
+    {
+        TransientEvent event;
+        double severity = 0.0, age = 1e9;
+    };
+
+    std::array<Cell, 3> cells;
+};
+
 /** Signed LFE / screen-channel interaction per frequency, -1 .. +1. */
 class CorrelationPlot : public juce::Component
 {

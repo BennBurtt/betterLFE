@@ -76,6 +76,7 @@ private:
 
     HeaderBar header;
     SpectrumPlot spectrum;
+    TransientStrip transientStrip;
     CorrelationPlot correlation;
 
     juce::Component panel;
@@ -86,10 +87,11 @@ private:
     juce::ComboBox formatBox, deviceBox, fpsBox, windowBox;
     juce::ToggleButton lfeGainToggle { "LFE +10 dB (theatre level)" }, animationToggle { "Background animation" };
     LabelledSlider inertia { "Inertia:", 0, 100, 1, 70 }, integration { "Integration:", 0.5, 5.0, 0.1, 2.0 },
-                   threshold { "Threshold:", 0.0, 1.0, 0.01, 0.33 }, decay { "Decay:", 0.1, 4.0, 0.05, 1.0 };
+                   threshold { "Threshold:", 0.0, 1.0, 0.01, 0.5 }, decay { "Decay:", 0.1, 4.0, 0.05, 1.0 };
     juce::TextButton settingsButton { "Settings" };
 
     double lastTick = 0.0, engineRate = 0.0, demoTime = 0.0;
+    std::array<double, 3> transientFlash { { 0.0, 0.0, 0.0 } };
     int inputGeneration = -1, framesShown = 0;
     bool panelVisible = true, restoring = false;
     std::vector<float> scratch;

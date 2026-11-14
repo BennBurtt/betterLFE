@@ -33,25 +33,21 @@ Logo et icône sont optionnels : voir `assets/README.md`.
 
 | Dossier | Contenu |
 |---|---|
-| `core/` | Moteur d'analyse en C++17 pur, sans dépendance (`LfeEngine`, `AlertTracker`) |
+| `core/` | Moteur d'analyse en C++17 pur, sans dépendance (`LfeEngine`, `TransientDetector`, `AlertTracker`) |
 | `app/` | Application JUCE : entrée audio, interface |
 | `tests/` | Vérifications du moteur sur signaux synthétiques |
 
 ## Ce qui est mesuré
 
-L'audio est filtré et décimé vers ~500 Hz, puis analysé par spectres et
-inter-spectres moyennés dans le temps et lissés au tiers d'octave. Pour chaque
-canal d'écran X face au LFE :
+Deux détecteurs indépendants, le LCR étant toujours la référence :
 
-| Grandeur | Formule | Lecture |
-|---|---|---|
-| Interaction `s` | `2·Re(Sxy) / (Sxx + Syy)` | +1 en phase à niveau égal, −1 annulation totale, 0 aucune interaction. La somme X + LFE varie de `10·log10(1 + s)` dB |
-| Cohérence | `|Sxy|² / (Sxx·Syy)` | 1 = même signal, 0 = décorrélé |
-| Phase | `arg(Sxy)` | déphasage X / LFE |
-| Incertitude `σ` | d'après la largeur de bande et la durée réellement moyennée | écart que le hasard seul peut produire sur `s` |
+- **Global** : corrélation, phase et interaction LFE ↔ L/C/R par fréquence, sur
+  la durée. Un LFE décorrélé n'alerte pas, quelle que soit sa phase.
+- **Transitoires** : à chaque attaque d'un canal d'écran, mesure du décalage du
+  LFE (en avance / en retard, en ms, avec sa précision) et de sa polarité.
 
-L'alerte se déclenche quand `|s|` dépasse le seuil réglé **et** 3 σ.
-Ambre : en phase. Rouge : hors phase.
+Le détail, les formules et les références publiées sont dans
+[`docs/ALGORITHME.md`](docs/ALGORITHME.md).
 
 ## Licence de JUCE
 

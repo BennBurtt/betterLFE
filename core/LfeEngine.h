@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include "TransientDetector.h"
+
 #include <array>
 #include <complex>
 #include <vector>
@@ -104,6 +106,11 @@ public:
     bool analyze (const Settings&);
 
     const Analysis& result() const  { return out; }
+
+    /** Attacks found in the screen channels since the last call, each with the
+        way the LFE lines up with it. Independent of analyze(). */
+    std::vector<TransientEvent> takeTransientEvents()   { return transients.takeEvents(); }
+
     double decimatedRate() const    { return fs; }
     double windowSeconds() const    { return windowSec; }
 
@@ -112,6 +119,7 @@ private:
 
     Decimator decimator;
     double fs, facadeGain, windowSec = 1.0;
+    TransientDetector transients;
     int nWin = 0, stride = 1;
 
     std::vector<double> window, scale, bandwidth;

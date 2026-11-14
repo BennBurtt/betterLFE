@@ -397,6 +397,138 @@ void SpectrumPlot::paint (juce::Graphics& g)
 }
 
 //==============================================================================
+void TransientStrip::show (const TransientEvent& e, double severity)
+{
+    auto& cell = cells[(size_t) juce::jlimit (0, 2, e.channel)];
+    cell.event = e;
+    cell.severity = severity;
+    cell.age = 0.0;
+    repaint();
+}
+
+void TransientStrip::advance (double seconds)
+{
+    bool visible = false;
+
+    for (auto& cell : cells)
+    {
+        visible = visible || cell.age < holdSeconds + fadeSeconds;
+        cell.age += seconds;
+    }
+
+    if (visible)
+        repaint();
+}
+
+void TransientStrip::paint (juce::Graphics& g)
+{
+    g.fillAll (theme::plot);
+    g.setColour (theme::outline);
+    g.fillRect (0, 0, getWidth(), 1);
+
+    g.setColour (theme::dimText);
+    g.setFont (uiFont (12.0f));
+    g.drawFittedText ("Transients\nLFE vs screen", 4, 0, FrequencyAxis::leftMargin + 30, getHeight(), juce::Justification::centredLeft, 2);
+
+    auto area = getLocalBounds().toFloat().withTrimmedLeft ((float) FrequencyAxis::leftMargin + 36.0f)
+                                          .withTrimmedRight ((float) FrequencyAxis::rightMargin).reduced (0.0f, 6.0f);
+    const float cellWidth = area.getWidth() / 3.0f;
+    const char* names[] = { "L", "C", "R" };
+    const double range = TransientDetector::maxLagSeconds * 1000.0;
+
+    for (size_t c = 0; c < 3; ++c)
+    {
+        const auto& cell = cells[c];
+        auto box = area.removeFromLeft (cellWidth).reduced (6.0f, 0.0f);
+
+        g.setColour (juce::Colour (0xff1b1b1b));
+        g.fillRoundedRectangle (box, 5.0f);
+
+        auto inner = box.reduced (10.0f, 4.0f);
+        g.setColour (theme::dimText);
+        g.setFont (uiFont (15.0f, true));
+        g.drawText (names[c], inner.removeFromLeft (20.0f), juce::Justification::centredLeft);
+
+        // Delay scale: LFE early on the left, late on the right
+        auto scaleRow = inner.removeFromBottom (14.0f);
+        g.setColour (juce::Colour (0xff777777));
+        g.setFont (uiFont (10.0f));
+        g.drawText ("early", scaleRow.removeFromLeft (30.0f), juce::Justification::centredLeft);
+        g.drawText ("late", scaleRow.removeFromRight (26.0f), juce::Justification::centredRight);
+        const auto scale = scaleRow;
+        const float mid = scale.getCentreX(), y = scale.getCentreY();
+        g.setColour (juce::Colour (0xff555555));
+        g.fillRect (scale.getX(), y, scale.getWidth(), 1.0f);
+        g.fillRect (mid, y - 5.0f, 1.0f, 10.0f);
+
+        const float alpha = (float) juce::jlimit (0.0, 1.0, 1.0 - (cell.age - holdSeconds) / fadeSeconds);
+
+        if (alpha <= 0.0f)
+        {
+            g.setColour (juce::Colour (0xff555555));
+            g.setFont (uiFont (12.0f));
+            g.drawText (juce::String::fromUTF8 ("\xe2\x80\x94"), inner, juce::Justification::centred);
+            continue;
+        }
+
+        const auto& e = cell.event;
+        const double phaseDegrees = std::abs (e.phase) * 180.0 / juce::MathConstants<double>::pi;
+        juce::String verdict;
+        juce::Colour colour;
+
+        // An offset is only claimed when it clearly exceeds what can be measured
+        const double tolerance = juce::jmax (alignedToleranceMs, 2.0 * e.delayUncertaintyMs);
+        const auto plusMinus = juce::String::fromUTF8 (" \xc2\xb1") + juce::String (e.delayUncertaintyMs, 1) + " ms";
+
+        if (e.delayUncertaintyMs > unmeasurableMs)
+        {
+            verdict = "Related, timing not measurable";
+            colour = juce::Colour (0xfff5c400);
+        }
+        else if (e.delayAtLimit)
+        {
+            verdict = "LFE off by " + juce::String ((int) range) + " ms or more";
+            colour = juce::Colour (0xffff8a00);
+        }
+        else if (std::abs (e.delayMs) > tolerance)
+        {
+            verdict = (e.delayMs > 0.0 ? "LFE late " : "LFE early ") + juce::String (std::abs (e.delayMs), 1) + plusMinus;
+            colour = juce::Colour (0xffff8a00);
+        }
+        else if (phaseDegrees > 120.0)
+        {
+            verdict = "Aligned, polarity inverted";
+            colour = juce::Colour (0xffff3a2a);
+        }
+        else if (phaseDegrees < 60.0)
+        {
+            verdict = "Aligned, in phase";
+            colour = juce::Colour (0xfff5c400);
+        }
+        else
+        {
+            verdict = "Aligned, phase shifted " + juce::String ((int) std::lround (phaseDegrees)) + juce::String::fromUTF8 ("\xc2\xb0");
+            colour = juce::Colour (0xffff8a00);
+        }
+
+        const double sumDb = 10.0 * std::log10 (juce::jmax (1e-3, 1.0 + e.interactionNow));
+        const auto detail = "match " + juce::String (e.match, 2) + "   sum " + (sumDb >= 0.0 ? "+" : "") + juce::String (sumDb, 1) + " dB";
+
+        colour = colour.withMultipliedAlpha (alpha * (float) (0.45 + 0.55 * juce::jlimit (0.0, 1.0, cell.severity)));
+        g.setColour (colour);
+        g.setFont (uiFont (14.0f, true));
+        g.drawText (verdict, inner.removeFromTop (18.0f), juce::Justification::centredLeft);
+        g.setColour (theme::dimText.withMultipliedAlpha (alpha));
+        g.setFont (uiFont (11.0f));
+        g.drawText (detail, inner.removeFromTop (14.0f), juce::Justification::centredLeft);
+
+        const float x = mid + (float) juce::jlimit (-1.0, 1.0, e.delayMs / range) * scale.getWidth() / 2.0f;
+        g.setColour (colour);
+        g.fillEllipse (x - 4.5f, y - 4.5f, 9.0f, 9.0f);
+    }
+}
+
+//==============================================================================
 juce::Rectangle<float> CorrelationPlot::plotArea() const
 {
     return getLocalBounds().toFloat().withTrimmedLeft ((float) FrequencyAxis::leftMargin)

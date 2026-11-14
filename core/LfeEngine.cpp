@@ -140,8 +140,11 @@ bool Decimator::process (const float* frame, double* outFrame)
 LfeEngine::LfeEngine (double sampleRate, double windowSeconds, double facadeTrimDb)
     : decimator (sampleRate),
       fs (decimator.outputRate()),
-      facadeGain (dbToGain (facadeTrimDb))
+      facadeGain (dbToGain (facadeTrimDb)),
+      transients (decimator.outputRate())
 {
+    transients.setGains ({ { facadeGain, facadeGain, facadeGain } }, 1.0);
+
     // FFT tables (radix 2)
     twiddleRe.resize (fftSize / 2);
     twiddleIm.resize (fftSize / 2);
@@ -279,6 +282,7 @@ void LfeEngine::configure (double windowSeconds)
 void LfeEngine::reset()
 {
     decimator.reset();
+    transients.reset();
     configure (windowSec);
 }
 
@@ -295,6 +299,7 @@ void LfeEngine::push (const float* interleaved, int numFrames)
 
             ringPos = (ringPos + 1) % nWin;
             ++pending;
+            transients.process (frame);
         }
     }
 }
@@ -346,6 +351,10 @@ bool LfeEngine::analyze (const Settings& settings)
 
     const auto nb = out.freqs.size();
     const double lfeGain = dbToGain (settings.lfeGainDb);
+
+    transients.setGains ({ { settings.mute[0] ? 0.0 : facadeGain,
+                             settings.mute[1] ? 0.0 : facadeGain,
+                             settings.mute[2] ? 0.0 : facadeGain } }, lfeGain);
 
     // Windowed, zero-padded FFT of the last nWin decimated samples
     for (int c = 0; c < numChannels; ++c)

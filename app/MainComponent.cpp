@@ -70,6 +70,7 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
     addAndMakeVisible (header);
     addAndMakeVisible (panel);
     addAndMakeVisible (spectrum);
+    addAndMakeVisible (transientStrip);
     addAndMakeVisible (correlation);
     addAndMakeVisible (settingsButton);
     buildSettingsPanel();
@@ -272,6 +273,7 @@ void MainComponent::resized()
 
     const int correlationHeight = juce::jmax (150, area.getHeight() * 2 / 7);
     correlation.setBounds (area.removeFromBottom (correlationHeight));
+    transientStrip.setBounds (area.removeFromBottom (68));
     spectrum.setBounds (area);
     settingsButton.setBounds (area.getX() + 10, area.getY() + 4, 72, 22);
 }
@@ -399,6 +401,20 @@ void MainComponent::feedDemoSignal (int numFrames)
             if (tone[0] > 70.0 && tone[0] < 110.0)   flipped -= v;
         }
 
+        // A kick in the centre channel every 1.5 s, repeated 12 ms late in the LFE
+        const auto kick = [] (double u)
+        {
+            if (u < 0.0)
+                return 0.0;
+
+            const double phase = juce::MathConstants<double>::twoPi * (45.0 * u + 75.0 * 0.03 * (1.0 - std::exp (-u / 0.03)));
+            return 0.5 * std::sin (phase) * std::exp (-u / 0.09) * (1.0 - std::exp (-u / 0.002));
+        };
+
+        const double sinceKick = std::fmod (t, 1.5);
+        other += kick (sinceKick);
+        lfe += kick (sinceKick - 0.012);
+
         float* frame = scratch.data() + (size_t) i * 4;
         frame[chL] = (float) (1.4 * shared);
         frame[chC] = (float) other;
@@ -462,9 +478,28 @@ void MainComponent::timerCallback()
         alerts.update (engine->result(), threshold.value(), decay.value(), dt);
         spectrum.update (engine->result(), alerts);
         correlation.update (engine->result(), alerts, threshold.value());
-        header.left.setLevel (alerts.speakerLevel[0]);
-        header.centre.setLevel (alerts.speakerLevel[1]);
-        header.right.setLevel (alerts.speakerLevel[2]);
+    }
+
+    // Transient detector: one verdict per attack found in a screen channel
+    for (const auto& event : engine->takeTransientEvents())
+    {
+        const double thr = juce::jmin (threshold.value(), 0.99);
+        const double severity = juce::jmin (1.0, AlertTracker::alertGain * (event.interactionBest - thr) / (1.0 - thr));
+
+        if (severity > 0.0)
+        {
+            transientStrip.show (event, severity);
+            transientFlash[(size_t) event.channel] = juce::jmax (transientFlash[(size_t) event.channel], severity);
+        }
+    }
+
+    transientStrip.advance (dt);
+    SpeakerIndicator* speakers[] = { &header.left, &header.centre, &header.right };
+
+    for (size_t c = 0; c < 3; ++c)
+    {
+        transientFlash[c] = juce::jmax (0.0, transientFlash[c] - dt / 0.6);
+        speakers[c]->setLevel (juce::jmax (alerts.speakerLevel[c], transientFlash[c]));
     }
 
     if (options.snapshotFile != juce::File() && ++framesShown == 240)
@@ -497,7 +532,7 @@ void MainComponent::loadState()
     header.setAnimationEnabled (animationToggle.getToggleState());
     inertia.setValue (settings->getDoubleValue ("inertia", 70.0));
     integration.setValue (settings->getDoubleValue ("integration", 2.0));
-    threshold.setValue (settings->getDoubleValue ("threshold", 0.33));
+    threshold.setValue (settings->getDoubleValue ("alertThreshold", 0.5));
     decay.setValue (settings->getDoubleValue ("decay", 1.0));
     restoring = false;
 }
@@ -516,7 +551,7 @@ void MainComponent::saveState()
     settings->setValue ("animation", animationToggle.getToggleState());
     settings->setValue ("inertia", inertia.value());
     settings->setValue ("integration", integration.value());
-    settings->setValue ("threshold", threshold.value());
+    settings->setValue ("alertThreshold", threshold.value());
     settings->setValue ("decay", decay.value());
 
     if (auto xml = deviceManager.createStateXml())

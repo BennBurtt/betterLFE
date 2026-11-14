@@ -493,6 +493,156 @@ static void testBlockSizeIndependence()
     check (worst < 1e-9, "same result whatever the block size", worst);
 }
 
+static void testTransients()
+{
+    std::printf ("transient detector\n");
+
+    // A kick: pitch sweep 120 -> 45 Hz with a 2 ms attack
+    const auto kicks = [] (double seconds, double offset, double gain)
+    {
+        Signal s ((size_t) (seconds * sampleRate), 0.0f);
+
+        for (size_t i = 0; i < s.size(); ++i)
+        {
+            const double t = (double) i / sampleRate;
+
+            for (double t0 = 1.0; t0 < seconds - 0.6; t0 += 0.9)
+            {
+                const double u = t - t0 - offset;
+
+                if (u < 0.0)
+                    continue;
+
+                const double phase = 2.0 * pi * (45.0 * u + 75.0 * 0.03 * (1.0 - std::exp (-u / 0.03)));
+                s[i] += (float) (gain * 0.5 * std::sin (phase) * std::exp (-u / 0.09) * (1.0 - std::exp (-u / 0.002)));
+            }
+        }
+
+        return s;
+    };
+
+    const auto collect = [] (const Scene& scene)
+    {
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        std::vector<TransientEvent> all;
+        const auto data = scene.interleaved();
+
+        for (size_t pos = 0; pos < scene.length(); pos += blockSize)
+        {
+            e.push (data.data() + pos * 4, (int) std::min ((size_t) blockSize, scene.length() - pos));
+
+            for (const auto& ev : e.takeTransientEvents())
+                all.push_back (ev);
+        }
+
+        return all;
+    };
+
+    const auto floorNoise = [] (unsigned seed) { return scaled (noise (6.0, seed), 0.01); };
+
+    struct Case { const char* name; double offset, gain, expectedDelay; bool inverted; };
+
+    for (const Case& c : { Case { "aligned", 0.0, 1.0, 0.0, false },
+                           Case { "LFE 10 ms late", 0.010, 1.0, 10.0, false },
+                           Case { "LFE 6 ms early", -0.006, 1.0, -6.0, false },
+                           Case { "LFE 23.3 ms late", 0.0233, 1.0, 23.3, false },
+                           Case { "polarity inverted", 0.0, -1.0, 0.0, true } })
+    {
+        Scene s;
+        s.c = sum (kicks (6.0, 0.0, 1.0), floorNoise (1));
+        s.lfe = sum (kicks (6.0, c.offset, c.gain), floorNoise (2));
+        const auto events = collect (s);
+        check (events.size() == 5, std::string (c.name) + ": one event per kick", (double) events.size());
+
+        double worstDelay = 0.0, worstMatch = 1.0, worstPhase = 0.0;
+
+        for (const auto& ev : events)
+        {
+            worstDelay = std::max (worstDelay, std::abs (ev.delayMs - c.expectedDelay));
+            worstMatch = std::min (worstMatch, ev.match);
+            worstPhase = std::max (worstPhase, std::abs (std::abs (ev.phase) - (c.inverted ? pi : 0.0)));
+            check (ev.channel == chC, std::string (c.name) + ": reported on the right channel", ev.channel);
+        }
+
+        check (worstDelay < 0.5, std::string (c.name) + ": delay within 0.5 ms", worstDelay);
+        check (events.empty() || events[0].delayUncertaintyMs < 1.0, std::string (c.name) + ": stated precision under 1 ms",
+               events.empty() ? 0.0 : events[0].delayUncertaintyMs);
+        check (worstMatch > 0.95, std::string (c.name) + ": transients recognised as the same", worstMatch);
+        check (worstPhase < 0.5, std::string (c.name) + ": polarity", worstPhase);
+    }
+
+    {
+        // 10 ms late: the pair would interact fully if aligned, and mostly cancels as it is
+        Scene s;
+        s.c = kicks (6.0, 0.0, 1.0);
+        s.lfe = kicks (6.0, 0.010, 1.0);
+        const auto events = collect (s);
+        check (! events.empty() && events[0].interactionBest > 0.95, "late kick: full interaction once aligned",
+               events.empty() ? 0.0 : events[0].interactionBest);
+        check (! events.empty() && events[0].interactionNow < 0.2, "late kick: no longer sums in phase",
+               events.empty() ? 0.0 : events[0].interactionNow);
+    }
+    {
+        // Narrow-band thump under noise: the stated precision must cover the real error
+        Signal thump ((size_t) (6.0 * sampleRate), 0.0f), late (thump.size(), 0.0f);
+
+        for (size_t i = 0; i < thump.size(); ++i)
+        {
+            const double t = (double) i / sampleRate;
+
+            for (double t0 = 1.0; t0 < 5.4; t0 += 0.9)
+                for (int k = 0; k < 2; ++k)
+                {
+                    const double u = t - t0 - (k == 1 ? 0.010 : 0.0);
+
+                    if (u >= 0.0)
+                        (k == 1 ? late : thump)[i] += (float) (0.5 * std::sin (2.0 * pi * 50.0 * u) * std::exp (-u / 0.15)
+                                                                 * (1.0 - std::exp (-u / 0.004)));
+                }
+        }
+
+        Scene s;
+        s.c = thump;
+        s.lfe = sum (late, scaled (noise (6.0, 21), 12.0));    // about -15 dB of noise in the LFE band
+        const auto events = collect (s);
+        check (! events.empty(), "narrow-band thump: detected", (double) events.size());
+
+        for (const auto& ev : events)
+        {
+            check (std::abs (ev.delayMs - 10.0) < 3.0 * ev.delayUncertaintyMs + 0.5, "narrow-band thump: error within the stated precision",
+                   std::abs (ev.delayMs - 10.0) / (ev.delayUncertaintyMs + 1e-9));
+            check (ev.delayUncertaintyMs > 1.0, "narrow-band thump: precision reported as poorer", ev.delayUncertaintyMs);
+        }
+    }
+    {
+        // Kick in the screen channel only, unrelated tone in the LFE: nothing to report
+        Scene s;
+        s.c = kicks (6.0, 0.0, 1.0);
+        s.lfe = sine (33.0, -14.0, 6.0);
+        check (collect (s).empty(), "unrelated LFE: no event", (double) collect (s).size());
+    }
+    {
+        // A steady tone has a single attack: its start
+        Scene s;
+        s.c = delayed (sine (40.0, -10.0, 6.0), 0.5);
+        s.lfe = s.c;
+        check (collect (s).size() == 1, "steady tone: only its start counts", (double) collect (s).size());
+    }
+    {
+        // Unrelated noise in both channels: no attack, no event
+        Scene s;
+        s.c = noise (6.0, 11);
+        s.lfe = noise (6.0, 12);
+        const auto events = collect (s);
+        int strong = 0;
+
+        for (const auto& ev : events)
+            strong += ev.interactionBest > 0.5;
+
+        check (strong == 0, "steady unrelated noise: nothing above the default threshold", strong);
+    }
+}
+
 int main()
 {
     testFilterDesign();
@@ -502,6 +652,7 @@ int main()
     testLevelBalanceAndPartial();
     testChanceLevel();
     testBlockSizeIndependence();
+    testTransients();
 
     std::printf ("\n%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;
