@@ -856,7 +856,7 @@ static void testPlaybackChains()
 
         check (t.chains.size() == 17, "17 systems: 10 cinema, 6 bass managed, stereo", (double) t.chains.size());
         check (cinema (t, 0.0, false).weight == 1.0 && cinema (t, 0.0, true).weight == 1.0, "on time counts fully, either polarity", 0.0);
-        check (home (t, 80.0, false).weight == 0.5, "bass managed counts half", home (t, 80.0, false).weight);
+        check (home (t, 80.0, false).weight == 1.0, "bass managed counts fully", home (t, 80.0, false).weight);
         check (worst < 0.05, "screen alone: every system within 0.05 dB of the reference", worst);
         check (t.robustness > 99.9, "screen alone: robustness 100", t.robustness);
         check (t.lfeShare < 0.01, "screen alone: LFE carries nothing", t.lfeShare);

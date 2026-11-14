@@ -179,10 +179,10 @@ il survit.
 | Cinéma, sub à 0 ms (les deux polarités) | 1 |
 | Cinéma, sub en retard (+2,5 et +5 ms) | 0,5 |
 | Cinéma, sub en avance (−5 et −2,5 ms) | 0,25 |
-| Bass management (les six cas) | 0,5 |
+| Bass management (les six cas) | 1 |
 
-**Dépendance** : `0,76 × pénalité de la stéréo sans LFE`, c'est-à-dire de ce que
-le grave perd partout où le LFE manque ou est mal réglé. Le plafond de 0,76
+**Dépendance** : `0,72 × pénalité de la stéréo sans LFE`, c'est-à-dire de ce que
+le grave perd partout où le LFE manque ou est mal réglé. Le plafond de 0,72
 exprime qu'un grave entièrement dans le LFE est grave (la salle seule en
 décide) sans valoir une annulation.
 
@@ -207,10 +207,10 @@ Vérifiées par les tests, sur bruit large bande :
 | LFE sans rapport avec la façade, 10 dB sous elle à l'écoute | 100 |
 | LFE 10 dB sous la façade, à 30 % copié sur elle | 95 |
 | LFE sans rapport, aussi fort que la façade | 62 |
-| LFE 10 dB sous la façade, à 60 % copié sur elle | 60 |
+| LFE 10 dB sous la façade, à 60 % copié sur elle | 61 |
 | LFE seul | 22 |
-| LFE sans rapport, 6 dB au-dessus de la façade | 22 |
-| LFE aussi fort que la façade, à 60 % copié sur elle | 17 |
+| LFE sans rapport, 6 dB au-dessus de la façade | 24 |
+| LFE aussi fort que la façade, à 60 % copié sur elle | 18 |
 | LFE 10 dB sous la façade, entièrement copié sur elle | 8 |
 | LFE identique à la façade | 0 |
 | LFE identique mais en retard de 5 ms | 0 |
@@ -228,7 +228,7 @@ grave de près de 6 dB entre un sub en polarité et un sub inversé.
 | Filtres de bass management (Linkwitz-Riley 24 dB/oct) | Modèle courant, variable selon les appareils |
 | Filtre d'encodeur (Butterworth 8ᵉ ordre à 120 Hz) | Modèle : le filtre LFE de Dolby Digital Plus n'est pas public |
 | Étendue des défauts de salle (±5 ms, polarité) | **Hypothèse.** Le rapport SMPTE constate de larges écarts mais ses chiffres ne sont pas publics |
-| Pertinences des systèmes, plafond de dépendance (0,76) | **Hypothèse** d'ingénierie, suivant la consigne (0 ms ×2, avance ×0,5 ; LFE seul vers 20–25). Aucune statistique publiée sur la fréquence de ces défauts |
+| Pertinences des systèmes, plafond de dépendance (0,72) | **Hypothèse** d'ingénierie, suivant la consigne (0 ms ×2, avance ×0,5 ; LFE seul vers 20–25). Aucune statistique publiée sur la fréquence de ces défauts |
 | Acoustique de la salle (modes, places) | Non simulée |
 
 ### 3.9 Autres témoins

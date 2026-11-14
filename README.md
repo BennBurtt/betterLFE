@@ -29,6 +29,9 @@ build/SubGuard_artefacts/Release/SubGuard.app/Contents/MacOS/SubGuard --demo
 
 Logo et icône sont optionnels : voir `assets/README.md`.
 
+Le script crée aussi 18 fichiers de test 5.1 dans `test-files/`, avec ce que
+l'app doit afficher pour chacun : voir [`docs/FICHIERS_TEST.md`](docs/FICHIERS_TEST.md).
+
 ## Organisation
 
 | Dossier | Contenu |
@@ -36,6 +39,7 @@ Logo et icône sont optionnels : voir `assets/README.md`.
 | `core/` | Moteur d'analyse en C++17 pur, sans dépendance (`LfeEngine`, `TransientDetector`, `PlaybackSim`, `AlertTracker`) |
 | `app/` | Application JUCE : entrée audio, interface |
 | `tests/` | Vérifications du moteur sur signaux synthétiques |
+| `tools/` | Générateur des fichiers de test 5.1 |
 
 ## Ce qui est mesuré
 

@@ -22,6 +22,10 @@ add_executable(engine_tests tests/EngineTests.cpp)
 target_link_libraries(engine_tests PRIVATE subguard_core)
 add_test(NAME engine_tests COMMAND engine_tests)
 
+# Writes the 5.1 test files and what the engine reads on each of them.
+add_executable(subguard_testfiles tools/TestFiles.cpp)
+target_link_libraries(subguard_testfiles PRIVATE subguard_core)
+
 # -------------------------------------------------------------------- app
 option(SUBGUARD_BUILD_APP "Build the application (needs JUCE)" ON)
 
