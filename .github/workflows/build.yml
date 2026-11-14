@@ -1,0 +1,28 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  macos:
+    runs-on: macos-14   # Apple Silicon
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --config Release -j 3
+      - name: Engine tests
+        run: ctest --test-dir build --output-on-failure -C Release
+      - name: Launch with the demo signal
+        timeout-minutes: 3
+        run: |
+          APP="$(find build -name SubGuard.app -maxdepth 4 | head -1)"
+          "$APP/Contents/MacOS/SubGuard" --demo --snapshot "$PWD/snapshot.png"
+          test -s snapshot.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: snapshot
+          path: snapshot.png

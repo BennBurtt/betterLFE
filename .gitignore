@@ -1,7 +1,3 @@
-__pycache__/
-*.pyc
-.venv/
 build/
-dist/
-.pytest_cache/
 .DS_Store
+*.xcuserstate

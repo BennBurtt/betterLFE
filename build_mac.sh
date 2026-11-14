@@ -1,18 +1,15 @@
 #!/bin/bash
-# Builds dist/SubGuard.app on macOS (Apple Silicon or Intel).
+# Builds SubGuard.app on macOS. Needs the Xcode command line tools and CMake
+# (xcode-select --install ; brew install cmake).
 set -euo pipefail
 cd "$(dirname "$0")"
 
-PYTHON="${PYTHON:-python3}"
-if [ ! -d .venv ]; then
-    "$PYTHON" -m venv .venv
-fi
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements-dev.txt
+command -v cmake >/dev/null || { echo "CMake is missing: brew install cmake"; exit 1; }
 
-python -m pytest tests -q
-pyinstaller --noconfirm --clean SubGuard.spec
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release -j "$(sysctl -n hw.ncpu)"
+ctest --test-dir build --output-on-failure -C Release
 
+APP="$(find build -name SubGuard.app -maxdepth 4 | head -1)"
 echo
-echo "Built: $(pwd)/dist/SubGuard.app"
+echo "Built: $(pwd)/$APP"

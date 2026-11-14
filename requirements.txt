@@ -1,6 +1,0 @@
-numpy
-scipy
-sounddevice
-PyQt6
-pyqtgraph
-PyOpenGL
