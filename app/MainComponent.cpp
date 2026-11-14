@@ -291,7 +291,7 @@ void MainComponent::buildCards()
                   levelWeightToggle.setBounds (r.removeFromTop (24));
               });
 
-    populate (chainsCard, 560, 322, { &chainsView, &resetSessionButton },
+    populate (chainsCard, 560, 300, { &chainsView, &resetSessionButton },
               [this] (juce::Rectangle<int> r)
               {
                   resetSessionButton.setBounds (r.removeFromBottom (24).removeFromRight (110));
@@ -359,7 +359,7 @@ void MainComponent::resized()
         bar.removeFromLeft (6);
     }
 
-    history.setBounds (area.removeFromBottom (58));
+    history.setBounds (area.removeFromBottom (48));
     correlation.setBounds (area.removeFromBottom (juce::jmax (150, area.getHeight() * 2 / 7)));
     transientStrip.setBounds (area.removeFromBottom (68));
     spectrum.setBounds (area);
@@ -582,8 +582,6 @@ void MainComponent::timerCallback()
         // Playback chains, robustness, LFE dependence, overlap
         ChainsInfo info;
         info.translation = simulator.compute (engine->result());
-        info.outOfBandDb = engine->lfeOutOfBandDb();
-        info.lfeLevelDb = engine->lfeLevelDb();
         info.sessionCorrelation = { { engine->globalCorrelation (0), engine->globalCorrelation (1), engine->globalCorrelation (2) } };
         info.sessionSeconds = engine->globalSeconds();
         const auto& t = info.translation;
@@ -591,19 +589,27 @@ void MainComponent::timerCallback()
         if (cards[chainsCard].isVisible())
             chainsView.update (info);
 
-        // The score moves smoothly; it disappears when there is no bass to score
+        // The score follows the mix within a fraction of a second, but the
+        // number on screen only changes once it has really moved, so that it
+        // can be read instead of flickering between two values.
         if (! t.hasBass)
+        {
             shownScore = -1.0;
-        else if (shownScore < 0.0)
-            shownScore = t.robustness;
+            displayedScore = -1;
+        }
         else
-            shownScore += juce::jmin (1.0, dt / 0.4) * (t.robustness - shownScore);
+        {
+            shownScore = shownScore < 0.0 ? t.robustness
+                                          : shownScore + juce::jmin (1.0, dt / 0.15) * (t.robustness - shownScore);
 
-        spectrum.setScore (shownScore);
+            if (displayedScore < 0 || std::abs (shownScore - displayedScore) >= 1.5)
+                displayedScore = juce::roundToInt (shownScore);
+        }
+
+        spectrum.setScore ((double) displayedScore);
         spectrum.setOverlap ({ { t.overlap[0].amount, t.overlap[1].amount, t.overlap[2].amount } });
 
         // History: the strongest value of each indicator over the column
-        const bool lfePlaying = info.lfeLevelDb > -120.0;
         double alert = 0.0;
         bool outOfPhase = false;
 
@@ -627,9 +633,6 @@ void MainComponent::timerCallback()
                                                    (float) juce::jlimit (0.0, 1.0, (t.lfeShare - 0.5) / 0.5));
         }
 
-        if (lfePlaying)
-            historySample.outOfBand = juce::jmax (historySample.outOfBand,
-                                                  (float) juce::jlimit (0.0, 1.0, (info.outOfBandDb + 30.0) / 20.0));
     }
 
     historyClock += dt;

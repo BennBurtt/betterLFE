@@ -75,6 +75,7 @@ struct Settings
     double lfeGainDb = 0.0;      // e.g. +10 for the cinema in-band gain
     double tauSpectrum = 0.15;   // averaging of the displayed spectra (s)
     double tauCorrelation = 2.0; // averaging of the correlation statistics (s)
+    double tauSimulation = 0.2;  // averaging behind the playback chains and the robustness score (s)
 };
 
 struct Analysis
@@ -94,6 +95,7 @@ struct Analysis
     {
         std::vector<double> pF, pLfe, pL, pC, pR, reLC, reRC;
         std::vector<std::complex<double>> cFLfe;
+        std::vector<double> sigma;      // chance level of the F / LFE coherence at this averaging
     } matrix;
 
     double windowSeconds = 1.0;     // length of the analysis window
@@ -127,12 +129,6 @@ public:
         way the LFE lines up with it. Independent of analyze(). */
     std::vector<TransientEvent> takeTransientEvents()   { return transients.takeEvents(); }
 
-    /** LFE content above 120 Hz relative to the whole LFE, in dB (about 1 s average). */
-    double lfeOutOfBandDb() const;
-
-    /** Broadband RMS level of the LFE, dBFS (about 1 s average). */
-    double lfeLevelDb() const;
-
     /** Energy-weighted correlation of a pair (L, C, R, facade) with the LFE over
         20-120 Hz, accumulated since the last resetGlobal(). */
     double globalCorrelation (int pair) const;
@@ -147,10 +143,6 @@ private:
 
     Decimator decimator;
     double fs, facadeGain, windowSec = 1.0;
-
-    struct Section { double b0, b1, b2, a1, a2, z1 = 0.0, z2 = 0.0; };
-    std::array<Section, 2> outOfBandFilter {};
-    double outOfBandCoeff = 0.0, outOfBandPower = 0.0, lfePower = 0.0;
 
     std::array<double, numPairs> globalRe {}, globalPx {}, globalPl {};
     double globalTime = 0.0;
@@ -169,7 +161,8 @@ private:
     int ringPos = 0, pending = 0;
 
     std::vector<double> specPower;                        // [bin * 2]: facade, LFE
-    std::vector<double> stats, now;                       // [bin * 13], see .cpp
+    std::vector<double> stats, fastStats, now;            // [bin * statCount], see .cpp
+    std::vector<double> m1Fast, m2Fast;                   // [grid]
     std::vector<double> m1, m2;                           // [grid * 4]
     std::vector<double> workRe, workIm, twiddleRe, twiddleIm;
     std::array<std::vector<std::complex<double>>, numChannels> spectrum;

@@ -28,7 +28,6 @@ namespace
     // ...then, for the stereo downmix, the real parts of L.conj(C) and R.conj(C).
     constexpr int statLC = 13, statRC = 14;
 
-    constexpr double outOfBandHz = 120.0;
     constexpr double globalLoHz = 20.0, globalHiHz = 120.0;
 
     double dbToGain (double db)   { return std::pow (10.0, db / 20.0); }
@@ -150,20 +149,6 @@ LfeEngine::LfeEngine (double sampleRate, double windowSeconds, double facadeTrim
       transients (decimator.outputRate())
 {
     transients.setGains ({ { facadeGain, facadeGain, facadeGain } }, 1.0);
-
-    // Fourth-order Butterworth high-pass at 120 Hz, at the input rate, for the
-    // LFE content an encoder's low-pass would remove.
-    const double w0 = 2.0 * pi * outOfBandHz / sampleRate;
-    const double qs[2] = { 0.54119610, 1.3065630 };
-
-    for (int i = 0; i < 2; ++i)
-    {
-        const double alpha = std::sin (w0) / (2.0 * qs[i]), c = std::cos (w0), a0 = 1.0 + alpha;
-        outOfBandFilter[(size_t) i] = { (1.0 + c) / 2.0 / a0, -(1.0 + c) / a0, (1.0 + c) / 2.0 / a0,
-                                        -2.0 * c / a0, (1.0 - alpha) / a0 };
-    }
-
-    outOfBandCoeff = 1.0 - std::exp (-1.0 / sampleRate);
 
     // FFT tables (radix 2)
     twiddleRe.resize (fftSize / 2);
@@ -319,6 +304,10 @@ void LfeEngine::configure (double windowSeconds)
     pending = 0;
     specPower.assign (nb * 2, 0.0);
     stats.assign (nb * statCount, 0.0);
+    fastStats.assign (nb * statCount, 0.0);
+    m1Fast.assign (gridPoints, 0.0);
+    m2Fast.assign (gridPoints, 0.0);
+    out.matrix.sigma.assign (gridPoints, 1.0);
     now.assign (nb * statCount, 0.0);
     m1.assign (gridPoints * numPairs, 0.0);
     m2.assign (gridPoints * numPairs, 0.0);
@@ -337,24 +326,6 @@ void LfeEngine::push (const float* interleaved, int numFrames)
 
     for (int i = 0; i < numFrames; ++i)
     {
-        // LFE above 120 Hz, measured before decimation removes it
-        {
-            const float sample = interleaved[(size_t) i * numChannels + chLFE];
-            const double x = std::isfinite (sample) ? (double) sample : 0.0;
-            double y = x;
-
-            for (auto& f : outOfBandFilter)
-            {
-                const double in = y;
-                y = f.b0 * in + f.z1;
-                f.z1 = f.b1 * in - f.a1 * y + f.z2;
-                f.z2 = f.b2 * in - f.a2 * y;
-            }
-
-            outOfBandPower += outOfBandCoeff * (y * y - outOfBandPower);
-            lfePower += outOfBandCoeff * (x * x - lfePower);
-        }
-
         if (decimator.process (interleaved + (size_t) i * numChannels, frame))
         {
             for (int c = 0; c < numChannels; ++c)
@@ -487,6 +458,8 @@ bool LfeEngine::analyze (const Settings& settings)
     const double tauCorr = std::max (settings.tauCorrelation, 1e-3);
     const double aSpec = 1.0 - std::exp (-dt / std::max (settings.tauSpectrum, 1e-3));
     const double aCorr = 1.0 - std::exp (-dt / tauCorr);
+    const double tauFast = std::max (settings.tauSimulation, 1e-3);
+    const double aFast = 1.0 - std::exp (-dt / tauFast);
 
     for (size_t i = 0; i < nb; ++i)
     {
@@ -524,7 +497,10 @@ bool LfeEngine::analyze (const Settings& settings)
         double* avg = &stats[i * statCount];
 
         for (int j = 0; j < statCount; ++j)
+        {
             avg[j] += aCorr * (row[j] - avg[j]);
+            fastStats[i * statCount + (size_t) j] += aFast * (row[j] - fastStats[i * statCount + (size_t) j]);
+        }
 
         specPower[i * 2] += aSpec * (row[statPower + pairFacade] - specPower[i * 2]);
         specPower[i * 2 + 1] += aSpec * (row[statPower + 4] - specPower[i * 2 + 1]);
@@ -535,21 +511,26 @@ bool LfeEngine::analyze (const Settings& settings)
 
     // 1/3-octave smoothing and derived quantities
     const double m2Decay = std::exp (-2.0 * dt / tauCorr);
+    const double m2FastDecay = std::exp (-2.0 * dt / tauFast);
 
     for (size_t g = 0; g < kernels.size(); ++g)
     {
         const auto& kernel = kernels[g];
-        double sm[statCount] = {}, smNow[5] = {};
+        double sm[statCount] = {}, fast[statCount] = {}, smNow[5] = {};
 
         for (size_t k = 0; k < kernel.weights.size(); ++k)
         {
             const double w = kernel.weights[k];
             const size_t bin = (size_t) kernel.first + k * (size_t) stride;
             const double* avg = &stats[bin * statCount];
+            const double* quick = &fastStats[bin * statCount];
             const double* row = &now[bin * statCount];
 
             for (int j = 0; j < statCount; ++j)
+            {
                 sm[j] += w * avg[j];
+                fast[j] += w * quick[j];
+            }
 
             for (int j = 0; j < 5; ++j)
                 smNow[j] += w * row[j];
@@ -557,18 +538,28 @@ bool LfeEngine::analyze (const Settings& settings)
 
         const double pl = sm[statPower + 4];
 
-        // Group spectra for the playback-chain simulation, back at unity gain
+        // Group spectra for the playback-chain simulation, back at unity gain.
+        // They use their own short average so that the robustness score
+        // follows the mix closely, with the uncertainty that goes with it.
         {
             const double gf2 = facadeGain * facadeGain, gl = lfeGain;
             auto& m = out.matrix;
-            m.pF[g] = sm[statPower + pairFacade] / gf2;
-            m.pLfe[g] = pl / (gl * gl);
-            m.pL[g] = sm[statPower] / gf2;
-            m.pC[g] = sm[statPower + 1] / gf2;
-            m.pR[g] = sm[statPower + 2] / gf2;
-            m.reLC[g] = sm[statLC] / gf2;
-            m.reRC[g] = sm[statRC] / gf2;
-            m.cFLfe[g] = std::complex<double> (sm[statRe + pairFacade], sm[statIm + pairFacade]) / (facadeGain * gl);
+            m.pF[g] = fast[statPower + pairFacade] / gf2;
+            m.pLfe[g] = fast[statPower + 4] / (gl * gl);
+            m.pL[g] = fast[statPower] / gf2;
+            m.pC[g] = fast[statPower + 1] / gf2;
+            m.pR[g] = fast[statPower + 2] / gf2;
+            m.reLC[g] = fast[statLC] / gf2;
+            m.reRC[g] = fast[statRC] / gf2;
+            m.cFLfe[g] = std::complex<double> (fast[statRe + pairFacade], fast[statIm + pairFacade]) / (facadeGain * gl);
+
+            const double q = std::sqrt (smNow[pairFacade] * smNow[4]);
+            double& a1 = m1Fast[g];
+            double& a2 = m2Fast[g];
+            a1 += aFast * (q - a1);
+            a2 = a2 * m2FastDecay + q * q * dt / (tauFast * tauFast);
+            const double dof = bandwidth[g] * (a1 * a1 / (a2 + tiny) + frameSeconds[pairFacade]);
+            m.sigma[g] = std::min (1.0, 1.0 / std::sqrt (2.0 * std::max (dof, 0.5)));
         }
 
         for (int p = 0; p < numPairs; ++p)
@@ -603,16 +594,6 @@ bool LfeEngine::analyze (const Settings& settings)
         globalTime += dt;
 
     return true;
-}
-
-double LfeEngine::lfeOutOfBandDb() const
-{
-    return 10.0 * std::log10 ((outOfBandPower + tiny) / (lfePower + tiny));
-}
-
-double LfeEngine::lfeLevelDb() const
-{
-    return 10.0 * std::log10 (lfePower + 1e-30);
 }
 
 double LfeEngine::globalCorrelation (int pair) const

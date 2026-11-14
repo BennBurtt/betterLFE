@@ -181,7 +181,6 @@ private:
 struct ChainsInfo
 {
     Translation translation;
-    double outOfBandDb = -200.0, lfeLevelDb = -200.0;
     std::array<double, 3> sessionCorrelation { { 0.0, 0.0, 0.0 } };
     double sessionSeconds = 0.0;
 };
@@ -191,7 +190,6 @@ class ChainsView : public juce::Component
 {
 public:
     static constexpr double dependenceWarning = 0.7;      // LFE carries more than this share of the bass
-    static constexpr double outOfBandWarningDb = -20.0;   // LFE content above 120 Hz louder than this
     static constexpr double polarityWarning = -0.3;       // whole-session correlation below this
     static constexpr double polarityMinSeconds = 30.0;
 
@@ -214,7 +212,6 @@ public:
         bool outOfPhase = false;    // its sign
         float fragility = 0.0f;     // 0..1, 1 - robustness
         float dependence = 0.0f;    // 0..1, LFE share of the bass
-        float outOfBand = 0.0f;     // 0..1, LFE content above 120 Hz
     };
 
     static constexpr double secondsPerColumn = 0.5;

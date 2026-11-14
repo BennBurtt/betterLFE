@@ -23,7 +23,7 @@
 //                  actual filter is not public).
 //
 // Cross terms that chance alone could produce are removed first (faded out
-// between 4 and 2 sigma on the coherence), so unrelated signals score as
+// between 3 and 2 sigma on the coherence), so unrelated signals score as
 // perfectly robust instead of slightly fragile.
 
 #pragma once
@@ -49,6 +49,8 @@ struct ChainResult
     bool encoderFilter = false; // home: LFE through the encoder low-pass model
 
     double changeDb = 0.0;                  // bass of this chain against the power sum, 20-120 Hz
+    double score = 100.0;                   // 0..100: how close that is to 0 dB
+    double weight = 1.0;                    // its share in the robustness score
     std::array<double, 3> bandChangeDb {};  // same for 30-60, 60-90, 90-120 Hz
 };
 
@@ -61,11 +63,12 @@ struct Translation
     std::vector<ChainResult> chains;
     double worstChangeDb = 0.0;         // deepest loss among the chains
     double spreadDb = 0.0;              // how much the bass level moves between chains
-    double robustness = 100.0;          // 0..100; 100: every chain gives the same bass
+    double robustness = 100.0;          // 0..100: weighted average of the chain scores
 
     // Stereo downmix of L, C, R without the LFE: bass left, against the full mix
     double downmixChangeDb = 0.0;
     double lfeShare = 0.0;              // 0..1, part of the bass energy carried by the LFE
+    double downmixScore = 100.0;        // its score in the robustness average
 
     // LFE (as heard, +10 dB) and screen sum both active in the same band
     struct Overlap
@@ -82,7 +85,10 @@ class PlaybackSimulator
 public:
     static constexpr double lfeInBandGainDb = 10.0;
     static constexpr double lossFloorDb = -24.0;        // deeper cancellations all count the same
-    static constexpr double spreadForZeroDb = 12.0;     // spread at which the score reaches 0
+    static constexpr double scoreZeroDb = 6.0;          // a chain this far from the power sum scores 0
+    static constexpr double nominalWeight = 2.0;        // cinema chains with the subwoofer on time
+    static constexpr double earlyWeight = 0.5;          // cinema chains with the subwoofer early
+    static constexpr double downmixWeight = 2.0;        // stereo downmix without the LFE
     static constexpr double overlapWindowDb = 10.0;     // levels further apart than this do not overlap
 
     Translation compute (const Analysis&) const;

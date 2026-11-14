@@ -52,8 +52,8 @@ Les deux fonctionnent de la même façon quel que soit le niveau, jusqu'à
 
 S'y ajoutent la simulation de chaînes de lecture (cinéma avec sub décalé ou
 inversé, bass management, filtre d'encodeur), un score de
-robustesse de 0 à 100, la dépendance au LFE, le recouvrement LFE / écran, le
-contenu du LFE au-dessus de 120 Hz et la polarité cumulée de la séance.
+robustesse de 0 à 100, la dépendance au LFE, le recouvrement LFE / écran et la
+polarité cumulée de la séance.
 
 Le détail, les formules et les références publiées sont dans
 [`docs/ALGORITHME.md`](docs/ALGORITHME.md).

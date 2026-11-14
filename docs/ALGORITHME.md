@@ -113,16 +113,32 @@ n'interagissaient pas. Plusieurs dB en dessous : annulation.
 | Filtre d'encodeur | idem avec un passe-bas raide à 120 Hz sur le LFE (Butterworth 8ᵉ ordre). C'est un modèle : le filtre LFE réel de Dolby Digital Plus n'est pas public |
 
 Le terme croisé que le hasard seul peut produire est retiré (effacé entre
-4σ et 2σ de cohérence) : des signaux sans rapport donnent exactement la somme
+3σ et 2σ de cohérence) : des signaux sans rapport donnent exactement la somme
 en puissance.
 
-**Robustesse (0 à 100).** Pour chacune des 16 chaînes (10 cinéma, 6 domestiques),
-on a l'écart en dB entre son grave et la somme en puissance, sur 20–120 Hz.
-Le score ne regarde que la distance entre la meilleure et la pire :
-`100 × (1 − (max − min) / 12 dB)`, borné entre 0 et 100. 100 : toutes les
-chaînes rendent le même grave. 0 : au moins 12 dB d'écart. Une annulation est
-comptée au plus à −24 dB. Le score suit le réglage « Integration » et porte sur
-ce qui joue à l'instant, pas sur le film entier.
+**Robustesse (0 à 100).** Chacune des 16 chaînes (10 cinéma, 6 domestiques),
+plus le downmix stéréo sans LFE, reçoit sa propre note d'après son écart au
+grave attendu (la somme en puissance ; pour le downmix, le mix complet), sur
+20–120 Hz : `100 × (1 − |écart| / 6 dB)`, bornée entre 0 et 100. Un écart nul
+vaut 100 ; 6 dB de perte **ou de gain** valent 0. Le score est la moyenne
+pondérée de ces notes :
+
+| Chaîne | Poids |
+|---|---|
+| Cinéma, sub à 0 ms (les deux polarités) | 2 |
+| Cinéma, sub en avance (−5 et −2,5 ms) | 0,5 |
+| Cinéma, sub en retard (+2,5 et +5 ms) | 1 |
+| Bass management (60, 80, 100 Hz, avec et sans filtre d'encodeur) | 1 |
+| Downmix stéréo sans LFE (dépendance au LFE) | 2 |
+
+Le score est quasi instantané : les chaînes sont calculées sur une moyenne de
+0,2 s, indépendante du réglage « Integration ». Le temps de réaction reste
+d'environ 0,8 s avec la fenêtre d'analyse de 1 s (0,5 s en mode « Fast ») :
+il faut que le son ait rempli la fenêtre. Le chiffre affiché ne change que
+lorsqu'il a bougé d'au moins 1,5 point, pour rester lisible.
+
+Comme beaucoup de chaînes se moyennent, un LFE strictement identique à la
+façade obtient environ 60, pas 0.
 
 **Dépendance au LFE.** Downmix stéréo du LCR sans LFE (`Lo = L + 0,707·C`,
 `Ro = R + 0,707·C`) : part de l'énergie de grave portée par le LFE, et perte en
@@ -131,10 +147,6 @@ dB quand il disparaît. Signalé au-delà de 70 %.
 **Recouvrement.** Niveau RMS du LFE et de la somme d'écran par bande (30–60,
 60–90, 90–120 Hz). Les marques sous le spectre se réchauffent quand les deux
 jouent à moins de 10 dB l'un de l'autre dans 60–120 Hz.
-
-**Hors bande.** Énergie du LFE au-dessus de 120 Hz (passe-haut 4ᵉ ordre, mesuré
-à pleine fréquence d'échantillonnage) rapportée au LFE entier. Signalé au-delà
-de −20 dB.
 
 **Polarité de séance.** Corrélation LFE ↔ L, C, R pondérée par l'énergie,
 cumulée sans oubli depuis la dernière remise à zéro. Signalée sous −0,3 après
@@ -176,8 +188,8 @@ ressemble au-delà du seuil ; avec un LFE sans rapport, rien n'est affiché.
   utiliser le mode « Ultra (2 s) » pour cette zone.
 - Les surrounds ne sont pas analysés, ni redirigés dans les chaînes simulées.
 - Les chaînes de lecture sont des modèles électriques ; l'acoustique d'une salle
-  n'est pas simulée. Les seuils des témoins (70 %, −20 dB, −0,3, 12 dB) sont des
-  choix de conception.
+  n'est pas simulée. Les seuils des témoins (70 %, −0,3, 6 dB) sont des choix de
+  conception.
 
 ## Références
 

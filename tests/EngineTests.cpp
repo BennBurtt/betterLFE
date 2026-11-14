@@ -846,7 +846,29 @@ static void testPlaybackChains()
         check (t.hasBass && t.chains.size() == 16, "16 chains", (double) t.chains.size());
         check (std::abs (inPhase - 3.0) < 0.5, "identical: cinema sum +3 dB", inPhase);
         check (opposed < -10.0, "identical: inverted subwoofer cancels", opposed);
-        check (t.robustness < 5.0, "identical: robustness near 0", t.robustness);
+        check (t.robustness < 70.0, "identical: clearly below a clean mix", t.robustness);
+
+        // The score is the weighted average of the chain scores: on-time cinema
+        // chains count double, early ones half, everything else once.
+        double weighted = 0.0, weights = 0.0;
+
+        for (const auto& c : t.chains)
+        {
+            const double w = c.kind != ChainResult::Kind::cinema ? 1.0 : (c.delayMs == 0.0 ? 2.0 : (c.delayMs < 0.0 ? 0.5 : 1.0));
+            weighted += w * 100.0 * std::clamp (1.0 - std::abs (c.changeDb) / 6.0, 0.0, 1.0);
+            weights += w;
+            check (c.weight == w, "chain weight", c.weight);
+        }
+
+        check (std::abs (weights - 16.0) < 1e-9, "chain weights add up to 16", weights);
+
+        // ...plus the stereo downmix without the LFE, counted twice
+        weighted += 2.0 * 100.0 * std::clamp (1.0 - std::abs (t.downmixChangeDb) / 6.0, 0.0, 1.0);
+        weights += 2.0;
+        check (std::abs (t.robustness - weighted / weights) < 1e-9, "robustness is the weighted average", t.robustness);
+        check (std::abs (find (t, ChainResult::Kind::cinema, 0.0, false).score - 50.0) < 9.0, "a +3 dB chain scores about 50",
+               find (t, ChainResult::Kind::cinema, 0.0, false).score);
+        std::printf ("  identical signals: robustness %.0f\n", t.robustness);
         check (std::abs (t.downmixChangeDb + 3.0) < 0.3, "identical: downmix without LFE loses 3 dB", t.downmixChangeDb);
         check (std::abs (t.lfeShare - 0.5) < 0.03, "identical: LFE carries half the bass", t.lfeShare);
         check (find (t, ChainResult::Kind::bassManaged, 80.0, false).bandChangeDb[0] > 1.5, "bass managed: 30-60 Hz still sums", 0.0);
@@ -866,7 +888,8 @@ static void testPlaybackChains()
             worst = std::max (worst, std::abs (c.changeDb));
 
         check (worst < 0.3, "unrelated: every chain within 0.3 dB of the power sum", worst);
-        check (t.robustness > 95.0, "unrelated: robustness near 100", t.robustness);
+        // Half of the bass is in the LFE here: the downmix loses 3 dB (score 50, weight 2 of 18)
+        check (std::abs (t.robustness - (100.0 - 50.0 * 2.0 / 18.0)) < 2.0, "unrelated: only the downmix costs points", t.robustness);
     }
     {
         // LFE 5 ms late: a subwoofer 5 ms early realigns it, 5 ms later makes it 10 ms
@@ -890,7 +913,11 @@ static void testPlaybackChains()
             (which == 0 ? s.lfe : s.c) = n;
             run (e, s);
             const auto t = sim.compute (e.result());
-            check (t.robustness > 99.0, which == 0 ? "LFE alone: robustness 100" : "screen alone: robustness 100", t.robustness);
+            // The chains agree in both cases. A stereo downmix keeps everything
+            // when only the screen plays and nothing when only the LFE does:
+            // that one system, counted twice out of 18, costs 100 x 2 / 18 points.
+            check (which == 0 ? std::abs (t.robustness - 100.0 * 16.0 / 18.0) < 1.0 : t.robustness > 99.0,
+                   which == 0 ? "LFE alone: only the downmix is lost" : "screen alone: robustness 100", t.robustness);
             check (which == 0 ? t.lfeShare > 0.99 : t.lfeShare < 0.01, "LFE share of the bass", t.lfeShare);
         }
     }
@@ -907,19 +934,12 @@ static void testPlaybackChains()
         check (t.overlap[1].amount < 0.01, "no overlap when only one of them plays in the band", t.overlap[1].amount);
     }
     {
-        // LFE content above 120 Hz, and whole-session polarity
-        LfeEngine high (sampleRate), low (sampleRate), opposed (sampleRate, 1.0, 0.0);
-        Scene a, b, c;
-        a.lfe = sine (300.0, -20.0, 4.0);
-        b.lfe = sine (50.0, -20.0, 4.0);
+        // Whole-session polarity
+        LfeEngine opposed (sampleRate, 1.0, 0.0);
+        Scene c;
         c.l = n;
         c.lfe = scaled (n, -0.2);
-        run (high, a);
-        run (low, b);
         run (opposed, c);
-        check (high.lfeOutOfBandDb() > -1.0, "300 Hz in the LFE: all out of band", high.lfeOutOfBandDb());
-        check (low.lfeOutOfBandDb() < -25.0, "50 Hz in the LFE: in band", low.lfeOutOfBandDb());
-        check (std::abs (high.lfeLevelDb() + 23.0) < 0.5, "LFE broadband level", high.lfeLevelDb());
         check (opposed.globalCorrelation (chL) < -0.95, "session polarity: opposed LFE reads -1", opposed.globalCorrelation (chL));
         check (std::abs (opposed.globalSeconds() - 10.0) < 0.5, "session time", opposed.globalSeconds());
         opposed.resetGlobal();

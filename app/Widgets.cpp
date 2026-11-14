@@ -927,19 +927,15 @@ void ChainsView::paint (juce::Graphics& g)
 
     const juce::String none = juce::String::fromUTF8 ("\xe2\x80\x94");
 
-    line ("Robustness", t.hasBass ? juce::String (juce::roundToInt (t.robustness)) + " / 100     spread " + juce::String (t.spreadDb, 1)
-                                      + " dB, worst " + juce::String (t.worstChangeDb, 1) + " dB"
+    line ("Robustness", t.hasBass ? juce::String (juce::roundToInt (t.robustness)) + " / 100     weighted average of the systems above, worst "
+                                      + juce::String (t.worstChangeDb, 1) + " dB"
                                   : none,
           t.hasBass && t.robustness < 50.0);
 
-    line ("Stereo downmix without LFE", t.hasBass ? juce::String (t.downmixChangeDb, 1) + " dB of bass     LFE carries "
+    line ("Stereo downmix without LFE", t.hasBass ? juce::String (t.downmixChangeDb, 1) + " dB of bass (in the score)     LFE carries "
                                                       + juce::String (juce::roundToInt (100.0 * t.lfeShare)) + " %"
                                                   : none,
           t.hasBass && t.lfeShare > dependenceWarning);
-
-    const bool lfePlaying = info.lfeLevelDb > -120.0;
-    line ("LFE content above 120 Hz", lfePlaying ? juce::String (juce::roundToInt (juce::jmax (-99.0, info.outOfBandDb))) + " dB against the whole LFE" : none,
-          lfePlaying && info.outOfBandDb > outOfBandWarningDb);
 
     const auto signedValue = [] (double v) { return (v >= 0.0 ? "+" : "") + juce::String (v, 2); };
     const int seconds = (int) info.sessionSeconds;
@@ -971,12 +967,13 @@ void HistoryStrip::paint (juce::Graphics& g)
 
     auto area = getLocalBounds().toFloat().withTrimmedLeft ((float) FrequencyAxis::leftMargin + 36.0f)
                                           .withTrimmedRight ((float) FrequencyAxis::rightMargin).reduced (0.0f, 5.0f);
-    const char* names[] = { "Alert", "Fragile", "LFE-dependent", "LFE > 120 Hz" };
-    const float lane = area.getHeight() / 4.0f;
+    const char* names[] = { "Alert", "Fragile", "LFE-dependent" };
+    const int lanes = 3;
+    const float lane = area.getHeight() / (float) lanes;
 
     g.setFont (uiFont (10.5f));
 
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < lanes; ++i)
     {
         const auto row = juce::Rectangle<float> (area.getX(), area.getY() + lane * (float) i, area.getWidth(), lane).reduced (0.0f, 1.0f);
         g.setColour (theme::dimText);
@@ -1000,8 +997,7 @@ void HistoryStrip::paint (juce::Graphics& g)
             {
                 case 0:  value = s.alert;       colour = s.outOfPhase ? juce::Colour (0xffff3a2a) : juce::Colour (0xfff5c400); break;
                 case 1:  value = s.fragility;   colour = juce::Colour (0xffff7043); break;
-                case 2:  value = s.dependence;  colour = juce::Colour (0xff7e9cff); break;
-                default: value = s.outOfBand;   colour = juce::Colour (0xffd16bff); break;
+                default: value = s.dependence;  colour = juce::Colour (0xff7e9cff); break;
             }
 
             if (value > 0.02f)

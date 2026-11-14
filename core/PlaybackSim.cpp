@@ -82,14 +82,16 @@ Translation PlaybackSimulator::compute (const Analysis& a) const
     const double lfeGain2 = std::pow (10.0, lfeInBandGainDb / 10.0);
 
     // Cross term with what chance could produce taken out: nothing below
-    // 2 sigma of coherence (chance level), everything above 4 sigma.
+    // 2 sigma of coherence (chance level), everything above 3 sigma (or above
+    // 0.95 when the short average makes 3 sigma unreachable).
     std::vector<cd> cFL (n);
 
     for (size_t g = 0; g < n; ++g)
     {
-        const double sigma = a.sigma[pairFacade][g];
+        const double sigma = m.sigma[g];
         const double coherence = std::abs (m.cFLfe[g]) / (std::sqrt (m.pF[g] * m.pLfe[g]) + 1e-60);
-        cFL[g] = m.cFLfe[g] * std::clamp ((coherence - 2.0 * sigma) / (2.0 * sigma + 1e-12), 0.0, 1.0);
+        const double full = std::max (std::min (3.0 * sigma, 0.95), 2.0 * sigma + 1e-9);
+        cFL[g] = m.cFLfe[g] * std::clamp ((coherence - 2.0 * sigma) / (full - 2.0 * sigma), 0.0, 1.0);
     }
 
     // The chains
@@ -165,19 +167,6 @@ Translation PlaybackSimulator::compute (const Analysis& a) const
     if (! t.hasBass)
         return t;
 
-    // Robustness: how far apart the chains land
-    double lowest = 1e9, highest = -1e9;
-
-    for (const auto& chain : t.chains)
-    {
-        lowest = std::min (lowest, chain.changeDb);
-        highest = std::max (highest, chain.changeDb);
-    }
-
-    t.worstChangeDb = lowest;
-    t.spreadDb = highest - lowest;
-    t.robustness = 100.0 * std::clamp (1.0 - t.spreadDb / spreadForZeroDb, 0.0, 1.0);
-
     // Stereo downmix without the LFE: Lo = L + 0.707 C, Ro = R + 0.707 C
     {
         double downmix = 0.0, lfe = 0.0;
@@ -196,6 +185,36 @@ Translation PlaybackSimulator::compute (const Analysis& a) const
         t.lfeShare = lfe / (lfe + downmix + 1e-60);
         t.downmixChangeDb = std::max (-60.0, 10.0 * std::log10 (std::max (1.0 - t.lfeShare, 1e-6)));
     }
+
+    // Robustness: one score per chain, 100 when its bass is exactly the power
+    // sum and 0 when it is scoreZeroDb away (louder or quieter), then a
+    // weighted average. The nominal alignment counts double, a subwoofer that
+    // arrives early counts half, the stereo downmix counts double.
+    double weighted = 0.0, weights = 0.0, lowest = 1e9, highest = -1e9;
+
+    for (auto& chain : t.chains)
+    {
+        chain.weight = 1.0;
+
+        if (chain.kind == ChainResult::Kind::cinema)
+            chain.weight = chain.delayMs == 0.0 ? nominalWeight : (chain.delayMs < 0.0 ? earlyWeight : 1.0);
+
+        chain.score = 100.0 * std::clamp (1.0 - std::abs (chain.changeDb) / scoreZeroDb, 0.0, 1.0);
+        weighted += chain.weight * chain.score;
+        weights += chain.weight;
+        lowest = std::min (lowest, chain.changeDb);
+        highest = std::max (highest, chain.changeDb);
+    }
+
+    t.worstChangeDb = lowest;
+    t.spreadDb = highest - lowest;
+    // The stereo downmix without the LFE is one more way the mix gets played:
+    // what goes missing there counts like a loss on any other system.
+    t.downmixScore = 100.0 * std::clamp (1.0 - std::abs (t.downmixChangeDb) / scoreZeroDb, 0.0, 1.0);
+    weighted += downmixWeight * t.downmixScore;
+    weights += downmixWeight;
+
+    t.robustness = weighted / weights;
 
     // Overlap: RMS level of each group per band. A mean per-bin power over a
     // band of width W becomes an RMS power of mean . W . window / 3 (Hann window).

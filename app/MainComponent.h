@@ -107,6 +107,7 @@ private:
 
     double lastTick = 0.0, engineRate = 0.0, demoTime = 0.0;
     double shownScore = -1.0, historyClock = 0.0;
+    int displayedScore = -1;
     HistoryStrip::Sample historySample;
     std::array<double, 3> transientFlash { { 0.0, 0.0, 0.0 } };
     int inputGeneration = -1, framesShown = 0;
