@@ -4,6 +4,7 @@
 
 #include "../core/AlertTracker.h"
 #include "../core/LfeEngine.h"
+#include "../core/PlaybackSim.h"
 
 namespace subguard
 {
@@ -100,6 +101,12 @@ public:
     void setPeakHold (bool);
     void setTilt (bool);
 
+    /** Robustness score drawn large behind the curves; negative: nothing to score. */
+    void setScore (double score);
+
+    /** LFE / screen overlap per band (30-60, 60-90, 90-120 Hz), 0..1: thin marks at the bottom. */
+    void setOverlap (const std::array<double, 3>& amounts);
+
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
     void mouseExit (const juce::MouseEvent&) override;
@@ -108,7 +115,8 @@ private:
     juce::Rectangle<float> plotArea() const;
 
     std::vector<double> freqs, facadeDb, lfeDb, peakFacade, peakLfe, grid, heatLevel, heatSign;
-    double floorDb = -96.0;
+    double floorDb = -96.0, score = -1.0;
+    std::array<double, 3> overlap { { 0.0, 0.0, 0.0 } };
     bool peakHold = true, tilt = false;
     float hoverX = -1.0f;
 };
@@ -149,6 +157,75 @@ private:
     std::array<std::vector<double>, 3> curves;
     double threshold = 0.5;
     bool negativeOnly = false;
+};
+
+//==============================================================================
+/** A panel that opens over the analyzer when its button is pressed. */
+class Card : public juce::Component
+{
+public:
+    explicit Card (juce::String titleText) : title (std::move (titleText)) {}
+
+    /** Lays out the card's children inside the given content area. */
+    std::function<void (juce::Rectangle<int>)> onLayout;
+
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void mouseDown (const juce::MouseEvent&) override {}    // clicks do not fall through to the plot
+
+private:
+    juce::String title;
+};
+
+/** Everything the playback-chains card shows. */
+struct ChainsInfo
+{
+    Translation translation;
+    double outOfBandDb = -200.0, lfeLevelDb = -200.0;
+    std::array<double, 3> sessionCorrelation { { 0.0, 0.0, 0.0 } };
+    double sessionSeconds = 0.0;
+};
+
+/** Table of the simulated playback chains plus the related read-outs. */
+class ChainsView : public juce::Component
+{
+public:
+    static constexpr double dependenceWarning = 0.7;      // LFE carries more than this share of the bass
+    static constexpr double outOfBandWarningDb = -20.0;   // LFE content above 120 Hz louder than this
+    static constexpr double polarityWarning = -0.3;       // whole-session correlation below this
+    static constexpr double polarityMinSeconds = 30.0;
+
+    void update (const ChainsInfo&);
+    void paint (juce::Graphics&) override;
+
+    static juce::Colour colourFor (double changeDb);
+
+private:
+    ChainsInfo info;
+};
+
+/** Scrolling record of the last minutes: one thin lane per indicator. */
+class HistoryStrip : public juce::Component
+{
+public:
+    struct Sample
+    {
+        float alert = 0.0f;         // 0..1, strongest alert
+        bool outOfPhase = false;    // its sign
+        float fragility = 0.0f;     // 0..1, 1 - robustness
+        float dependence = 0.0f;    // 0..1, LFE share of the bass
+        float outOfBand = 0.0f;     // 0..1, LFE content above 120 Hz
+    };
+
+    static constexpr double secondsPerColumn = 0.5;
+    static constexpr int columns = 600;                 // five minutes
+
+    void push (const Sample&);
+    void paint (juce::Graphics&) override;
+
+private:
+    std::vector<Sample> samples;
+    size_t writePos = 0;
 };
 
 } // namespace subguard

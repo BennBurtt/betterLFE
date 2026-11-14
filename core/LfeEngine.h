@@ -32,7 +32,8 @@
 namespace subguard
 {
 
-enum Channel { chL = 0, chC, chR, chLFE, numChannels };
+// chHeights is the sum of the height channels (silent when the format has none).
+enum Channel { chL = 0, chC, chR, chLFE, chHeights, numChannels };
 
 // Index of the L+C+R sum in the per-pair results (after L, C, R).
 constexpr int pairFacade = 3;
@@ -85,6 +86,23 @@ struct Analysis
     std::vector<double> grid;        // log frequency axis of what follows (Hz)
 
     // Indexed [pair][grid point]; pairs are L, C, R, facade, each against the LFE.
+    // Smoothed auto and cross spectra of the three groups that playback chains
+    // treat differently: F = L+C+R, the LFE and H = the height channels, on the
+    // grid above and at unity gain (no display trim, no LFE offset). cXY is the
+    // average of X.conj(Y). With these, the power of any filtered sum of the
+    // groups can be worked out without touching the audio again.
+    struct Matrix
+    {
+        std::vector<double> pF, pLfe, pH, pL, pC, pR, reLC, reRC;
+        std::vector<std::complex<double>> cFLfe, cFH, cHLfe;
+    } matrix;
+
+    double windowSeconds = 1.0;     // length of the analysis window
+
+    // Same meaning as sigma below, for pairs that do not involve a screen
+    // channel: based on how long the LFE itself has been playing.
+    std::vector<double> sigmaLfe;
+
     // correlation is level independent: it reads the same however quiet the LFE
     // is. interaction is the same quantity weighted by the level balance.
     std::array<std::vector<double>, numPairs> correlation, interaction, coherence, phase, gate, sigma;
@@ -101,7 +119,7 @@ public:
     /** Clears all audio and statistics. */
     void reset();
 
-    /** Feeds interleaved audio frames ordered L, C, R, LFE. */
+    /** Feeds interleaved audio frames ordered L, C, R, LFE, heights sum. */
     void push (const float* interleaved, int numFrames);
 
     /** Updates the averages with the audio pushed since the last call.
@@ -114,6 +132,18 @@ public:
         way the LFE lines up with it. Independent of analyze(). */
     std::vector<TransientEvent> takeTransientEvents()   { return transients.takeEvents(); }
 
+    /** LFE content above 120 Hz relative to the whole LFE, in dB (about 1 s average). */
+    double lfeOutOfBandDb() const;
+
+    /** Broadband RMS level of the LFE, dBFS (about 1 s average). */
+    double lfeLevelDb() const;
+
+    /** Energy-weighted correlation of a pair (L, C, R, facade) with the LFE over
+        20-120 Hz, accumulated since the last resetGlobal(). */
+    double globalCorrelation (int pair) const;
+    double globalSeconds() const    { return globalTime; }
+    void resetGlobal();
+
     double decimatedRate() const    { return fs; }
     double windowSeconds() const    { return windowSec; }
 
@@ -122,6 +152,14 @@ private:
 
     Decimator decimator;
     double fs, facadeGain, windowSec = 1.0;
+
+    struct Section { double b0, b1, b2, a1, a2, z1 = 0.0, z2 = 0.0; };
+    std::array<Section, 2> outOfBandFilter {};
+    double outOfBandCoeff = 0.0, outOfBandPower = 0.0, lfePower = 0.0;
+
+    std::array<double, numPairs> globalRe {}, globalPx {}, globalPl {};
+    double globalTime = 0.0;
+    size_t globalBinLo = 0, globalBinHi = 0;
     TransientDetector transients;
     int nWin = 0, stride = 1;
 
@@ -138,6 +176,7 @@ private:
     std::vector<double> specPower;                        // [bin * 2]: facade, LFE
     std::vector<double> stats, now;                       // [bin * 13], see .cpp
     std::vector<double> m1, m2;                           // [grid * 4]
+    std::vector<double> m1Lfe, m2Lfe;                     // [grid]
     std::vector<double> workRe, workIm, twiddleRe, twiddleIm;
     std::array<std::vector<std::complex<double>>, numChannels> spectrum;
     std::vector<int> bitReverse;

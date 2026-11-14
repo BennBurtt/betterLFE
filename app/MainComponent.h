@@ -34,6 +34,7 @@ struct LaunchOptions
 {
     bool demoSignal = false;        // --demo: built-in test signal instead of an audio device
     juce::File snapshotFile;        // --snapshot <png>: save the window after 4 s and quit
+    juce::String openCard;          // --card <name>: start with that panel open (for snapshots)
 };
 
 class MainComponent : public juce::Component,
@@ -48,10 +49,14 @@ public:
     void resized() override;
 
 private:
+    enum CardId { sourceCard, analysisCard, spectrumCard, responseCard, alertCard, chainsCard, numCards };
+
     void timerCallback() override;
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
 
-    void buildSettingsPanel();
+    void buildCards();
+    void showCard (int index);      // -1 closes whichever is open
+    void positionCards();
     void openDevices();
     void applyFormat();
     void selectDevice (const juce::String& name);
@@ -64,6 +69,7 @@ private:
 
     const ChannelFormat& format() const;
     int channelsNeeded() const      { return (int) format().channels.size(); }
+    AlertTracker::Options alertOptions() const;
 
     LaunchOptions options;
     juce::ApplicationProperties properties;
@@ -72,18 +78,21 @@ private:
     AudioInput input;
     std::unique_ptr<LfeEngine> engine;
     AlertTracker alerts;
-    AlertTracker::Options alertOptions() const;
+    PlaybackSimulator simulator;
     Settings engineSettings;
 
     HeaderBar header;
     SpectrumPlot spectrum;
     TransientStrip transientStrip;
     CorrelationPlot correlation;
+    HistoryStrip history;
 
-    juce::Component panel;
-    juce::GroupComponent sourceGroup { {}, "Source & Format" }, analysisGroup { {}, "Analysis" },
-                         displayGroup { {}, "Spectrum" }, responseGroup { {}, "Responsiveness" },
-                         alertGroup { {}, "Alert" };
+    // One button per panel; a panel opens over the analyzer, one at a time
+    std::array<juce::TextButton, numCards> cardButtons;
+    std::array<Card, numCards> cards { { Card ("Source & Format"), Card ("Analysis"), Card ("Spectrum"),
+                                         Card ("Responsiveness"), Card ("Alert"), Card ("Playback chains") } };
+    int openCard = -1;
+
     juce::Label formatLabel { {}, "Channel Format:" }, deviceLabel { {}, "Input Device:" },
                 fpsLabel { {}, "Refresh Rate:" }, windowLabel { {}, "Time / Frequency:" },
                 rangeLabel { {}, "Level range:" }, statusLabel;
@@ -93,12 +102,15 @@ private:
                        levelWeightToggle { "Weigh by level balance" };
     LabelledSlider inertia { "Inertia:", 0, 100, 1, 70 }, integration { "Integration:", 0.5, 5.0, 0.1, 2.0 },
                    threshold { "Threshold:", 0.0, 1.0, 0.01, 0.5 }, decay { "Decay:", 0.1, 4.0, 0.05, 1.0 };
-    juce::TextButton settingsButton { "Settings" };
+    ChainsView chainsView;
+    juce::TextButton resetSessionButton { "Reset session" };
 
     double lastTick = 0.0, engineRate = 0.0, demoTime = 0.0;
+    double shownScore = -1.0, historyClock = 0.0;
+    HistoryStrip::Sample historySample;
     std::array<double, 3> transientFlash { { 0.0, 0.0, 0.0 } };
     int inputGeneration = -1, framesShown = 0;
-    bool panelVisible = true, restoring = false;
+    bool restoring = false;
     std::vector<float> scratch;
     std::vector<std::array<double, 3>> demoTones;   // frequency, phase, group
 };

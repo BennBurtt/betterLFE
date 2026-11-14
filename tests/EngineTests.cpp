@@ -3,6 +3,7 @@
 
 #include "../core/AlertTracker.h"
 #include "../core/LfeEngine.h"
+#include "../core/PlaybackSim.h"
 
 #include <algorithm>
 #include <cmath>
@@ -117,21 +118,21 @@ namespace
 
     struct Scene
     {
-        Signal l, c, r, lfe;
+        Signal l, c, r, lfe, heights;
 
         size_t length() const
         {
-            return std::max (std::max (l.size(), c.size()), std::max (r.size(), lfe.size()));
+            return std::max (std::max (std::max (l.size(), c.size()), std::max (r.size(), lfe.size())), heights.size());
         }
 
         std::vector<float> interleaved() const
         {
-            std::vector<float> d (length() * 4, 0.0f);
-            const Signal* src[4] = { &l, &c, &r, &lfe };
+            std::vector<float> d (length() * numChannels, 0.0f);
+            const Signal* src[numChannels] = { &l, &c, &r, &lfe, &heights };
 
-            for (int ch = 0; ch < 4; ++ch)
+            for (int ch = 0; ch < numChannels; ++ch)
                 for (size_t i = 0; i < src[ch]->size(); ++i)
-                    d[i * 4 + (size_t) ch] = (*src[ch])[i];
+                    d[i * numChannels + (size_t) ch] = (*src[ch])[i];
 
             return d;
         }
@@ -151,7 +152,7 @@ namespace
 
         for (size_t pos = 0; pos < total; pos += blockSize, ++block)
         {
-            engine.push (data.data() + pos * 4, (int) std::min ((size_t) blockSize, total - pos));
+            engine.push (data.data() + pos * numChannels, (int) std::min ((size_t) blockSize, total - pos));
 
             if (block % 2 == 1 && engine.analyze (settings) && each)
                 each ((double) pos / sampleRate);
@@ -491,7 +492,7 @@ static void testBlockSizeIndependence()
     for (size_t pos = 0; pos < total;)
     {
         const auto n = std::min ((size_t) sizes (rng), total - pos);
-        b.push (data.data() + pos * 4, (int) n);
+        b.push (data.data() + pos * numChannels, (int) n);
         pos += n;
     }
 
@@ -640,7 +641,7 @@ static void testTransients()
 
         for (size_t pos = 0; pos < scene.length(); pos += blockSize)
         {
-            e.push (data.data() + pos * 4, (int) std::min ((size_t) blockSize, scene.length() - pos));
+            e.push (data.data() + pos * numChannels, (int) std::min ((size_t) blockSize, scene.length() - pos));
 
             for (const auto& ev : e.takeTransientEvents())
                 if (ev.match > 0.5)
@@ -814,6 +815,132 @@ static void testTransients()
     }
 }
 
+static void testPlaybackChains()
+{
+    std::printf ("playback chains, robustness, downmix, overlap\n");
+    const PlaybackSimulator sim;
+    const double asHeard = std::pow (10.0, -10.0 / 20.0);   // LFE recorded 10 dB down plays as loud as a screen channel
+    const auto n = noise (10.0, 71);
+
+    const auto find = [] (const Translation& t, ChainResult::Kind kind, double delayOrCorner, bool flag)
+    {
+        for (const auto& c : t.chains)
+            if (c.kind == kind
+                 && (kind == ChainResult::Kind::cinema ? (std::abs (c.delayMs - delayOrCorner) < 1e-9 && c.inverted == flag)
+                                                       : (std::abs (c.crossoverHz - delayOrCorner) < 1e-9 && c.encoderFilter == flag)))
+                return c;
+
+        return ChainResult();
+    };
+
+    {
+        // Same signal in L and (as heard) in the LFE; default engine, i.e. with the display trim
+        LfeEngine e (sampleRate);
+        Scene s;
+        s.l = n;
+        s.lfe = scaled (n, asHeard);
+        run (e, s);
+        const auto t = sim.compute (e.result(), false);
+        const double inPhase = find (t, ChainResult::Kind::cinema, 0.0, false).changeDb;
+        const double opposed = find (t, ChainResult::Kind::cinema, 0.0, true).changeDb;
+        check (t.hasBass && t.chains.size() == 16, "16 chains without height channels", (double) t.chains.size());
+        check (std::abs (inPhase - 3.0) < 0.5, "identical: cinema sum +3 dB", inPhase);
+        check (opposed < -10.0, "identical: inverted subwoofer cancels", opposed);
+        check (t.robustness < 5.0, "identical: robustness near 0", t.robustness);
+        check (std::abs (t.downmixChangeDb + 3.0) < 0.3, "identical: downmix without LFE loses 3 dB", t.downmixChangeDb);
+        check (std::abs (t.lfeShare - 0.5) < 0.03, "identical: LFE carries half the bass", t.lfeShare);
+        check (find (t, ChainResult::Kind::bassManaged, 80.0, false).bandChangeDb[0] > 1.5, "bass managed: 30-60 Hz still sums", 0.0);
+        check (t.overlap[1].amount > 0.9 && t.overlap[2].amount > 0.9, "equal levels: full overlap", t.overlap[1].amount);
+    }
+    {
+        // Unrelated signals: nothing interacts, every chain gives the power sum
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        Scene s;
+        s.l = n;
+        s.lfe = scaled (noise (10.0, 72), asHeard);
+        run (e, s);
+        const auto t = sim.compute (e.result(), false);
+        double worst = 0.0;
+
+        for (const auto& c : t.chains)
+            worst = std::max (worst, std::abs (c.changeDb));
+
+        check (worst < 0.3, "unrelated: every chain within 0.3 dB of the power sum", worst);
+        check (t.robustness > 95.0, "unrelated: robustness near 100", t.robustness);
+    }
+    {
+        // LFE 5 ms late: a subwoofer 5 ms early realigns it, 5 ms later makes it 10 ms
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        Scene s;
+        s.l = n;
+        s.lfe = delayed (scaled (n, asHeard), 0.005);
+        run (e, s);
+        const auto t = sim.compute (e.result(), false);
+        check (std::abs (find (t, ChainResult::Kind::cinema, -5.0, false).changeDb - 3.0) < 0.5, "late LFE realigned by the chain: +3 dB",
+               find (t, ChainResult::Kind::cinema, -5.0, false).changeDb);
+        check (std::abs (find (t, ChainResult::Kind::cinema, 5.0, false).changeDb) < 0.7, "late LFE, 10 ms in total: about 0 dB",
+               find (t, ChainResult::Kind::cinema, 5.0, false).changeDb);
+    }
+    {
+        // LFE alone, then screen alone: no interaction possible
+        for (int which = 0; which < 2; ++which)
+        {
+            LfeEngine e (sampleRate, 1.0, 0.0);
+            Scene s;
+            (which == 0 ? s.lfe : s.c) = n;
+            run (e, s);
+            const auto t = sim.compute (e.result(), false);
+            check (t.robustness > 99.0, which == 0 ? "LFE alone: robustness 100" : "screen alone: robustness 100", t.robustness);
+            check (which == 0 ? t.lfeShare > 0.99 : t.lfeShare < 0.01, "LFE share of the bass", t.lfeShare);
+        }
+    }
+    {
+        // Heights that oppose the LFE: only the Atmos home chain sees it
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        Scene s;
+        s.heights = n;
+        s.lfe = scaled (n, -asHeard);
+        run (e, s);
+        const auto t = sim.compute (e.result(), true);
+        check (t.chains.size() == 18, "18 chains with height channels", (double) t.chains.size());
+        check (find (t, ChainResult::Kind::atmosHome, 80.0, false).bandChangeDb[0] < -6.0, "Atmos home: heights against LFE cancel at 30-60 Hz",
+               find (t, ChainResult::Kind::atmosHome, 80.0, false).bandChangeDb[0]);
+        check (std::abs (find (t, ChainResult::Kind::cinema, 0.0, false).changeDb) < 0.3, "cinema chain ignores the heights",
+               find (t, ChainResult::Kind::cinema, 0.0, false).changeDb);
+    }
+    {
+        // Band levels: a -20 dBFS sine at 75 Hz is -23 dBFS RMS in the 60-90 Hz band
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        Scene s;
+        s.l = sine (75.0, -20.0, 6.0);
+        s.lfe = sine (40.0, -40.0, 6.0);
+        run (e, s);
+        const auto t = sim.compute (e.result(), false);
+        check (std::abs (t.overlap[1].screenDb + 23.0) < 1.0, "band RMS level of a sine", t.overlap[1].screenDb);
+        check (std::abs (t.overlap[0].lfeDb + 33.0) < 1.0, "LFE band level includes its +10 dB", t.overlap[0].lfeDb);
+        check (t.overlap[1].amount < 0.01, "no overlap when only one of them plays in the band", t.overlap[1].amount);
+    }
+    {
+        // LFE content above 120 Hz, and whole-session polarity
+        LfeEngine high (sampleRate), low (sampleRate), opposed (sampleRate, 1.0, 0.0);
+        Scene a, b, c;
+        a.lfe = sine (300.0, -20.0, 4.0);
+        b.lfe = sine (50.0, -20.0, 4.0);
+        c.l = n;
+        c.lfe = scaled (n, -0.2);
+        run (high, a);
+        run (low, b);
+        run (opposed, c);
+        check (high.lfeOutOfBandDb() > -1.0, "300 Hz in the LFE: all out of band", high.lfeOutOfBandDb());
+        check (low.lfeOutOfBandDb() < -25.0, "50 Hz in the LFE: in band", low.lfeOutOfBandDb());
+        check (std::abs (high.lfeLevelDb() + 23.0) < 0.5, "LFE broadband level", high.lfeLevelDb());
+        check (opposed.globalCorrelation (chL) < -0.95, "session polarity: opposed LFE reads -1", opposed.globalCorrelation (chL));
+        check (std::abs (opposed.globalSeconds() - 10.0) < 0.5, "session time", opposed.globalSeconds());
+        opposed.resetGlobal();
+        check (opposed.globalSeconds() == 0.0, "session reset", opposed.globalSeconds());
+    }
+}
+
 int main()
 {
     testFilterDesign();
@@ -825,6 +952,7 @@ int main()
     testBlockSizeIndependence();
     testLowLevelAndLowFrequency();
     testTransients();
+    testPlaybackChains();
 
     std::printf ("\n%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;

@@ -312,6 +312,8 @@ void SpectrumPlot::update (const Analysis& a, const AlertTracker& alerts, double
 void SpectrumPlot::setFloorDb (double db)      { floorDb = db; repaint(); }
 void SpectrumPlot::setPeakHold (bool on)       { peakHold = on; repaint(); }
 void SpectrumPlot::setTilt (bool on)           { tilt = on; repaint(); }
+void SpectrumPlot::setScore (double value)     { score = value; }
+void SpectrumPlot::setOverlap (const std::array<double, 3>& amounts)   { overlap = amounts; }
 
 void SpectrumPlot::mouseMove (const juce::MouseEvent& e)
 {
@@ -378,6 +380,22 @@ void SpectrumPlot::paint (juce::Graphics& g)
             g.setColour (rampColour (heatSign[i] < 0.0 ? outOfPhaseRamp : inPhaseRamp, std::sqrt (heatLevel[i])));
             g.fillRect (x0, juce::roundToInt (area.getY()), x1 - x0, juce::roundToInt (area.getHeight()) + 1);
         }
+    }
+
+    // Robustness score: large, behind the curves, always there
+    {
+        const float size = juce::jlimit (60.0f, 220.0f, area.getHeight() * 0.55f);
+        const auto colour = score < 0.0 ? juce::Colour (0xff808080)
+                                        : juce::Colour (0xffff3a2a).interpolatedWith (juce::Colour (0xff3ddc84), (float) (score / 100.0));
+        auto box = area.withSizeKeepingCentre (size * 2.4f, size * 1.25f);
+
+        g.setColour (colour.withAlpha (0.20f));
+        g.setFont (uiFont (size, true));
+        g.drawText (score < 0.0 ? juce::String ("--") : juce::String (juce::roundToInt (score)),
+                    box.removeFromTop (size), juce::Justification::centred, false);
+        g.setColour (colour.withAlpha (0.32f));
+        g.setFont (uiFont (juce::jmax (11.0f, size * 0.11f), true));
+        g.drawText ("ROBUSTNESS", box, juce::Justification::centredTop, false);
     }
 
     // Grid
@@ -474,6 +492,17 @@ void SpectrumPlot::paint (juce::Graphics& g)
 
     drawCurve (facadeDb, peakFacade, theme::facade, 0.50f, 2.0f);
     drawCurve (lfeDb, peakLfe, theme::lfe, 0.42f, 1.8f);
+
+    // Overlap marks: a thin line under each band, warming up where the LFE and
+    // the screen channels both play at similar levels (60-120 Hz only).
+    for (size_t b = 0; b < 3; ++b)
+    {
+        const float x0 = FrequencyAxis::xFor (Translation::bandEdges[b], area) + 2.0f;
+        const float x1 = FrequencyAxis::xFor (Translation::bandEdges[b + 1], area) - 2.0f;
+        const float amount = b == 0 ? 0.0f : (float) overlap[b];
+        g.setColour (juce::Colour (0xff8a8a8a).interpolatedWith (juce::Colour (0xffffb347), amount).withAlpha (0.35f + 0.55f * amount));
+        g.fillRoundedRectangle (x0, area.getBottom() - 6.0f, x1 - x0, 3.0f + 2.0f * amount, 1.5f);
+    }
 
     // Fade out above the LFE cut-off (whole-pixel strips, fully black near the edge)
     const int strips = 24;
@@ -764,6 +793,228 @@ void CorrelationPlot::paint (juce::Graphics& g)
         g.fillRect (cell.getX() + 6.0f, cell.getCentreY() - 1.0f, 12.0f, 2.0f);
         g.drawText (names[c], cell.withTrimmedLeft (22.0f), juce::Justification::centredLeft);
     }
+}
+
+//==============================================================================
+void Card::paint (juce::Graphics& g)
+{
+    const auto bounds = getLocalBounds().toFloat().reduced (1.0f);
+    g.setColour (juce::Colour (0xf21a1a1a));
+    g.fillRoundedRectangle (bounds, 8.0f);
+    g.setColour (juce::Colour (0xff5a5a5a));
+    g.drawRoundedRectangle (bounds, 8.0f, 1.0f);
+    g.setColour (theme::dimText);
+    g.setFont (uiFont (13.0f, true));
+    g.drawText (title, getLocalBounds().reduced (14, 8).removeFromTop (18), juce::Justification::centredLeft);
+}
+
+void Card::resized()
+{
+    if (onLayout)
+        onLayout (getLocalBounds().reduced (14, 10).withTrimmedTop (22));
+}
+
+//==============================================================================
+juce::Colour ChainsView::colourFor (double changeDb)
+{
+    if (changeDb < -3.0)   return juce::Colour (0xffc0392b);   // a cancellation
+    if (changeDb < -1.0)   return juce::Colour (0xffb9770e);
+    return juce::Colour (0xff2e6b4a);
+}
+
+void ChainsView::update (const ChainsInfo& newInfo)
+{
+    info = newInfo;
+    repaint();
+}
+
+void ChainsView::paint (juce::Graphics& g)
+{
+    const auto& t = info.translation;
+    auto area = getLocalBounds().toFloat();
+    const float rowHeight = 22.0f, labelWidth = 150.0f;
+
+    const auto find = [&t] (ChainResult::Kind kind, double value, bool flag) -> const ChainResult*
+    {
+        for (const auto& c : t.chains)
+            if (c.kind == kind
+                 && (kind == ChainResult::Kind::cinema ? (std::abs (c.delayMs - value) < 1e-9 && c.inverted == flag)
+                                                       : (std::abs (c.crossoverHz - value) < 1e-9 && c.encoderFilter == flag)))
+                return &c;
+
+        return nullptr;
+    };
+
+    const auto heading = [&] (const juce::String& text)
+    {
+        g.setColour (theme::dimText);
+        g.setFont (uiFont (12.0f, true));
+        g.drawText (text, area.removeFromTop (20.0f), juce::Justification::centredLeft);
+    };
+
+    const auto cell = [&] (juce::Rectangle<float> box, const ChainResult* chain)
+    {
+        box = box.reduced (1.5f);
+
+        if (chain == nullptr || ! t.hasBass)
+        {
+            g.setColour (juce::Colour (0xff2a2a2a));
+            g.fillRoundedRectangle (box, 3.0f);
+            g.setColour (juce::Colour (0xff777777));
+            g.setFont (uiFont (12.0f));
+            g.drawText (juce::String::fromUTF8 ("\xe2\x80\x94"), box, juce::Justification::centred);
+            return;
+        }
+
+        const double db = chain->changeDb;
+        g.setColour (colourFor (db));
+        g.fillRoundedRectangle (box, 3.0f);
+        g.setColour (juce::Colours::white);
+        g.setFont (uiFont (12.5f, true));
+        g.drawText (db <= PlaybackSimulator::lossFloorDb + 0.05 ? juce::String::fromUTF8 ("\xe2\x89\xa4") + juce::String ((int) PlaybackSimulator::lossFloorDb)
+                                                                 : (db >= 0.0 ? "+" : "") + juce::String (db, 1),
+                    box, juce::Justification::centred);
+    };
+
+    const auto table = [&] (const juce::StringArray& columns, const juce::StringArray& rows,
+                            const std::function<const ChainResult* (int row, int column)>& lookup)
+    {
+        auto header = area.removeFromTop (18.0f);
+        header.removeFromLeft (labelWidth);
+        const float width = header.getWidth() / (float) columns.size();
+        g.setColour (theme::dimText);
+        g.setFont (uiFont (11.5f));
+
+        for (const auto& name : columns)
+            g.drawText (name, header.removeFromLeft (width), juce::Justification::centred);
+
+        for (int r = 0; r < rows.size(); ++r)
+        {
+            auto row = area.removeFromTop (rowHeight);
+            g.setColour (theme::text);
+            g.setFont (uiFont (12.5f));
+            g.drawText (rows[r], row.removeFromLeft (labelWidth), juce::Justification::centredLeft);
+
+            for (int c = 0; c < columns.size(); ++c)
+                cell (row.removeFromLeft (width), lookup (r, c));
+        }
+
+        area.removeFromTop (8.0f);
+    };
+
+    heading ("Bass of each chain against the power sum, 20-120 Hz (dB)");
+
+    const double delays[] = { -5.0, -2.5, 0.0, 2.5, 5.0 };
+    table ({ "-5 ms", "-2.5 ms", "0 ms", "+2.5 ms", "+5 ms" }, { "Cinema, sub in polarity", "Cinema, sub inverted" },
+           [&] (int r, int c) { return find (ChainResult::Kind::cinema, delays[c], r == 1); });
+
+    const double corners[] = { 60.0, 80.0, 100.0 };
+    table ({ "60 Hz", "80 Hz", "100 Hz", "Atmos 80 Hz" }, { "Bass managed", "+ encoder LFE filter" },
+           [&] (int r, int c) { return c < 3 ? find (ChainResult::Kind::bassManaged, corners[c], r == 1)
+                                             : find (ChainResult::Kind::atmosHome, 80.0, r == 1); });
+
+    // Read-outs
+    const auto line = [&] (const juce::String& label, const juce::String& value, bool warn)
+    {
+        auto row = area.removeFromTop (rowHeight);
+        g.setColour (theme::dimText);
+        g.setFont (uiFont (12.5f));
+        g.drawText (label, row.removeFromLeft (labelWidth + 40.0f), juce::Justification::centredLeft);
+        g.setColour (warn ? juce::Colour (0xffffb347) : theme::text);
+        g.setFont (uiFont (12.5f, warn));
+        g.drawText (value, row, juce::Justification::centredLeft);
+    };
+
+    const juce::String none = juce::String::fromUTF8 ("\xe2\x80\x94");
+
+    line ("Robustness", t.hasBass ? juce::String (juce::roundToInt (t.robustness)) + " / 100     spread " + juce::String (t.spreadDb, 1)
+                                      + " dB, worst " + juce::String (t.worstChangeDb, 1) + " dB"
+                                  : none,
+          t.hasBass && t.robustness < 50.0);
+
+    line ("Stereo downmix without LFE", t.hasBass ? juce::String (t.downmixChangeDb, 1) + " dB of bass     LFE carries "
+                                                      + juce::String (juce::roundToInt (100.0 * t.lfeShare)) + " %"
+                                                  : none,
+          t.hasBass && t.lfeShare > dependenceWarning);
+
+    const bool lfePlaying = info.lfeLevelDb > -120.0;
+    line ("LFE content above 120 Hz", lfePlaying ? juce::String (juce::roundToInt (juce::jmax (-99.0, info.outOfBandDb))) + " dB against the whole LFE" : none,
+          lfePlaying && info.outOfBandDb > outOfBandWarningDb);
+
+    const auto signedValue = [] (double v) { return (v >= 0.0 ? "+" : "") + juce::String (v, 2); };
+    const int seconds = (int) info.sessionSeconds;
+    const bool enough = info.sessionSeconds >= polarityMinSeconds;
+    const bool opposed = enough && (info.sessionCorrelation[0] < polarityWarning || info.sessionCorrelation[1] < polarityWarning
+                                      || info.sessionCorrelation[2] < polarityWarning);
+    line ("Session polarity, LFE vs", "L " + signedValue (info.sessionCorrelation[0]) + "   C " + signedValue (info.sessionCorrelation[1])
+                                        + "   R " + signedValue (info.sessionCorrelation[2]) + "     over "
+                                        + juce::String (seconds / 60) + ":" + juce::String (seconds % 60).paddedLeft ('0', 2),
+          opposed);
+}
+
+//==============================================================================
+void HistoryStrip::push (const Sample& sample)
+{
+    if (samples.empty())
+        samples.resize (columns);
+
+    samples[writePos] = sample;
+    writePos = (writePos + 1) % samples.size();
+    repaint();
+}
+
+void HistoryStrip::paint (juce::Graphics& g)
+{
+    g.fillAll (theme::plot);
+    g.setColour (theme::outline);
+    g.fillRect (0, 0, getWidth(), 1);
+
+    auto area = getLocalBounds().toFloat().withTrimmedLeft ((float) FrequencyAxis::leftMargin + 36.0f)
+                                          .withTrimmedRight ((float) FrequencyAxis::rightMargin).reduced (0.0f, 5.0f);
+    const char* names[] = { "Alert", "Fragile", "LFE-dependent", "LFE > 120 Hz" };
+    const float lane = area.getHeight() / 4.0f;
+
+    g.setFont (uiFont (10.5f));
+
+    for (int i = 0; i < 4; ++i)
+    {
+        const auto row = juce::Rectangle<float> (area.getX(), area.getY() + lane * (float) i, area.getWidth(), lane).reduced (0.0f, 1.0f);
+        g.setColour (theme::dimText);
+        g.drawText (names[i], juce::Rectangle<float> (4.0f, row.getY() - 2.0f, area.getX() - 10.0f, row.getHeight() + 4.0f),
+                    juce::Justification::centredRight);
+        g.setColour (juce::Colour (0xff1c1c1c));
+        g.fillRect (row);
+
+        if (samples.empty())
+            continue;
+
+        const float width = row.getWidth() / (float) columns;
+
+        for (int c = 0; c < columns; ++c)
+        {
+            const auto& s = samples[(writePos + (size_t) c) % samples.size()];
+            float value = 0.0f;
+            juce::Colour colour;
+
+            switch (i)
+            {
+                case 0:  value = s.alert;       colour = s.outOfPhase ? juce::Colour (0xffff3a2a) : juce::Colour (0xfff5c400); break;
+                case 1:  value = s.fragility;   colour = juce::Colour (0xffff7043); break;
+                case 2:  value = s.dependence;  colour = juce::Colour (0xff7e9cff); break;
+                default: value = s.outOfBand;   colour = juce::Colour (0xffd16bff); break;
+            }
+
+            if (value > 0.02f)
+            {
+                g.setColour (colour.withAlpha (juce::jlimit (0.0f, 1.0f, 0.15f + 0.85f * value)));
+                g.fillRect (row.getX() + width * (float) c, row.getY(), width + 0.5f, row.getHeight());
+            }
+        }
+    }
+
+    g.setColour (juce::Colour (0xff777777));
+    g.setFont (uiFont (10.0f));
+    g.drawText ("now", juce::Rectangle<float> (area.getRight() + 1.0f, area.getY(), 22.0f, 12.0f), juce::Justification::centredLeft);
 }
 
 } // namespace subguard

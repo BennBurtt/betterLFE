@@ -91,6 +91,55 @@ Répond à : *quand le LCR attaque, le LFE attaque-t-il en même temps ?*
 
    2,5 ms est un quart de période à 100 Hz.
 
+## 3. Chaînes de lecture, robustesse et témoins
+
+Tout ce qui suit utilise le LFE **tel qu'il est entendu**, soit 10 dB au-dessus
+d'un canal d'écran, quel que soit le réglage d'affichage.
+
+**Chaînes de lecture.** Chaque chaîne est un jeu de filtres appliqués à trois
+groupes avant leur somme : F (L+C+R), le LFE, H (canaux de hauteur). La
+puissance de la somme se déduit des spectres et inter-spectres déjà moyennés,
+sans refiltrer l'audio :
+
+`P = Σ Ga·conj(Gb)·Sab`
+
+Elle est comparée à la **somme en puissance** (la même expression sans les
+termes croisés), c'est-à-dire au grave qu'on aurait si les groupes
+n'interagissaient pas. Plusieurs dB en dessous : annulation.
+
+| Chaîne | Modèle |
+|---|---|
+| Cinéma | somme acoustique écran + LFE ; sub décalé de −5, −2,5, 0, +2,5, +5 ms ; polarité normale ou inversée |
+| Bass management | canaux d'écran croisés vers le sub (Linkwitz-Riley 4ᵉ ordre à 60, 80 ou 100 Hz), LFE passe-bas 120 Hz ; somme électrique |
+| Filtre d'encodeur | idem avec un passe-bas raide à 120 Hz sur le LFE (Butterworth 8ᵉ ordre). C'est un modèle : le filtre LFE réel de Dolby Digital Plus n'est pas public |
+| Atmos domestique | bass management à 80 Hz qui redirige aussi les canaux de hauteur |
+
+Les termes croisés que le hasard seul peut produire sont retirés (effacés entre
+4σ et 2σ de cohérence) : des signaux sans rapport donnent exactement la somme
+en puissance.
+
+**Robustesse (0 à 100).** Écart entre la chaîne la plus forte et la plus faible,
+sur 20–120 Hz : `100 × (1 − écart / 12 dB)`. 100 : toutes les chaînes rendent
+le même grave. 0 : au moins 12 dB d'écart. Une annulation est comptée au plus à
+−24 dB.
+
+**Dépendance au LFE.** Downmix stéréo du LCR sans LFE (`Lo = L + 0,707·C`,
+`Ro = R + 0,707·C`) : part de l'énergie de grave portée par le LFE, et perte en
+dB quand il disparaît. Signalé au-delà de 70 %.
+
+**Recouvrement.** Niveau RMS du LFE et de la somme d'écran par bande (30–60,
+60–90, 90–120 Hz). Les marques sous le spectre se réchauffent quand les deux
+jouent à moins de 10 dB l'un de l'autre dans 60–120 Hz.
+
+**Hors bande.** Énergie du LFE au-dessus de 120 Hz (passe-haut 4ᵉ ordre, mesuré
+à pleine fréquence d'échantillonnage) rapportée au LFE entier. Signalé au-delà
+de −20 dB.
+
+**Polarité de séance.** Corrélation LFE ↔ L, C, R pondérée par l'énergie,
+cumulée sans oubli depuis la dernière remise à zéro. Signalée sous −0,3 après
+30 s. Elle reflète ce qui a été joué : rejouer une scène la compte plusieurs
+fois.
+
 ## Ce qui est vérifié
 
 `tests/EngineTests.cpp` contrôle sur signaux synthétiques : niveaux, repliement,
@@ -124,7 +173,10 @@ ressemble au-delà du seuil ; avec un LFE sans rapport, rien n'est affiché.
   (moins de ~10 dB) peut ne pas être détecté comme attaque.
 - Tout en bas (5–15 Hz), la résolution est limitée par la durée de la fenêtre :
   utiliser le mode « Ultra (2 s) » pour cette zone.
-- Les surrounds ne sont pas analysés.
+- Les surrounds ne sont pas analysés, ni redirigés dans les chaînes simulées.
+- Les chaînes de lecture sont des modèles électriques ; l'acoustique d'une salle
+  n'est pas simulée. Les seuils des témoins (70 %, −20 dB, −0,3, 12 dB) sont des
+  choix de conception.
 
 ## Références
 

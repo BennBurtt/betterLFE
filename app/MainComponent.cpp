@@ -11,7 +11,8 @@ namespace
 {
     constexpr double preferredSampleRate = 48000.0;
     constexpr double lfeInBandGainDb = 10.0;    // cinema B-chain: LFE plays 10 dB above a screen channel
-    constexpr int headerHeight = 170, panelHeight = 214;
+    constexpr int headerHeight = 170, barHeight = 38;
+    constexpr int frame = AudioInput::frameSize;
 }
 
 //==============================================================================
@@ -68,12 +69,11 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
    #endif
 
     addAndMakeVisible (header);
-    addAndMakeVisible (panel);
     addAndMakeVisible (spectrum);
     addAndMakeVisible (transientStrip);
     addAndMakeVisible (correlation);
-    addAndMakeVisible (settingsButton);
-    buildSettingsPanel();
+    addAndMakeVisible (history);
+    buildCards();
 
     for (auto* speaker : { &header.left, &header.centre, &header.right })
         speaker->onToggle = [this]
@@ -117,7 +117,11 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
         statusLabel.setText ("Demo signal (no audio device)", juce::dontSendNotification);
     }
 
-    setSize (1200, 980);
+    setSize (1200, 1000);
+
+    const juce::StringArray cardNames { "source", "analysis", "spectrum", "response", "alert", "chains" };
+    showCard (cardNames.indexOf (options.openCard));
+
     lastTick = juce::Time::getMillisecondCounterHiRes() * 0.001;
     startTimerHz (fpsBox.getSelectedId());
 }
@@ -138,20 +142,10 @@ const ChannelFormat& MainComponent::format() const
 }
 
 //==============================================================================
-void MainComponent::buildSettingsPanel()
+void MainComponent::buildCards()
 {
-    for (auto* group : { &sourceGroup, &analysisGroup, &displayGroup, &responseGroup, &alertGroup })
-    {
-        group->setColour (juce::GroupComponent::outlineColourId, theme::outline);
-        group->setColour (juce::GroupComponent::textColourId, theme::dimText);
-        panel.addAndMakeVisible (group);
-    }
-
     for (auto* label : { &formatLabel, &deviceLabel, &fpsLabel, &windowLabel, &rangeLabel, &statusLabel })
-    {
         label->setFont (uiFont (13.0f));
-        panel.addAndMakeVisible (label);
-    }
 
     statusLabel.setMinimumHorizontalScale (0.7f);
 
@@ -199,8 +193,6 @@ void MainComponent::buildSettingsPanel()
     alertModeBox.setSelectedId (1, juce::dontSendNotification);
     alertModeBox.setTooltip ("Out of phase only: alert just where the LFE works against the screen channel.");
 
-    for (auto* box : { &formatBox, &deviceBox, &fpsBox, &windowBox, &rangeBox, &alertModeBox })
-        panel.addAndMakeVisible (box);
 
     peakHoldToggle.setToggleState (true, juce::dontSendNotification);
     peakHoldToggle.onClick = [this] { spectrum.setPeakHold (peakHoldToggle.getToggleState()); };
@@ -209,14 +201,10 @@ void MainComponent::buildSettingsPanel()
     levelWeightToggle.setTooltip ("Off: the alert follows the correlation alone, however quiet the LFE is.\n"
                                   "On: an LFE much quieter (or louder) than the screen channel counts less.");
 
-    for (auto* toggle : { &peakHoldToggle, &tiltToggle, &levelWeightToggle })
-        panel.addAndMakeVisible (toggle);
 
     lfeGainToggle.setTooltip ("Weigh the LFE as it plays in a cinema: 10 dB of in-band gain over a screen channel.");
     animationToggle.setToggleState (true, juce::dontSendNotification);
     animationToggle.onClick = [this] { header.setAnimationEnabled (animationToggle.getToggleState()); };
-    panel.addAndMakeVisible (lfeGainToggle);
-    panel.addAndMakeVisible (animationToggle);
 
     inertia.format = [] (double v) { return juce::String ((int) v) + "%"; };
     integration.format = [] (double v) { return juce::String (v, 1) + " s"; };
@@ -224,19 +212,129 @@ void MainComponent::buildSettingsPanel()
     decay.format = [] (double v) { return juce::String (v, 2) + " s"; };
 
     for (auto* slider : { &inertia, &integration, &threshold, &decay })
-    {
         slider->refresh();
-        panel.addAndMakeVisible (slider);
+
+
+    resetSessionButton.onClick = [this]
+    {
+        if (engine != nullptr)
+            engine->resetGlobal();
+    };
+
+    // What each card holds, its size and how it lays its content out
+    const auto populate = [this] (int cardIndex, int width, int height, std::initializer_list<juce::Component*> children,
+                                  std::function<void (juce::Rectangle<int>)> layout)
+    {
+        auto& card = cards[(size_t) cardIndex];
+
+        for (auto* child : children)
+            card.addAndMakeVisible (child);
+
+        card.onLayout = std::move (layout);
+        card.setSize (width, height);
+        addChildComponent (card);
+    };
+
+    populate (sourceCard, 360, 196, { &formatLabel, &formatBox, &deviceLabel, &deviceBox, &statusLabel },
+              [this] (juce::Rectangle<int> r)
+              {
+                  formatLabel.setBounds (r.removeFromTop (20));
+                  formatBox.setBounds (r.removeFromTop (26));
+                  r.removeFromTop (6);
+                  deviceLabel.setBounds (r.removeFromTop (20));
+                  deviceBox.setBounds (r.removeFromTop (26));
+                  r.removeFromTop (4);
+                  statusLabel.setBounds (r.removeFromTop (30));
+              });
+
+    populate (analysisCard, 330, 156, { &fpsLabel, &fpsBox, &windowLabel, &windowBox, &lfeGainToggle, &animationToggle },
+              [this] (juce::Rectangle<int> r)
+              {
+                  auto combos = r.removeFromTop (46);
+                  auto fps = combos.removeFromLeft (100);
+                  fpsLabel.setBounds (fps.removeFromTop (20));
+                  fpsBox.setBounds (fps.withTrimmedRight (6));
+                  windowLabel.setBounds (combos.removeFromTop (20));
+                  windowBox.setBounds (combos);
+                  r.removeFromTop (8);
+                  lfeGainToggle.setBounds (r.removeFromTop (26));
+                  animationToggle.setBounds (r.removeFromTop (26));
+              });
+
+    populate (spectrumCard, 250, 156, { &rangeLabel, &rangeBox, &peakHoldToggle, &tiltToggle },
+              [this] (juce::Rectangle<int> r)
+              {
+                  rangeLabel.setBounds (r.removeFromTop (20));
+                  rangeBox.setBounds (r.removeFromTop (26));
+                  r.removeFromTop (8);
+                  peakHoldToggle.setBounds (r.removeFromTop (26));
+                  tiltToggle.setBounds (r.removeFromTop (26));
+              });
+
+    populate (responseCard, 300, 150, { &inertia, &integration },
+              [this] (juce::Rectangle<int> r)
+              {
+                  inertia.setBounds (r.removeFromTop (46));
+                  r.removeFromTop (8);
+                  integration.setBounds (r.removeFromTop (46));
+              });
+
+    populate (alertCard, 320, 206, { &threshold, &decay, &alertModeBox, &levelWeightToggle },
+              [this] (juce::Rectangle<int> r)
+              {
+                  threshold.setBounds (r.removeFromTop (46));
+                  r.removeFromTop (6);
+                  decay.setBounds (r.removeFromTop (46));
+                  r.removeFromTop (8);
+                  alertModeBox.setBounds (r.removeFromTop (26));
+                  r.removeFromTop (4);
+                  levelWeightToggle.setBounds (r.removeFromTop (24));
+              });
+
+    populate (chainsCard, 600, 322, { &chainsView, &resetSessionButton },
+              [this] (juce::Rectangle<int> r)
+              {
+                  resetSessionButton.setBounds (r.removeFromBottom (24).removeFromRight (110));
+                  chainsView.setBounds (r.withTrimmedBottom (-24));
+                  resetSessionButton.toFront (false);
+              });
+
+    const char* names[] = { "Source", "Analysis", "Spectrum", "Response", "Alert", "Playback chains" };
+
+    for (int i = 0; i < numCards; ++i)
+    {
+        auto& button = cardButtons[(size_t) i];
+        button.setButtonText (names[i]);
+        button.setClickingTogglesState (false);
+        button.onClick = [this, i] { showCard (openCard == i ? -1 : i); };
+        addAndMakeVisible (button);
+    }
+}
+
+void MainComponent::showCard (int index)
+{
+    openCard = index >= 0 && index < numCards ? index : -1;
+
+    for (int i = 0; i < numCards; ++i)
+    {
+        cards[(size_t) i].setVisible (i == openCard);
+        cardButtons[(size_t) i].setToggleState (i == openCard, juce::dontSendNotification);
     }
 
-    settingsButton.setClickingTogglesState (true);
-    settingsButton.setToggleState (true, juce::dontSendNotification);
-    settingsButton.onClick = [this]
+    positionCards();
+}
+
+void MainComponent::positionCards()
+{
+    // Each card hangs under its button, kept inside the window
+    for (int i = 0; i < numCards; ++i)
     {
-        panelVisible = settingsButton.getToggleState();
-        panel.setVisible (panelVisible);
-        resized();
-    };
+        auto& card = cards[(size_t) i];
+        const auto button = cardButtons[(size_t) i].getBounds();
+        const int x = juce::jlimit (8, juce::jmax (8, getWidth() - card.getWidth() - 8), button.getX());
+        card.setTopLeftPosition (x, button.getBottom() + 6);
+        card.toFront (false);
+    }
 }
 
 void MainComponent::paint (juce::Graphics& g)
@@ -247,72 +345,31 @@ void MainComponent::paint (juce::Graphics& g)
 void MainComponent::resized()
 {
     auto area = getLocalBounds();
-    header.setBounds (area.removeFromTop (juce::jmax (120, juce::jmin (headerHeight, getHeight() / 5))));
+    header.setBounds (area.removeFromTop (juce::jmax (110, juce::jmin (headerHeight, getHeight() / 6))));
 
-    if (panelVisible)
+    auto bar = area.removeFromTop (barHeight).reduced (10, 6);
+    const int widths[] = { 90, 90, 90, 90, 80, 140 };
+
+    for (int i = 0; i < numCards; ++i)
     {
-        panel.setBounds (area.removeFromTop (panelHeight));
-        auto row = panel.getLocalBounds().reduced (10, 2);
+        if (i == chainsCard)
+            bar.removeFromLeft (14);
 
-        const auto place = [&row] (juce::GroupComponent& group, int width)
-        {
-            group.setBounds (row.removeFromLeft (width));
-            row.removeFromLeft (8);
-            return group.getBounds().reduced (12, 6).withTrimmedTop (14);
-        };
-
-        auto source = place (sourceGroup, juce::jmax (240, row.getWidth() * 24 / 100));
-        formatLabel.setBounds (source.removeFromTop (20));
-        formatBox.setBounds (source.removeFromTop (26));
-        source.removeFromTop (4);
-        deviceLabel.setBounds (source.removeFromTop (20));
-        deviceBox.setBounds (source.removeFromTop (26));
-        statusLabel.setBounds (source.removeFromTop (30));
-
-        auto analysis = place (analysisGroup, 280);
-        auto combos = analysis.removeFromTop (46);
-        auto fpsArea = combos.removeFromLeft (96);
-        fpsLabel.setBounds (fpsArea.removeFromTop (20));
-        fpsBox.setBounds (fpsArea.withTrimmedRight (6));
-        windowLabel.setBounds (combos.removeFromTop (20));
-        windowBox.setBounds (combos);
-        analysis.removeFromTop (10);
-        lfeGainToggle.setBounds (analysis.removeFromTop (26));
-        animationToggle.setBounds (analysis.removeFromTop (26));
-
-        auto display = place (displayGroup, 190);
-        rangeLabel.setBounds (display.removeFromTop (20));
-        rangeBox.setBounds (display.removeFromTop (26));
-        display.removeFromTop (10);
-        peakHoldToggle.setBounds (display.removeFromTop (26));
-        tiltToggle.setBounds (display.removeFromTop (26));
-
-        auto response = place (responseGroup, juce::jmax (140, (row.getWidth() - 8) * 42 / 100));
-        inertia.setBounds (response.removeFromTop (46));
-        response.removeFromTop (8);
-        integration.setBounds (response.removeFromTop (46));
-
-        auto alert = place (alertGroup, juce::jmax (190, row.getWidth()));
-        threshold.setBounds (alert.removeFromTop (44));
-        alert.removeFromTop (4);
-        decay.setBounds (alert.removeFromTop (44));
-        alert.removeFromTop (6);
-        alertModeBox.setBounds (alert.removeFromTop (26));
-        alert.removeFromTop (2);
-        levelWeightToggle.setBounds (alert.removeFromTop (24));
+        cardButtons[(size_t) i].setBounds (bar.removeFromLeft (widths[i]));
+        bar.removeFromLeft (6);
     }
 
-    const int correlationHeight = juce::jmax (150, area.getHeight() * 2 / 7);
-    correlation.setBounds (area.removeFromBottom (correlationHeight));
+    history.setBounds (area.removeFromBottom (58));
+    correlation.setBounds (area.removeFromBottom (juce::jmax (150, area.getHeight() * 2 / 7)));
     transientStrip.setBounds (area.removeFromBottom (68));
     spectrum.setBounds (area);
-    settingsButton.setBounds (area.getX() + 10, area.getY() + 4, 72, 22);
+    positionCards();
 }
 
 //==============================================================================
 void MainComponent::applyFormat()
 {
-    input.setChannelIndices (format().analysisIndices());
+    input.setChannelIndices (format().analysisIndices(), format().heightIndices());
 }
 
 void MainComponent::openDevices()
@@ -423,7 +480,7 @@ void MainComponent::rebuildEngine (double sampleRate)
 
 void MainComponent::feedDemoSignal (int numFrames)
 {
-    scratch.resize ((size_t) numFrames * 4);
+    scratch.assign ((size_t) numFrames * frame, 0.0f);
 
     for (int i = 0; i < numFrames; ++i)
     {
@@ -456,11 +513,11 @@ void MainComponent::feedDemoSignal (int numFrames)
         other += kick (sinceKick);
         lfe += kick (sinceKick - 0.012);
 
-        float* frame = scratch.data() + (size_t) i * 4;
-        frame[chL] = (float) (1.4 * shared);
-        frame[chC] = (float) other;
-        frame[chR] = (float) (1.4 * flipped);
-        frame[chLFE] = (float) lfe;
+        float* out = scratch.data() + (size_t) i * frame;
+        out[chL] = (float) (1.4 * shared);
+        out[chC] = (float) other;
+        out[chR] = (float) (1.4 * flipped);
+        out[chLFE] = (float) lfe;
     }
 
     demoTime += numFrames / engineRate;
@@ -486,7 +543,7 @@ void MainComponent::timerCallback()
         if (input.generation() != inputGeneration || std::abs (input.sampleRate() - engineRate) > 0.5)
         {
             inputGeneration = input.generation();
-            scratch.resize (4096 * 4);
+            scratch.resize ((size_t) 4096 * frame);
 
             while (input.read (scratch.data(), 4096) > 0) {}
 
@@ -494,7 +551,7 @@ void MainComponent::timerCallback()
             updateStatus();
         }
 
-        scratch.resize (4096 * 4);
+        scratch.resize ((size_t) 4096 * frame);
 
         for (int n; (n = input.read (scratch.data(), 4096)) > 0;)
             engine->push (scratch.data(), n);
@@ -504,8 +561,8 @@ void MainComponent::timerCallback()
     else
     {
         // No device: feed silence so the display settles instead of freezing
-        scratch.assign ((size_t) std::lround (engineRate * dt) * 4, 0.0f);
-        engine->push (scratch.data(), (int) scratch.size() / 4);
+        scratch.assign ((size_t) std::lround (engineRate * dt) * frame, 0.0f);
+        engine->push (scratch.data(), (int) scratch.size() / frame);
     }
 
     header.setLevel (level);
@@ -521,6 +578,67 @@ void MainComponent::timerCallback()
         alerts.update (engine->result(), alerting, dt);
         spectrum.update (engine->result(), alerts, dt);
         correlation.update (engine->result(), alerts, alerting.threshold, alerting.outOfPhaseOnly);
+
+        // Playback chains, robustness, LFE dependence, overlap
+        ChainsInfo info;
+        info.translation = simulator.compute (engine->result(), ! format().heightIndices().empty());
+        info.outOfBandDb = engine->lfeOutOfBandDb();
+        info.lfeLevelDb = engine->lfeLevelDb();
+        info.sessionCorrelation = { { engine->globalCorrelation (0), engine->globalCorrelation (1), engine->globalCorrelation (2) } };
+        info.sessionSeconds = engine->globalSeconds();
+        const auto& t = info.translation;
+
+        if (cards[chainsCard].isVisible())
+            chainsView.update (info);
+
+        // The score moves smoothly; it disappears when there is no bass to score
+        if (! t.hasBass)
+            shownScore = -1.0;
+        else if (shownScore < 0.0)
+            shownScore = t.robustness;
+        else
+            shownScore += juce::jmin (1.0, dt / 0.4) * (t.robustness - shownScore);
+
+        spectrum.setScore (shownScore);
+        spectrum.setOverlap ({ { t.overlap[0].amount, t.overlap[1].amount, t.overlap[2].amount } });
+
+        // History: the strongest value of each indicator over the column
+        const bool lfePlaying = info.lfeLevelDb > -120.0;
+        double alert = 0.0;
+        bool outOfPhase = false;
+
+        for (size_t i = 0; i < alerts.heatLevel.size(); ++i)
+            if (alerts.heatLevel[i] > alert)
+            {
+                alert = alerts.heatLevel[i];
+                outOfPhase = alerts.heatSign[i] < 0.0;
+            }
+
+        if ((float) alert > historySample.alert)
+        {
+            historySample.alert = (float) alert;
+            historySample.outOfPhase = outOfPhase;
+        }
+
+        if (t.hasBass)
+        {
+            historySample.fragility = juce::jmax (historySample.fragility, (float) (1.0 - t.robustness / 100.0));
+            historySample.dependence = juce::jmax (historySample.dependence,
+                                                   (float) juce::jlimit (0.0, 1.0, (t.lfeShare - 0.5) / 0.5));
+        }
+
+        if (lfePlaying)
+            historySample.outOfBand = juce::jmax (historySample.outOfBand,
+                                                  (float) juce::jlimit (0.0, 1.0, (info.outOfBandDb + 30.0) / 20.0));
+    }
+
+    historyClock += dt;
+
+    if (historyClock >= HistoryStrip::secondsPerColumn)
+    {
+        historyClock = 0.0;
+        history.push (historySample);
+        historySample = {};
     }
 
     // Transient detector: one verdict per attack found in a screen channel

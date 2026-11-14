@@ -37,7 +37,7 @@ public:
         setUsingNativeTitleBar (true);
         setContentOwned (new MainComponent (options), true);
         setResizable (true, false);
-        setResizeLimits (1120, 800, 10000, 10000);
+        setResizeLimits (1000, 780, 10000, 10000);
         centreWithSize (getWidth(), getHeight());
         setVisible (true);
     }
@@ -65,6 +65,11 @@ public:
 
         if (snapshot >= 0 && snapshot + 1 < args.size())
             options.snapshotFile = juce::File::getCurrentWorkingDirectory().getChildFile (args[snapshot + 1]);
+
+        const int card = args.indexOf ("--card");
+
+        if (card >= 0 && card + 1 < args.size())
+            options.openCard = args[card + 1];
 
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
         window = std::make_unique<MainWindow> (options);
