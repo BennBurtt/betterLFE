@@ -291,7 +291,7 @@ void MainComponent::buildCards()
                   levelWeightToggle.setBounds (r.removeFromTop (24));
               });
 
-    populate (chainsCard, 600, 322, { &chainsView, &resetSessionButton },
+    populate (chainsCard, 560, 322, { &chainsView, &resetSessionButton },
               [this] (juce::Rectangle<int> r)
               {
                   resetSessionButton.setBounds (r.removeFromBottom (24).removeFromRight (110));
@@ -369,7 +369,7 @@ void MainComponent::resized()
 //==============================================================================
 void MainComponent::applyFormat()
 {
-    input.setChannelIndices (format().analysisIndices(), format().heightIndices());
+    input.setChannelIndices (format().analysisIndices());
 }
 
 void MainComponent::openDevices()
@@ -581,7 +581,7 @@ void MainComponent::timerCallback()
 
         // Playback chains, robustness, LFE dependence, overlap
         ChainsInfo info;
-        info.translation = simulator.compute (engine->result(), ! format().heightIndices().empty());
+        info.translation = simulator.compute (engine->result());
         info.outOfBandDb = engine->lfeOutOfBandDb();
         info.lfeLevelDb = engine->lfeLevelDb();
         info.sessionCorrelation = { { engine->globalCorrelation (0), engine->globalCorrelation (1), engine->globalCorrelation (2) } };

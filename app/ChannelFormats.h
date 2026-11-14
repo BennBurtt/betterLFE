@@ -21,18 +21,6 @@ struct ChannelFormat
         return -1;
     }
 
-    /** Positions of the height channels (Ltf, Rtf, Ltr, Rtr), if any. */
-    std::vector<int> heightIndices() const
-    {
-        std::vector<int> result;
-
-        for (const char* label : { "Ltf", "Rtf", "Ltr", "Rtr" })
-            if (const int i = indexOf (label); i >= 0)
-                result.push_back (i);
-
-        return result;
-    }
-
     /** Positions of L, C, R, LFE in the input stream. */
     std::array<int, 4> analysisIndices() const
     {

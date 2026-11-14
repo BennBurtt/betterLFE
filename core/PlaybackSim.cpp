@@ -45,14 +45,14 @@ namespace
         return h;
     }
 
-    struct Gains { cd screen, lfe, heights; };
+    struct Gains { cd screen, lfe; };
 
     Gains gainsFor (const ChainResult& chain, double hz)
     {
         const double lfeGain = std::pow (10.0, PlaybackSimulator::lfeInBandGainDb / 20.0);
 
         if (chain.kind == ChainResult::Kind::cinema)
-            return { 1.0, lfeGain * (chain.inverted ? -1.0 : 1.0) * std::polar (1.0, -2.0 * pi * hz * chain.delayMs * 0.001), 0.0 };
+            return { 1.0, lfeGain * (chain.inverted ? -1.0 : 1.0) * std::polar (1.0, -2.0 * pi * hz * chain.delayMs * 0.001) };
 
         const cd redirected = lr4AllPass (hz, chain.crossoverHz);
         cd lfe = lfeGain * lr4LowPass (hz, lfeLowPassHz);
@@ -60,7 +60,7 @@ namespace
         if (chain.encoderFilter)
             lfe *= encoderLowPass (hz);
 
-        return { redirected, lfe, chain.kind == ChainResult::Kind::atmosHome ? redirected : cd() };
+        return { redirected, lfe };
     }
 
     double toDb (double ratio)
@@ -69,10 +69,9 @@ namespace
     }
 }
 
-Translation PlaybackSimulator::compute (const Analysis& a, bool formatHasHeights) const
+Translation PlaybackSimulator::compute (const Analysis& a) const
 {
     Translation t;
-    t.hasHeights = formatHasHeights;
 
     const auto& m = a.matrix;
     const auto n = a.grid.size();
@@ -82,21 +81,15 @@ Translation PlaybackSimulator::compute (const Analysis& a, bool formatHasHeights
 
     const double lfeGain2 = std::pow (10.0, lfeInBandGainDb / 10.0);
 
-    // Cross terms with what chance could produce taken out
-    std::vector<cd> cFL (n), cFH (n), cHL (n);
+    // Cross term with what chance could produce taken out: nothing below
+    // 2 sigma of coherence (chance level), everything above 4 sigma.
+    std::vector<cd> cFL (n);
 
     for (size_t g = 0; g < n; ++g)
     {
-        // Nothing below 2 sigma (chance level), everything above 4 sigma
-        const auto keep = [] (std::complex<double> c, double pa, double pb, double sigma)
-        {
-            const double coherence = std::abs (c) / (std::sqrt (pa * pb) + 1e-60);
-            return c * std::clamp ((coherence - 2.0 * sigma) / (2.0 * sigma + 1e-12), 0.0, 1.0);
-        };
-
-        cFL[g] = keep (m.cFLfe[g], m.pF[g], m.pLfe[g], a.sigma[pairFacade][g]);
-        cFH[g] = keep (m.cFH[g], m.pF[g], m.pH[g], a.sigmaLfe[g]);
-        cHL[g] = keep (m.cHLfe[g], m.pH[g], m.pLfe[g], a.sigmaLfe[g]);
+        const double sigma = a.sigma[pairFacade][g];
+        const double coherence = std::abs (m.cFLfe[g]) / (std::sqrt (m.pF[g] * m.pLfe[g]) + 1e-60);
+        cFL[g] = m.cFLfe[g] * std::clamp ((coherence - 2.0 * sigma) / (2.0 * sigma + 1e-12), 0.0, 1.0);
     }
 
     // The chains
@@ -124,17 +117,6 @@ Translation PlaybackSimulator::compute (const Analysis& a, bool formatHasHeights
             t.chains.push_back (c);
         }
 
-    if (formatHasHeights)
-        for (bool encoder : { false, true })
-        {
-            ChainResult c;
-            c.kind = ChainResult::Kind::atmosHome;
-            c.crossoverHz = 80.0;
-            c.encoderFilter = encoder;
-            c.name = std::string ("Atmos home 80 Hz") + (encoder ? ", encoder filter" : "");
-            t.chains.push_back (c);
-        }
-
     // Integrate each chain over frequency. The grid is logarithmic, so each
     // point stands for a width proportional to its frequency.
     double referenceTotal = 0.0, weightTotal = 0.0;
@@ -151,12 +133,8 @@ Translation PlaybackSimulator::compute (const Analysis& a, bool formatHasHeights
                 continue;
 
             const auto gain = gainsFor (chain, hz);
-            const double incoherent = std::norm (gain.screen) * m.pF[g] + std::norm (gain.lfe) * m.pLfe[g]
-                                        + std::norm (gain.heights) * m.pH[g];
-            const double coherent = incoherent
-                                      + 2.0 * (gain.screen * std::conj (gain.lfe) * cFL[g]).real()
-                                      + 2.0 * (gain.screen * std::conj (gain.heights) * cFH[g]).real()
-                                      + 2.0 * (gain.heights * std::conj (gain.lfe) * cHL[g]).real();
+            const double incoherent = std::norm (gain.screen) * m.pF[g] + std::norm (gain.lfe) * m.pLfe[g];
+            const double coherent = incoherent + 2.0 * (gain.screen * std::conj (gain.lfe) * cFL[g]).real();
 
             sum += hz * std::max (coherent, 0.0);
             reference += hz * incoherent;

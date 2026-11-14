@@ -32,8 +32,7 @@
 namespace subguard
 {
 
-// chHeights is the sum of the height channels (silent when the format has none).
-enum Channel { chL = 0, chC, chR, chLFE, chHeights, numChannels };
+enum Channel { chL = 0, chC, chR, chLFE, numChannels };
 
 // Index of the L+C+R sum in the per-pair results (after L, C, R).
 constexpr int pairFacade = 3;
@@ -86,22 +85,18 @@ struct Analysis
     std::vector<double> grid;        // log frequency axis of what follows (Hz)
 
     // Indexed [pair][grid point]; pairs are L, C, R, facade, each against the LFE.
-    // Smoothed auto and cross spectra of the three groups that playback chains
-    // treat differently: F = L+C+R, the LFE and H = the height channels, on the
-    // grid above and at unity gain (no display trim, no LFE offset). cXY is the
-    // average of X.conj(Y). With these, the power of any filtered sum of the
-    // groups can be worked out without touching the audio again.
+    // Smoothed auto and cross spectra of the two groups that playback chains
+    // treat differently: F = L+C+R and the LFE, on the grid above and at unity
+    // gain (no display trim, no LFE offset). cFLfe is the average of
+    // F.conj(LFE). With these, the power of any filtered sum of the two can be
+    // worked out without touching the audio again.
     struct Matrix
     {
-        std::vector<double> pF, pLfe, pH, pL, pC, pR, reLC, reRC;
-        std::vector<std::complex<double>> cFLfe, cFH, cHLfe;
+        std::vector<double> pF, pLfe, pL, pC, pR, reLC, reRC;
+        std::vector<std::complex<double>> cFLfe;
     } matrix;
 
     double windowSeconds = 1.0;     // length of the analysis window
-
-    // Same meaning as sigma below, for pairs that do not involve a screen
-    // channel: based on how long the LFE itself has been playing.
-    std::vector<double> sigmaLfe;
 
     // correlation is level independent: it reads the same however quiet the LFE
     // is. interaction is the same quantity weighted by the level balance.
@@ -119,7 +114,7 @@ public:
     /** Clears all audio and statistics. */
     void reset();
 
-    /** Feeds interleaved audio frames ordered L, C, R, LFE, heights sum. */
+    /** Feeds interleaved audio frames ordered L, C, R, LFE. */
     void push (const float* interleaved, int numFrames);
 
     /** Updates the averages with the audio pushed since the last call.
@@ -176,7 +171,6 @@ private:
     std::vector<double> specPower;                        // [bin * 2]: facade, LFE
     std::vector<double> stats, now;                       // [bin * 13], see .cpp
     std::vector<double> m1, m2;                           // [grid * 4]
-    std::vector<double> m1Lfe, m2Lfe;                     // [grid]
     std::vector<double> workRe, workIm, twiddleRe, twiddleIm;
     std::array<std::vector<std::complex<double>>, numChannels> spectrum;
     std::vector<int> bitReverse;

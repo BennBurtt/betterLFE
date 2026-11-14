@@ -871,9 +871,10 @@ void ChainsView::paint (juce::Graphics& g)
         g.fillRoundedRectangle (box, 3.0f);
         g.setColour (juce::Colours::white);
         g.setFont (uiFont (12.5f, true));
-        g.drawText (db <= PlaybackSimulator::lossFloorDb + 0.05 ? juce::String::fromUTF8 ("\xe2\x89\xa4") + juce::String ((int) PlaybackSimulator::lossFloorDb)
-                                                                 : (db >= 0.0 ? "+" : "") + juce::String (db, 1),
-                    box, juce::Justification::centred);
+        const auto value = db <= PlaybackSimulator::lossFloorDb + 0.05
+                             ? juce::String::fromUTF8 ("\xe2\x89\xa4") + juce::String ((int) PlaybackSimulator::lossFloorDb)
+                             : (db >= 0.0 ? "+" : "") + juce::String (db, 1);
+        g.drawText (value + " dB", box, juce::Justification::centred);
     };
 
     const auto table = [&] (const juce::StringArray& columns, const juce::StringArray& rows,
@@ -902,16 +903,15 @@ void ChainsView::paint (juce::Graphics& g)
         area.removeFromTop (8.0f);
     };
 
-    heading ("Bass of each chain against the power sum, 20-120 Hz (dB)");
+    heading ("Bass level on each playback system, compared with LFE and screen simply added (20-120 Hz)");
 
     const double delays[] = { -5.0, -2.5, 0.0, 2.5, 5.0 };
     table ({ "-5 ms", "-2.5 ms", "0 ms", "+2.5 ms", "+5 ms" }, { "Cinema, sub in polarity", "Cinema, sub inverted" },
            [&] (int r, int c) { return find (ChainResult::Kind::cinema, delays[c], r == 1); });
 
     const double corners[] = { 60.0, 80.0, 100.0 };
-    table ({ "60 Hz", "80 Hz", "100 Hz", "Atmos 80 Hz" }, { "Bass managed", "+ encoder LFE filter" },
-           [&] (int r, int c) { return c < 3 ? find (ChainResult::Kind::bassManaged, corners[c], r == 1)
-                                             : find (ChainResult::Kind::atmosHome, 80.0, r == 1); });
+    table ({ "60 Hz", "80 Hz", "100 Hz" }, { "Bass managed", "+ encoder LFE filter" },
+           [&] (int r, int c) { return find (ChainResult::Kind::bassManaged, corners[c], r == 1); });
 
     // Read-outs
     const auto line = [&] (const juce::String& label, const juce::String& value, bool warn)

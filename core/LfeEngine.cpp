@@ -22,12 +22,11 @@ namespace
 
     // Layout of one row of the statistics: power of L, C, R, F, LFE, then the
     // real and imaginary parts of X.conj(LFE) for X = L, C, R, F.
-    constexpr int statCount = 20;
+    constexpr int statCount = 15;
     constexpr int statPower = 0, statRe = 5, statIm = 9;
 
-    // ...then what the playback-chain simulation needs: power of the heights,
-    // F.conj(H), H.conj(LFE) (real, imaginary), and Re of L.conj(C), R.conj(C).
-    constexpr int statHeights = 13, statFH = 14, statHLfe = 16, statLC = 18, statRC = 19;
+    // ...then, for the stereo downmix, the real parts of L.conj(C) and R.conj(C).
+    constexpr int statLC = 13, statRC = 14;
 
     constexpr double outOfBandHz = 120.0;
     constexpr double globalLoHz = 20.0, globalHiHz = 120.0;
@@ -289,17 +288,13 @@ void LfeEngine::configure (double windowSeconds)
     {
         auto& m = out.matrix;
 
-        for (auto* v : { &m.pF, &m.pLfe, &m.pH, &m.pL, &m.pC, &m.pR, &m.reLC, &m.reRC })
+        for (auto* v : { &m.pF, &m.pLfe, &m.pL, &m.pC, &m.pR, &m.reLC, &m.reRC })
             v->assign (gridPoints, 0.0);
 
-        for (auto* v : { &m.cFLfe, &m.cFH, &m.cHLfe })
-            v->assign (gridPoints, {});
+        m.cFLfe.assign (gridPoints, {});
     }
 
     out.windowSeconds = windowSec;
-    out.sigmaLfe.assign (gridPoints, 1.0);
-    m1Lfe.assign (gridPoints, 0.0);
-    m2Lfe.assign (gridPoints, 0.0);
     globalBinLo = globalBinHi = 0;
 
     for (size_t i = 0; i < nb; ++i)
@@ -444,8 +439,8 @@ bool LfeEngine::analyze (const Settings& settings)
         std::fill (workIm.begin(), workIm.end(), 0.0);
         fft();
 
-        const bool muted = c < chLFE && settings.mute[(size_t) c];
-        const double gain = muted ? 0.0 : (c == chLFE ? lfeGain : c == chHeights ? 1.0 : facadeGain);
+        const bool muted = (c != chLFE) && settings.mute[(size_t) c];
+        const double gain = muted ? 0.0 : (c == chLFE ? lfeGain : facadeGain);
 
         for (size_t i = 0; i < nb; ++i)
         {
@@ -488,20 +483,6 @@ bool LfeEngine::analyze (const Settings& settings)
         frameSeconds[p] = sum * sum / (squares + tiny) / fs;
     }
 
-    double frameSecondsLfe = 0.0;
-    {
-        double sum = 0.0, squares = 0.0;
-
-        for (int i = 0; i < nWin; ++i)
-        {
-            const double e = windowed[chLFE][(size_t) i] * windowed[chLFE][(size_t) i];
-            sum += e;
-            squares += e * e;
-        }
-
-        frameSecondsLfe = sum * sum / (squares + tiny) / fs;
-    }
-
     // Instantaneous statistics, then exponential averaging
     const double tauCorr = std::max (settings.tauCorrelation, 1e-3);
     const double aSpec = 1.0 - std::exp (-dt / std::max (settings.tauSpectrum, 1e-3));
@@ -526,16 +507,8 @@ bool LfeEngine::analyze (const Settings& settings)
 
         row[statPower + 4] = std::norm (lfe);
 
-        const auto heights = spectrum[chHeights][i];
-        const auto cross = [] (std::complex<double> a, std::complex<double> b) { return a * std::conj (b); };
-        const auto fh = cross (x[pairFacade], heights), hl = cross (heights, lfe);
-        row[statHeights] = std::norm (heights);
-        row[statFH] = fh.real();
-        row[statFH + 1] = fh.imag();
-        row[statHLfe] = hl.real();
-        row[statHLfe + 1] = hl.imag();
-        row[statLC] = cross (x[0], x[1]).real();
-        row[statRC] = cross (x[2], x[1]).real();
+        row[statLC] = (x[0] * std::conj (x[1])).real();
+        row[statRC] = (x[2] * std::conj (x[1])).real();
 
         // Whole-session polarity: no forgetting, weighted by energy and time
         if (i >= globalBinLo && i < globalBinHi)
@@ -584,30 +557,18 @@ bool LfeEngine::analyze (const Settings& settings)
 
         const double pl = sm[statPower + 4];
 
-        {
-            double& a1 = m1Lfe[g];
-            double& a2 = m2Lfe[g];
-            a1 += aCorr * (smNow[4] - a1);
-            a2 = a2 * m2Decay + smNow[4] * smNow[4] * dt / (tauCorr * tauCorr);
-            const double dof = bandwidth[g] * (a1 * a1 / (a2 + tiny) + frameSecondsLfe);
-            out.sigmaLfe[g] = std::min (1.0, 1.0 / std::sqrt (2.0 * std::max (dof, 0.5)));
-        }
-
         // Group spectra for the playback-chain simulation, back at unity gain
         {
             const double gf2 = facadeGain * facadeGain, gl = lfeGain;
             auto& m = out.matrix;
             m.pF[g] = sm[statPower + pairFacade] / gf2;
             m.pLfe[g] = pl / (gl * gl);
-            m.pH[g] = sm[statHeights];
             m.pL[g] = sm[statPower] / gf2;
             m.pC[g] = sm[statPower + 1] / gf2;
             m.pR[g] = sm[statPower + 2] / gf2;
             m.reLC[g] = sm[statLC] / gf2;
             m.reRC[g] = sm[statRC] / gf2;
             m.cFLfe[g] = std::complex<double> (sm[statRe + pairFacade], sm[statIm + pairFacade]) / (facadeGain * gl);
-            m.cFH[g] = std::complex<double> (sm[statFH], sm[statFH + 1]) / facadeGain;
-            m.cHLfe[g] = std::complex<double> (sm[statHLfe], sm[statHLfe + 1]) / gl;
         }
 
         for (int p = 0; p < numPairs; ++p)

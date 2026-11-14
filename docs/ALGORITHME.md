@@ -96,15 +96,14 @@ Répond à : *quand le LCR attaque, le LFE attaque-t-il en même temps ?*
 Tout ce qui suit utilise le LFE **tel qu'il est entendu**, soit 10 dB au-dessus
 d'un canal d'écran, quel que soit le réglage d'affichage.
 
-**Chaînes de lecture.** Chaque chaîne est un jeu de filtres appliqués à trois
-groupes avant leur somme : F (L+C+R), le LFE, H (canaux de hauteur). La
-puissance de la somme se déduit des spectres et inter-spectres déjà moyennés,
-sans refiltrer l'audio :
+**Chaînes de lecture.** Chaque chaîne est une paire de filtres, l'un appliqué à
+F (L+C+R), l'autre au LFE, avant leur somme. La puissance de la somme se déduit
+des spectres et inter-spectres déjà moyennés, sans refiltrer l'audio :
 
-`P = Σ Ga·conj(Gb)·Sab`
+`P = |Gf|²·Sff + |Gl|²·Sll + 2·Re(Gf·conj(Gl)·Sfl)`
 
 Elle est comparée à la **somme en puissance** (la même expression sans les
-termes croisés), c'est-à-dire au grave qu'on aurait si les groupes
+terme croisé), c'est-à-dire au grave qu'on aurait si le LFE et la façade
 n'interagissaient pas. Plusieurs dB en dessous : annulation.
 
 | Chaîne | Modèle |
@@ -112,16 +111,18 @@ n'interagissaient pas. Plusieurs dB en dessous : annulation.
 | Cinéma | somme acoustique écran + LFE ; sub décalé de −5, −2,5, 0, +2,5, +5 ms ; polarité normale ou inversée |
 | Bass management | canaux d'écran croisés vers le sub (Linkwitz-Riley 4ᵉ ordre à 60, 80 ou 100 Hz), LFE passe-bas 120 Hz ; somme électrique |
 | Filtre d'encodeur | idem avec un passe-bas raide à 120 Hz sur le LFE (Butterworth 8ᵉ ordre). C'est un modèle : le filtre LFE réel de Dolby Digital Plus n'est pas public |
-| Atmos domestique | bass management à 80 Hz qui redirige aussi les canaux de hauteur |
 
-Les termes croisés que le hasard seul peut produire sont retirés (effacés entre
+Le terme croisé que le hasard seul peut produire est retiré (effacé entre
 4σ et 2σ de cohérence) : des signaux sans rapport donnent exactement la somme
 en puissance.
 
-**Robustesse (0 à 100).** Écart entre la chaîne la plus forte et la plus faible,
-sur 20–120 Hz : `100 × (1 − écart / 12 dB)`. 100 : toutes les chaînes rendent
-le même grave. 0 : au moins 12 dB d'écart. Une annulation est comptée au plus à
-−24 dB.
+**Robustesse (0 à 100).** Pour chacune des 16 chaînes (10 cinéma, 6 domestiques),
+on a l'écart en dB entre son grave et la somme en puissance, sur 20–120 Hz.
+Le score ne regarde que la distance entre la meilleure et la pire :
+`100 × (1 − (max − min) / 12 dB)`, borné entre 0 et 100. 100 : toutes les
+chaînes rendent le même grave. 0 : au moins 12 dB d'écart. Une annulation est
+comptée au plus à −24 dB. Le score suit le réglage « Integration » et porte sur
+ce qui joue à l'instant, pas sur le film entier.
 
 **Dépendance au LFE.** Downmix stéréo du LCR sans LFE (`Lo = L + 0,707·C`,
 `Ro = R + 0,707·C`) : part de l'énergie de grave portée par le LFE, et perte en

@@ -1,12 +1,12 @@
 // Playback-chain simulation: what the bass of the mix becomes on different
 // reproduction systems. Portable C++17, no dependencies.
 //
-// Every chain is a set of filters applied to three groups of channels before
-// they are summed: F (L+C+R), the LFE and H (height channels). The power of
-// that sum follows from the smoothed auto and cross spectra the engine already
-// keeps, so nothing is re-filtered:
+// Every chain is a pair of filters, one applied to F (L+C+R) and one to the
+// LFE, before the two are summed. The power of that sum follows from the
+// smoothed auto and cross spectra the engine already keeps, so nothing is
+// re-filtered:
 //
-//   P = sum over groups a, b of  Ga . conj(Gb) . Sab
+//   P = |Gf|^2 Sff + |Gl|^2 Sll + 2 Re (Gf . conj(Gl) . Sfl)
 //
 // It is compared with the power sum (the same expression without the cross
 // terms), i.e. what the bass would be if the groups did not interact. A result
@@ -21,8 +21,6 @@
 //   Encoder        Same, with a steep 120 Hz low-pass on the LFE standing in for
 //                  the LFE filter of a Dolby Digital Plus encoder (a model: the
 //                  actual filter is not public).
-//   Atmos home     Bass management at 80 Hz that also redirects the height
-//                  channels to the subwoofer.
 //
 // Cross terms that chance alone could produce are removed first (faded out
 // between 4 and 2 sigma on the coherence), so unrelated signals score as
@@ -41,7 +39,7 @@ namespace subguard
 
 struct ChainResult
 {
-    enum class Kind { cinema, bassManaged, atmosHome };
+    enum class Kind { cinema, bassManaged };
 
     Kind kind = Kind::cinema;
     std::string name;
@@ -59,7 +57,6 @@ struct Translation
     static constexpr double bandEdges[4] = { 30.0, 60.0, 90.0, 120.0 };
 
     bool hasBass = false;               // false: silence, nothing below is meaningful
-    bool hasHeights = false;
 
     std::vector<ChainResult> chains;
     double worstChangeDb = 0.0;         // deepest loss among the chains
@@ -88,7 +85,7 @@ public:
     static constexpr double spreadForZeroDb = 12.0;     // spread at which the score reaches 0
     static constexpr double overlapWindowDb = 10.0;     // levels further apart than this do not overlap
 
-    Translation compute (const Analysis&, bool formatHasHeights) const;
+    Translation compute (const Analysis&) const;
 };
 
 } // namespace subguard

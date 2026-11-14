@@ -10,25 +10,20 @@
 namespace subguard
 {
 
-/** Real-time side of the app: picks L, C, R, LFE out of the device input, adds
-    the sum of the height channels, and hands these five signals to the message
-    thread through a lock-free FIFO. The audio thread never allocates, locks or
-    analyses anything. */
+/** Real-time side of the app: picks L, C, R, LFE out of the device input and
+    hands them to the message thread through a lock-free FIFO. The audio
+    thread never allocates, locks or analyses anything. */
 class AudioInput : public juce::AudioIODeviceCallback
 {
 public:
     AudioInput()  { setChannelIndices ({ { 0, 2, 1, 3 } }); }
 
-    static constexpr int frameSize = 5;      // L, C, R, LFE, heights sum
-    static constexpr int maxHeights = 4;
+    static constexpr int frameSize = 4;      // L, C, R, LFE
 
-    void setChannelIndices (const std::array<int, 4>& indices, const std::vector<int>& heights = {})
+    void setChannelIndices (const std::array<int, 4>& indices)
     {
         for (size_t i = 0; i < 4; ++i)
             channelIndex[i].store (indices[i]);
-
-        for (size_t i = 0; i < (size_t) maxHeights; ++i)
-            heightIndex[i].store (i < heights.size() ? heights[i] : -1);
     }
 
     /** Reads up to maxFrames interleaved frames of frameSize samples. Message thread only. */
@@ -79,14 +74,6 @@ public:
             source[i] = (index >= 0 && index < numInputs) ? input[index] : nullptr;
         }
 
-        const float* heights[maxHeights];
-
-        for (size_t i = 0; i < (size_t) maxHeights; ++i)
-        {
-            const int index = heightIndex[i].load (std::memory_order_relaxed);
-            heights[i] = (index >= 0 && index < numInputs) ? input[index] : nullptr;
-        }
-
         double energy = 0.0;
 
         for (int c = 0; c < numInputs; ++c)
@@ -111,18 +98,8 @@ public:
             float* dest = buffer.data() + (size_t) block.first * frameSize;
 
             for (int i = 0; i < block.second; ++i, ++pos, dest += frameSize)
-            {
                 for (size_t c = 0; c < 4; ++c)
                     dest[c] = source[c] != nullptr ? source[c][pos] : 0.0f;
-
-                float sum = 0.0f;
-
-                for (const float* h : heights)
-                    if (h != nullptr)
-                        sum += h[pos];
-
-                dest[4] = sum;
-            }
         }
     }
 
@@ -133,7 +110,6 @@ private:
     std::vector<float> buffer = std::vector<float> ((size_t) capacity * frameSize);
 
     std::array<std::atomic<int>, 4> channelIndex;
-    std::array<std::atomic<int>, maxHeights> heightIndex;
     std::atomic<double> rate { 48000.0 };
     std::atomic<int> startCount { 0 }, dropped { 0 };
     std::atomic<bool> running { false };

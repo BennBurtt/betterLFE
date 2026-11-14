@@ -118,17 +118,17 @@ namespace
 
     struct Scene
     {
-        Signal l, c, r, lfe, heights;
+        Signal l, c, r, lfe;
 
         size_t length() const
         {
-            return std::max (std::max (std::max (l.size(), c.size()), std::max (r.size(), lfe.size())), heights.size());
+            return std::max (std::max (l.size(), c.size()), std::max (r.size(), lfe.size()));
         }
 
         std::vector<float> interleaved() const
         {
             std::vector<float> d (length() * numChannels, 0.0f);
-            const Signal* src[numChannels] = { &l, &c, &r, &lfe, &heights };
+            const Signal* src[numChannels] = { &l, &c, &r, &lfe };
 
             for (int ch = 0; ch < numChannels; ++ch)
                 for (size_t i = 0; i < src[ch]->size(); ++i)
@@ -840,10 +840,10 @@ static void testPlaybackChains()
         s.l = n;
         s.lfe = scaled (n, asHeard);
         run (e, s);
-        const auto t = sim.compute (e.result(), false);
+        const auto t = sim.compute (e.result());
         const double inPhase = find (t, ChainResult::Kind::cinema, 0.0, false).changeDb;
         const double opposed = find (t, ChainResult::Kind::cinema, 0.0, true).changeDb;
-        check (t.hasBass && t.chains.size() == 16, "16 chains without height channels", (double) t.chains.size());
+        check (t.hasBass && t.chains.size() == 16, "16 chains", (double) t.chains.size());
         check (std::abs (inPhase - 3.0) < 0.5, "identical: cinema sum +3 dB", inPhase);
         check (opposed < -10.0, "identical: inverted subwoofer cancels", opposed);
         check (t.robustness < 5.0, "identical: robustness near 0", t.robustness);
@@ -859,7 +859,7 @@ static void testPlaybackChains()
         s.l = n;
         s.lfe = scaled (noise (10.0, 72), asHeard);
         run (e, s);
-        const auto t = sim.compute (e.result(), false);
+        const auto t = sim.compute (e.result());
         double worst = 0.0;
 
         for (const auto& c : t.chains)
@@ -875,7 +875,7 @@ static void testPlaybackChains()
         s.l = n;
         s.lfe = delayed (scaled (n, asHeard), 0.005);
         run (e, s);
-        const auto t = sim.compute (e.result(), false);
+        const auto t = sim.compute (e.result());
         check (std::abs (find (t, ChainResult::Kind::cinema, -5.0, false).changeDb - 3.0) < 0.5, "late LFE realigned by the chain: +3 dB",
                find (t, ChainResult::Kind::cinema, -5.0, false).changeDb);
         check (std::abs (find (t, ChainResult::Kind::cinema, 5.0, false).changeDb) < 0.7, "late LFE, 10 ms in total: about 0 dB",
@@ -889,24 +889,10 @@ static void testPlaybackChains()
             Scene s;
             (which == 0 ? s.lfe : s.c) = n;
             run (e, s);
-            const auto t = sim.compute (e.result(), false);
+            const auto t = sim.compute (e.result());
             check (t.robustness > 99.0, which == 0 ? "LFE alone: robustness 100" : "screen alone: robustness 100", t.robustness);
             check (which == 0 ? t.lfeShare > 0.99 : t.lfeShare < 0.01, "LFE share of the bass", t.lfeShare);
         }
-    }
-    {
-        // Heights that oppose the LFE: only the Atmos home chain sees it
-        LfeEngine e (sampleRate, 1.0, 0.0);
-        Scene s;
-        s.heights = n;
-        s.lfe = scaled (n, -asHeard);
-        run (e, s);
-        const auto t = sim.compute (e.result(), true);
-        check (t.chains.size() == 18, "18 chains with height channels", (double) t.chains.size());
-        check (find (t, ChainResult::Kind::atmosHome, 80.0, false).bandChangeDb[0] < -6.0, "Atmos home: heights against LFE cancel at 30-60 Hz",
-               find (t, ChainResult::Kind::atmosHome, 80.0, false).bandChangeDb[0]);
-        check (std::abs (find (t, ChainResult::Kind::cinema, 0.0, false).changeDb) < 0.3, "cinema chain ignores the heights",
-               find (t, ChainResult::Kind::cinema, 0.0, false).changeDb);
     }
     {
         // Band levels: a -20 dBFS sine at 75 Hz is -23 dBFS RMS in the 60-90 Hz band
@@ -915,7 +901,7 @@ static void testPlaybackChains()
         s.l = sine (75.0, -20.0, 6.0);
         s.lfe = sine (40.0, -40.0, 6.0);
         run (e, s);
-        const auto t = sim.compute (e.result(), false);
+        const auto t = sim.compute (e.result());
         check (std::abs (t.overlap[1].screenDb + 23.0) < 1.0, "band RMS level of a sine", t.overlap[1].screenDb);
         check (std::abs (t.overlap[0].lfeDb + 33.0) < 1.0, "LFE band level includes its +10 dB", t.overlap[0].lfeDb);
         check (t.overlap[1].amount < 0.01, "no overlap when only one of them plays in the band", t.overlap[1].amount);
