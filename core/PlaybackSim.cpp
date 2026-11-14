@@ -111,7 +111,7 @@ Translation PlaybackSimulator::compute (const Analysis& a) const
             c.kind = ChainResult::Kind::cinema;
             c.delayMs = delaySteps[d];
             c.inverted = pol == 1;
-            c.weight = cinemaShare * delayWeights[d] * polarityWeights[pol];
+            c.weight = delayRelevance[d];
             char text[96];
             std::snprintf (text, sizeof (text), "cinema, sub %+.1f ms%s", c.delayMs, c.inverted ? ", inverted" : "");
             c.name = text;
@@ -125,7 +125,7 @@ Translation PlaybackSimulator::compute (const Analysis& a) const
             c.kind = ChainResult::Kind::bassManaged;
             c.crossoverHz = corner;
             c.encoderFilter = encoder;
-            c.weight = homeShare / 6.0;
+            c.weight = homeRelevance;
             c.name = "bass managed " + std::to_string ((int) corner) + " Hz" + (encoder ? ", encoder filter" : "");
             t.chains.push_back (c);
         }
@@ -133,7 +133,7 @@ Translation PlaybackSimulator::compute (const Analysis& a) const
     {
         ChainResult c;
         c.kind = ChainResult::Kind::stereo;
-        c.weight = stereoShare;
+        c.weight = 0.0;     // rated apart, as the dependence on the LFE
         c.name = "stereo downmix without LFE";
         t.chains.push_back (c);
     }
@@ -170,7 +170,7 @@ Translation PlaybackSimulator::compute (const Analysis& a) const
     t.lfeBalanceDb = std::clamp (10.0 * std::log10 ((lfeTotal + 1e-60) / (screenTotal + 1e-60)), -60.0, 60.0);
 
     // Each system against the reference, band by band
-    double score = 0.0, worst = -1.0;
+    double worst = -1.0;
 
     for (size_t k = 0; k < t.chains.size(); ++k)
     {
@@ -224,19 +224,23 @@ Translation PlaybackSimulator::compute (const Analysis& a) const
         }
 
         chain.penalty = std::min (chain.penalty, 1.0);
-        score += chain.weight * chain.penalty;
-
-        if (chain.penalty > worst)
+        if (chain.kind == ChainResult::Kind::stereo)
         {
-            worst = chain.penalty;
+            t.downmixChangeDb = chain.changeDb;
+            t.dependence = dependenceCeiling * chain.penalty;
+        }
+        else if (chain.weight * chain.penalty > worst)
+        {
+            worst = chain.weight * chain.penalty;
             t.worstChain = (int) k;
         }
-
-        if (chain.kind == ChainResult::Kind::stereo)
-            t.downmixChangeDb = chain.changeDb;
     }
 
-    t.robustness = 100.0 * std::clamp (1.0 - score, 0.0, 1.0);
+    // Two separate risks. Interaction: the worst that a playback system does
+    // to the bass, since a mix is only as safe as its worst plausible outcome.
+    // Dependence: how much of the bass exists only in the LFE.
+    t.interaction = std::clamp (worst, 0.0, 1.0);
+    t.robustness = 100.0 * (1.0 - t.interaction) * (1.0 - t.dependence);
 
     // Overlap: RMS level of each group per band. A mean per-bin power over a
     // band of width W becomes an RMS power of mean . W . window / 3 (Hann window).

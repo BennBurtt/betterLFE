@@ -165,33 +165,58 @@ Pour chaque système et chaque bande (20–30, 30–60, 60–90, 90–120 Hz) :
 
 ### 3.6 Score
 
-`robustesse = 100 × (1 − Σ poids × pénalité)`, les poids valant 1 au total.
+Deux risques distincts, multipliés :
 
-| Famille | Part du score | Répartition interne |
-|---|---|---|
-| Cinéma | 10/18 | retard : 0 ms 40 %, en retard 20 % chacun, en avance 10 % chacun · polarité : 50 / 50 |
-| Bass management | 6/18 | six cas à parts égales |
-| Stéréo sans LFE | 2/18 | — |
+`robustesse = 100 × (1 − interaction) × (1 − dépendance)`
+
+**Interaction** : la plus forte valeur de `pertinence × pénalité` parmi les
+systèmes cinéma et bass management. C'est le pire cas, pas une moyenne : un mix
+qui s'annule sur un système plausible n'est pas rendu sûr par les systèmes où
+il survit.
+
+| Système | Pertinence |
+|---|---|
+| Cinéma, sub à 0 ms (les deux polarités) | 1 |
+| Cinéma, sub en retard (+2,5 et +5 ms) | 0,5 |
+| Cinéma, sub en avance (−5 et −2,5 ms) | 0,25 |
+| Bass management (les six cas) | 0,5 |
+
+**Dépendance** : `0,76 × pénalité de la stéréo sans LFE`, c'est-à-dire de ce que
+le grave perd partout où le LFE manque ou est mal réglé. Le plafond de 0,76
+exprime qu'un grave entièrement dans le LFE est grave (la salle seule en
+décide) sans valoir une annulation.
 
 Les chaînes sont calculées sur une moyenne de 0,2 s : le score réagit en 0,7 à
 0,8 s avec la fenêtre d'analyse de 1 s. Le chiffre affiché ne change que
 lorsqu'il a bougé d'au moins 1,5 point.
 
-### 3.7 Valeurs de référence
+### 3.7 Lecture du score et valeurs de référence
+
+| Score | Sens |
+|---|---|
+| 100 | Aucun système ne déplace le grave de façon audible, et il ne repose pas sur le LFE |
+| 50 | Dangereux mais passable : le pire système à l'heure déplace le grave à mi-chemin d'un doublement ou d'une division par deux de la sensation (environ 3,5 dB) |
+| 20–25 | Tout le grave est dans le LFE : la salle seule en décide |
+| 0 | Un système plausible annule le grave, ou le rend deux fois plus fort |
 
 Vérifiées par les tests, sur bruit large bande :
 
 | Mix | Robustesse |
 |---|---|
 | Façade seule, LFE muet | 100 |
-| LFE sans rapport avec la façade, aussi fort qu'elle à l'écoute | 93 |
-| LFE sans rapport, 6 dB au-dessus de la façade | 84 |
-| LFE seul | 83 |
-| LFE identique à la façade | 50 |
+| LFE sans rapport avec la façade, 10 dB sous elle à l'écoute | 100 |
+| LFE 10 dB sous la façade, à 30 % copié sur elle | 95 |
+| LFE sans rapport, aussi fort que la façade | 62 |
+| LFE 10 dB sous la façade, à 60 % copié sur elle | 60 |
+| LFE seul | 22 |
+| LFE sans rapport, 6 dB au-dessus de la façade | 22 |
+| LFE aussi fort que la façade, à 60 % copié sur elle | 17 |
+| LFE 10 dB sous la façade, entièrement copié sur elle | 8 |
+| LFE identique à la façade | 0 |
+| LFE identique mais en retard de 5 ms | 0 |
 
-Un LFE dominant mais décorrélé n'est sanctionné que par la stéréo sans LFE et
-par le bass management, soit une quinzaine de points au plus. Le témoin
-« niveau du LFE face à la façade » (3.9) le signale séparément.
+Même 10 dB sous la façade, un LFE entièrement copié sur elle fait varier le
+grave de près de 6 dB entre un sub en polarité et un sub inversé.
 
 ### 3.8 Ce qui est établi et ce qui est supposé
 
@@ -203,7 +228,7 @@ par le bass management, soit une quinzaine de points au plus. Le témoin
 | Filtres de bass management (Linkwitz-Riley 24 dB/oct) | Modèle courant, variable selon les appareils |
 | Filtre d'encodeur (Butterworth 8ᵉ ordre à 120 Hz) | Modèle : le filtre LFE de Dolby Digital Plus n'est pas public |
 | Étendue des défauts de salle (±5 ms, polarité) | **Hypothèse.** Le rapport SMPTE constate de larges écarts mais ses chiffres ne sont pas publics |
-| Tous les poids | **Hypothèse** d'ingénierie, suivant la consigne (0 ms ×2, avance ×0,5). Aucune statistique publiée sur la fréquence de ces défauts |
+| Pertinences des systèmes, plafond de dépendance (0,76) | **Hypothèse** d'ingénierie, suivant la consigne (0 ms ×2, avance ×0,5 ; LFE seul vers 20–25). Aucune statistique publiée sur la fréquence de ces défauts |
 | Acoustique de la salle (modes, places) | Non simulée |
 
 ### 3.9 Autres témoins

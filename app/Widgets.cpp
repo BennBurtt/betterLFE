@@ -947,19 +947,23 @@ void ChainsView::paint (juce::Graphics& g)
     const juce::String none = juce::String::fromUTF8 ("\xe2\x80\x94");
     juce::String worst;
 
-    if (t.hasBass && t.worstChain >= 0)
+    if (t.hasBass && t.worstChain >= 0 && t.interaction > 0.02)
     {
         const auto& c = t.chains[(size_t) t.worstChain];
-        worst = "     worst: " + juce::String (c.name) + " (" + (c.changeDb >= 0.0 ? "+" : "") + juce::String (c.changeDb, 1) + " dB)";
+        worst = "     worst system: " + juce::String (c.name) + " (" + (c.changeDb >= 0.0 ? "+" : "") + juce::String (c.changeDb, 1) + " dB)";
     }
 
-    line ("Robustness", t.hasBass ? juce::String (juce::roundToInt (t.robustness)) + " / 100" + worst : none,
+    line ("Robustness", t.hasBass ? juce::String (juce::roundToInt (t.robustness)) + " / 100     interaction x LFE dependence" : none,
           t.hasBass && t.robustness < 50.0);
 
-    line ("LFE level against the screen", t.hasBass ? (t.lfeBalanceDb >= 0.0 ? "+" : "") + juce::String (t.lfeBalanceDb, 1)
-                                                        + " dB as heard     LFE carries " + juce::String (juce::roundToInt (100.0 * t.lfeShare))
-                                                        + " % of the bass"
-                                                    : none,
+    line ("  from interaction", t.hasBass ? juce::String (juce::roundToInt (100.0 * (1.0 - t.interaction))) + " / 100" + worst : none,
+          t.hasBass && t.interaction > 0.5);
+
+    line ("  from LFE dependence", t.hasBass ? juce::String (juce::roundToInt (100.0 * (1.0 - t.dependence)))
+                                                 + " / 100     LFE " + (t.lfeBalanceDb >= 0.0 ? "+" : "") + juce::String (t.lfeBalanceDb, 1)
+                                                 + " dB against the screen, carries " + juce::String (juce::roundToInt (100.0 * t.lfeShare))
+                                                 + " % of the bass"
+                                             : none,
           t.hasBass && t.lfeBalanceDb > PlaybackSimulator::balanceWarningDb);
 
     const auto signedValue = [] (double v) { return (v >= 0.0 ? "+" : "") + juce::String (v, 2); };

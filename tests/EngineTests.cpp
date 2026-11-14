@@ -849,16 +849,14 @@ static void testPlaybackChains()
         s.c = n;
         run (e, s);
         const auto t = sim.compute (e.result());
-        double weights = 0.0, worst = 0.0;
+        double worst = 0.0;
 
         for (const auto& c : t.chains)
-        {
-            weights += c.weight;
             worst = std::max (worst, std::abs (c.changeDb));
-        }
 
         check (t.chains.size() == 17, "17 systems: 10 cinema, 6 bass managed, stereo", (double) t.chains.size());
-        check (std::abs (weights - 1.0) < 1e-12, "weights add up to 1", weights);
+        check (cinema (t, 0.0, false).weight == 1.0 && cinema (t, 0.0, true).weight == 1.0, "on time counts fully, either polarity", 0.0);
+        check (home (t, 80.0, false).weight == 0.5, "bass managed counts half", home (t, 80.0, false).weight);
         check (worst < 0.05, "screen alone: every system within 0.05 dB of the reference", worst);
         check (t.robustness > 99.9, "screen alone: robustness 100", t.robustness);
         check (t.lfeShare < 0.01, "screen alone: LFE carries nothing", t.lfeShare);
@@ -877,14 +875,18 @@ static void testPlaybackChains()
         check (std::abs (cinema (t, 5.0, true).changeDb) < 0.05, "LFE alone: delay and polarity change nothing", cinema (t, 5.0, true).changeDb);
         check (stereo (t).penalty > 0.999 && stereo (t).changeDb < -20.0, "LFE alone: nothing left in stereo", stereo (t).changeDb);
         check (t.lfeShare > 0.99, "LFE alone: it carries all the bass", t.lfeShare);
-        check (t.robustness < 100.0 * (1.0 - PlaybackSimulator::stereoShare) + 0.01, "LFE alone: the stereo loss is counted", t.robustness);
+        check (std::abs (t.dependence - PlaybackSimulator::dependenceCeiling) < 1e-9, "LFE alone: full dependence", t.dependence);
+        check (t.robustness > 18.0 && t.robustness < 26.0, "LFE alone: about 20-25, the room alone decides the bass", t.robustness);
 
-        double sum = 0.0;
+        double worst = 0.0;
 
         for (const auto& c : t.chains)
-            sum += c.weight * c.penalty;
+            if (c.kind != ChainResult::Kind::stereo)
+                worst = std::max (worst, c.weight * c.penalty);
 
-        check (std::abs (t.robustness - 100.0 * (1.0 - sum)) < 1e-9, "robustness = 100 (1 - sum of weight x penalty)", t.robustness);
+        check (std::abs (t.interaction - worst) < 1e-12, "interaction = worst relevance x penalty", t.interaction);
+        check (std::abs (t.robustness - 100.0 * (1.0 - t.interaction) * (1.0 - t.dependence)) < 1e-9,
+               "robustness = 100 (1 - interaction) (1 - dependence)", t.robustness);
         std::printf ("  LFE alone: robustness %.0f\n", t.robustness);
     }
     {
@@ -927,7 +929,7 @@ static void testPlaybackChains()
         check (cinema (t, 0.0, true).penalty > 0.99, "identical: that system gets the full penalty", cinema (t, 0.0, true).penalty);
         check (std::abs (stereo (t).changeDb + 6.02) < 0.5, "identical: stereo loses 6 dB", stereo (t).changeDb);
         check (t.overlap[1].amount > 0.9 && t.overlap[2].amount > 0.9, "equal levels: full overlap", t.overlap[1].amount);
-        check (t.robustness < 75.0, "identical: fragile", t.robustness);
+        check (t.robustness < 1.0, "identical: 0, an inverted subwoofer cancels the bass", t.robustness);
         check (t.worstChain >= 0 && t.chains[(size_t) t.worstChain].inverted, "identical: the worst system has the subwoofer inverted",
                (double) t.worstChain);
         std::printf ("  identical signals: robustness %.0f\n", t.robustness);
@@ -944,6 +946,7 @@ static void testPlaybackChains()
         check (std::abs (cinema (t, -5.0, false).changeDb - 5.04) < 0.6, "late LFE realigned by the system: +5.0 dB",
                cinema (t, -5.0, false).changeDb);
         check (std::abs (cinema (t, 0.0, false).changeDb) < 1e-9, "the reference itself reads 0 dB", cinema (t, 0.0, false).changeDb);
+        std::printf ("  LFE 5 ms late: robustness %.0f\n", t.robustness);
 
         // One band, one system, checked by hand: a level difference d in a band
         // costs (|d| - 1) / (D - 1), D being the dB that double loudness there
@@ -956,6 +959,39 @@ static void testPlaybackChains()
                                                          / (PlaybackSimulator::doublingDb[b] - 1.0), 0.0, 1.0));
 
         check (c.penalty <= expected + 1e-9, "a system's penalty never exceeds its worst band", c.penalty);
+    }
+    {
+        // Between the anchors: an LFE that only partly copies the screen, 10 dB
+        // below it when heard (so that dependence stays out of the way)
+        const auto other = noise (10.0, 74);
+        double previous = 101.0;
+
+        for (double shared : { 0.0, 0.3, 0.6, 1.0 })
+        {
+            LfeEngine e (sampleRate, 1.0, 0.0);
+            Scene s;
+            s.l = n;
+            s.lfe = scaled (sum (scaled (n, shared), scaled (other, std::sqrt (1.0 - shared * shared))), 0.316 * asHeard);
+            run (e, s);
+            const auto t = sim.compute (e.result());
+            check (t.robustness <= previous + 1.0, "the more the LFE copies the screen, the lower the score", t.robustness);
+            previous = t.robustness;
+            std::printf ("  LFE 10 dB below the screen, %.0f %% shared: robustness %.0f\n", 100.0 * shared, t.robustness);
+        }
+    }
+    {
+        // Equal levels, partly shared
+        const auto other = noise (10.0, 75);
+
+        for (double shared : { 0.3, 0.6 })
+        {
+            LfeEngine e (sampleRate, 1.0, 0.0);
+            Scene s;
+            s.l = n;
+            s.lfe = scaled (sum (scaled (n, shared), scaled (other, std::sqrt (1.0 - shared * shared))), asHeard);
+            run (e, s);
+            std::printf ("  LFE as loud as the screen, %.0f %% shared: robustness %.0f\n", 100.0 * shared, sim.compute (e.result()).robustness);
+        }
     }
     {
         // Band levels: a -20 dBFS sine at 75 Hz is -23 dBFS RMS in the 60-90 Hz band

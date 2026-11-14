@@ -34,9 +34,25 @@
 //
 //   0 up to 1 dB (about the just-noticeable level difference), 1 when the band
 //   is heard twice as loud or half as loud. Bands are combined by their share
-//   of the bass, systems by their weights:
+//   of the bass.
 //
-//     robustness = 100 . (1 - sum of weight . penalty)
+// SCORE
+//   Two risks, multiplied:
+//
+//     interaction = the highest (relevance x penalty) among the cinema and
+//                   bass-managed systems. The worst case, not an average: a
+//                   mix that cancels on one plausible system is not made safe
+//                   by the systems where it survives.
+//     dependence  = 0.76 x the penalty of the stereo downmix without LFE, i.e.
+//                   of what the bass loses wherever the LFE is missing or
+//                   wrongly set.
+//
+//     robustness = 100 . (1 - interaction) . (1 - dependence)
+//
+//   Anchors: screen alone 100; LFE identical to the screen 0 (an inverted
+//   subwoofer cancels it); LFE alone about 22 (the room alone decides the
+//   bass); 50 when the worst on-time system moves the bass half-way to a
+//   doubling or halving of loudness.
 //
 // Cross terms that chance alone could produce are removed first, so unrelated
 // signals are never reported as interacting.
@@ -67,7 +83,7 @@ struct ChainResult
     double changeDb = 0.0;                          // bass against the reference, 20-120 Hz
     std::array<double, numBands> bandChangeDb {};   // same per band (20-30, 30-60, 60-90, 90-120 Hz)
     double penalty = 0.0;                           // 0..1, perceptual, see the header comment
-    double weight = 0.0;                            // share in the score; all weights add up to 1
+    double weight = 0.0;                            // relevance, 0..1: how much this system counts
 };
 
 struct Translation
@@ -78,7 +94,9 @@ struct Translation
 
     std::vector<ChainResult> chains;
     double robustness = 100.0;          // 0..100
-    int worstChain = -1;                // index of the system with the highest penalty
+    double interaction = 0.0;           // 0..1, worst relevance x penalty among cinema and bass-managed systems
+    double dependence = 0.0;            // 0..1, how much the bass rests on the LFE
+    int worstChain = -1;                // the system behind `interaction`
 
     // LFE as heard (+10 dB) against the screen channels, 20-120 Hz
     double lfeBalanceDb = 0.0;          // positive: the LFE is the louder of the two
@@ -109,13 +127,17 @@ public:
     static constexpr double bandLimits[ChainResult::numBands + 1] = { 20.0, 30.0, 60.0, 90.0, 120.0 };
     static constexpr double doublingDb[ChainResult::numBands] = { 5.0, 5.5, 6.4, 6.9 };
 
-    // Weights. Their shape follows the brief (on-time counts double, early
-    // counts half); how often each fault really occurs in cinemas is not
-    // published, so the figures are engineering assumptions, kept in one place.
-    static constexpr double cinemaShare = 10.0 / 18.0, homeShare = 6.0 / 18.0, stereoShare = 2.0 / 18.0;
+    // Relevance of each system, following the brief: a subwoofer on time counts
+    // fully, late or bass-managed counts half, early counts a quarter. Both
+    // polarities count alike. How often each fault occurs in practice is not
+    // published, so these are engineering assumptions, kept in one place.
     static constexpr double delaySteps[5] = { -5.0, -2.5, 0.0, 2.5, 5.0 };
-    static constexpr double delayWeights[5] = { 0.10, 0.10, 0.40, 0.20, 0.20 };    // 0.5 : 0.5 : 2 : 1 : 1
-    static constexpr double polarityWeights[2] = { 0.5, 0.5 };                      // in polarity, inverted
+    static constexpr double delayRelevance[5] = { 0.25, 0.25, 1.0, 0.5, 0.5 };
+    static constexpr double homeRelevance = 0.5;
+
+    // With all the bass in the LFE the score stops at about 22: bad, since the
+    // room alone then decides the bass, but not as bad as a cancellation.
+    static constexpr double dependenceCeiling = 0.76;
 
     Translation compute (const Analysis&) const;
 };
