@@ -52,8 +52,7 @@ namespace
         const double lfeGain = std::pow (10.0, PlaybackSimulator::lfeInBandGainDb / 20.0);
 
         if (chain.kind == ChainResult::Kind::cinema)
-            return { 1.0, lfeGain * std::pow (10.0, chain.gainDb / 20.0) * (chain.inverted ? -1.0 : 1.0)
-                            * std::polar (1.0, -2.0 * pi * hz * chain.delayMs * 0.001) };
+            return { 1.0, lfeGain * (chain.inverted ? -1.0 : 1.0) * std::polar (1.0, -2.0 * pi * hz * chain.delayMs * 0.001) };
 
         cd lfe = lfeGain * lr4LowPass (hz, lfeLowPassHz);
 
@@ -107,19 +106,17 @@ Translation PlaybackSimulator::compute (const Analysis& a) const
     // The systems and their weights
     for (int pol = 0; pol < 2; ++pol)
         for (int d = 0; d < 5; ++d)
-            for (int gi = 0; gi < 5; ++gi)
-            {
-                ChainResult c;
-                c.kind = ChainResult::Kind::cinema;
-                c.gainDb = gainSteps[gi];
-                c.delayMs = delaySteps[d];
-                c.inverted = pol == 1;
-                c.weight = cinemaShare * gainWeights[gi] * delayWeights[d] * polarityWeights[pol];
-                char text[96];
-                std::snprintf (text, sizeof (text), "cinema, sub %+.0f dB, %+.1f ms%s", c.gainDb, c.delayMs, c.inverted ? ", inverted" : "");
-                c.name = text;
-                t.chains.push_back (c);
-            }
+        {
+            ChainResult c;
+            c.kind = ChainResult::Kind::cinema;
+            c.delayMs = delaySteps[d];
+            c.inverted = pol == 1;
+            c.weight = cinemaShare * delayWeights[d] * polarityWeights[pol];
+            char text[96];
+            std::snprintf (text, sizeof (text), "cinema, sub %+.1f ms%s", c.delayMs, c.inverted ? ", inverted" : "");
+            c.name = text;
+            t.chains.push_back (c);
+        }
 
     for (bool encoder : { false, true })
         for (double corner : { 60.0, 80.0, 100.0 })

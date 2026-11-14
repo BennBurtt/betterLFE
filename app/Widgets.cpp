@@ -834,10 +834,10 @@ void ChainsView::paint (juce::Graphics& g)
     auto area = getLocalBounds().toFloat();
     const float rowHeight = 22.0f, labelWidth = 150.0f;
 
-    const auto cinema = [&t] (double gainDb, double delayMs, bool inverted) -> const ChainResult*
+    const auto cinema = [&t] (double delayMs, bool inverted) -> const ChainResult*
     {
         for (const auto& c : t.chains)
-            if (c.kind == ChainResult::Kind::cinema && std::abs (c.gainDb - gainDb) < 1e-9 && std::abs (c.delayMs - delayMs) < 1e-9 && c.inverted == inverted)
+            if (c.kind == ChainResult::Kind::cinema && std::abs (c.delayMs - delayMs) < 1e-9 && c.inverted == inverted)
                 return &c;
 
         return nullptr;
@@ -925,11 +925,7 @@ void ChainsView::paint (juce::Graphics& g)
 
     const double delays[] = { -5.0, -2.5, 0.0, 2.5, 5.0 };
     table ({ "-5 ms", "-2.5 ms", "0 ms", "+2.5 ms", "+5 ms" }, { "Cinema, sub in polarity", "Cinema, sub inverted" },
-           [&] (int r, int c) { return cinema (0.0, delays[c], r == 1); });
-
-    const double levels[] = { -6.0, -3.0, 3.0, 6.0 };
-    table ({ "-6 dB", "-3 dB", "+3 dB", "+6 dB" }, { "Cinema, sub level off by" },
-           [&] (int, int c) { return cinema (levels[c], 0.0, false); });
+           [&] (int r, int c) { return cinema (delays[c], r == 1); });
 
     const double corners[] = { 60.0, 80.0, 100.0 };
     table ({ "60 Hz", "80 Hz", "100 Hz", "Stereo, no LFE" }, { "Bass managed", "+ encoder LFE filter" },

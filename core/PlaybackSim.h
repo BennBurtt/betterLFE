@@ -15,8 +15,8 @@
 //
 //     P = |Gf|^2 Sff + |Gl|^2 Sll + 2 Re (Gf . conj(Gl) . Sfl)
 //
-//   Cinema         subwoofer level off by -6, -3, 0, +3 or +6 dB, arriving
-//                  -5 .. +5 ms from the screen, in either polarity (50 cases).
+//   Cinema         subwoofer arriving -5 .. +5 ms from the screen, in either
+//                  polarity (10 cases).
 //   Bass managed   home system: screen channels crossed over to the subwoofer
 //                  (4th-order Linkwitz-Riley at 60, 80 or 100 Hz), LFE low-passed
 //                  at 120 Hz; with and without a steep 120 Hz low-pass standing
@@ -58,7 +58,6 @@ struct ChainResult
 
     Kind kind = Kind::cinema;
     std::string name;
-    double gainDb = 0.0;        // cinema: subwoofer level error
     double delayMs = 0.0;       // cinema: subwoofer offset
     bool inverted = false;      // cinema: subwoofer polarity
     double crossoverHz = 0.0;   // bass managed
@@ -103,7 +102,7 @@ public:
     static constexpr double changeLimitDb = 24.0;       // larger differences all count the same
     static constexpr double justNoticeableDb = 1.0;     // level difference that starts to count
     static constexpr double overlapWindowDb = 10.0;     // levels further apart than this do not overlap
-    static constexpr double balanceWarningDb = 6.0;     // LFE this far above the screen: at the mercy of the subwoofer level
+    static constexpr double balanceWarningDb = 6.0;     // LFE this far above the screen: the bass then follows each room's subwoofer level
 
     // Rating bands and, for each, the level change that doubles loudness
     // (ISO 226:2003 around 80 phon, at 25, 40, 70 and 100 Hz).
@@ -114,8 +113,6 @@ public:
     // counts half); how often each fault really occurs in cinemas is not
     // published, so the figures are engineering assumptions, kept in one place.
     static constexpr double cinemaShare = 10.0 / 18.0, homeShare = 6.0 / 18.0, stereoShare = 2.0 / 18.0;
-    static constexpr double gainSteps[5] = { -6.0, -3.0, 0.0, 3.0, 6.0 };
-    static constexpr double gainWeights[5] = { 0.10, 0.20, 0.40, 0.20, 0.10 };
     static constexpr double delaySteps[5] = { -5.0, -2.5, 0.0, 2.5, 5.0 };
     static constexpr double delayWeights[5] = { 0.10, 0.10, 0.40, 0.20, 0.20 };    // 0.5 : 0.5 : 2 : 1 : 1
     static constexpr double polarityWeights[2] = { 0.5, 0.5 };                      // in polarity, inverted

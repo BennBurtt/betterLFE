@@ -102,7 +102,7 @@ s'écarte-t-il de ce qui a été validé, selon la façon dont il est diffusé ?
 |---|---|---|
 | En salle, le canal sub est réglé 10 dB au-dessus d'un canal d'écran, dans sa bande | SMPTE RP 200 [9] | Le LFE est toujours compté à +10 dB |
 | Le même signal envoyé au centre et au sub doit donner +3 dB dans la bande commune | SMPTE RP 200 [9] | La norme suppose une addition en puissance : la relation de phase sub / écran n'est pas garantie |
-| La restitution varie largement d'une salle à l'autre, et surtout entre l'auditorium et la salle ; l'écart est sévère dans le grave | Rapport SMPTE TC-25CSS 2014 [10], Hill et al. [11] | Il faut simuler des erreurs de niveau, de retard et de polarité du sub |
+| La restitution varie largement d'une salle à l'autre, et surtout entre l'auditorium et la salle ; l'écart est sévère dans le grave | Rapport SMPTE TC-25CSS 2014 [10], Hill et al. [11] | Le retard et la polarité du sub sont simulés. Le niveau du sub ne l'est pas : il varie d'une salle à l'autre, et c'est précisément pourquoi le grave ne doit pas reposer sur le LFE |
 | Le LFE est optionnel à la réception, ne doit porter que de l'information d'appoint, et ne doit pas porter tout le grave du programme | UIT-R BS.775 [12] | Un LFE qui porte l'essentiel du grave est un défaut du mix |
 | Les downmix deux canaux omettent le LFE | Dolby [13], UIT-R BS.775 [12] | La stéréo sans LFE est un système de lecture à part entière |
 | Dans le grave, les courbes d'isosonie sont resserrées : de petits écarts de niveau s'entendent beaucoup | ISO 226:2003 [14], Leembruggen & Newell [15] | Les dB sont convertis en sensation, bande par bande |
@@ -146,7 +146,7 @@ en interaction.
 
 | Famille | Cas | Nombre |
 |---|---|---|
-| Cinéma | niveau du sub faux de −6, −3, 0, +3, +6 dB × sub décalé de −5, −2,5, 0, +2,5, +5 ms × polarité normale ou inversée | 50 |
+| Cinéma | sub décalé de −5, −2,5, 0, +2,5, +5 ms × polarité normale ou inversée | 10 |
 | Bass management | canaux d'écran croisés vers le sub (Linkwitz-Riley 4ᵉ ordre) à 60, 80, 100 Hz, LFE passe-bas 120 Hz ; avec et sans passe-bas raide à 120 Hz tenant lieu de filtre d'encodeur | 6 |
 | Stéréo | `Lo = L + 0,707·C`, `Ro = R + 0,707·C`, sans LFE | 1 |
 
@@ -169,7 +169,7 @@ Pour chaque système et chaque bande (20–30, 30–60, 60–90, 90–120 Hz) :
 
 | Famille | Part du score | Répartition interne |
 |---|---|---|
-| Cinéma | 10/18 | niveau : 0 dB 40 %, ±3 dB 20 % chacun, ±6 dB 10 % chacun · retard : 0 ms 40 %, en retard 20 % chacun, en avance 10 % chacun · polarité : 50 / 50 |
+| Cinéma | 10/18 | retard : 0 ms 40 %, en retard 20 % chacun, en avance 10 % chacun · polarité : 50 / 50 |
 | Bass management | 6/18 | six cas à parts égales |
 | Stéréo sans LFE | 2/18 | — |
 
@@ -184,15 +184,14 @@ Vérifiées par les tests, sur bruit large bande :
 | Mix | Robustesse |
 |---|---|
 | Façade seule, LFE muet | 100 |
-| LFE sans rapport avec la façade, aussi fort qu'elle à l'écoute | 85 |
-| LFE sans rapport, 6 dB au-dessus de la façade | 70 |
-| LFE seul | 63 |
-| LFE identique à la façade | 48 |
+| LFE sans rapport avec la façade, aussi fort qu'elle à l'écoute | 93 |
+| LFE sans rapport, 6 dB au-dessus de la façade | 84 |
+| LFE seul | 83 |
+| LFE identique à la façade | 50 |
 
-Pourquoi un LFE dominant coûte cher, même décorrélé : si le LFE porte une part
-`s` du grave, une erreur de `g` dB sur le sub déplace le grave total de
-`10·log10(1 − s + s·10^(g/10))`. À 6 dB au-dessus de la façade (`s` = 80 %), un
-sub réglé 6 dB trop fort donne +5,3 dB, et la stéréo perd 7 dB.
+Un LFE dominant mais décorrélé n'est sanctionné que par la stéréo sans LFE et
+par le bass management, soit une quinzaine de points au plus. Le témoin
+« niveau du LFE face à la façade » (3.9) le signale séparément.
 
 ### 3.8 Ce qui est établi et ce qui est supposé
 
@@ -203,7 +202,7 @@ sub réglé 6 dB trop fort donne +5,3 dB, et la stéréo perd 7 dB.
 | Seuil de 1 dB | Ordre de grandeur admis [16] ; plus fin à fort niveau |
 | Filtres de bass management (Linkwitz-Riley 24 dB/oct) | Modèle courant, variable selon les appareils |
 | Filtre d'encodeur (Butterworth 8ᵉ ordre à 120 Hz) | Modèle : le filtre LFE de Dolby Digital Plus n'est pas public |
-| Étendue des défauts de salle (±6 dB, ±5 ms, polarité) | **Hypothèse.** Le rapport SMPTE constate de larges écarts mais ses chiffres ne sont pas publics |
+| Étendue des défauts de salle (±5 ms, polarité) | **Hypothèse.** Le rapport SMPTE constate de larges écarts mais ses chiffres ne sont pas publics |
 | Tous les poids | **Hypothèse** d'ingénierie, suivant la consigne (0 ms ×2, avance ×0,5). Aucune statistique publiée sur la fréquence de ces défauts |
 | Acoustique de la salle (modes, places) | Non simulée |
 
@@ -211,7 +210,8 @@ sub réglé 6 dB trop fort donne +5,3 dB, et la stéréo perd 7 dB.
 
 **Niveau du LFE face à la façade.** Rapport des énergies sur 20–120 Hz, LFE
 compté à +10 dB. Signalé au-delà de +6 dB : le grave dépend alors du réglage du
-sub de chaque salle.
+sub de chaque salle, qui varie. Ce défaut de réglage n'est pas simulé dans le
+score ; il est la raison d'être de ce témoin.
 
 **Recouvrement.** Niveau RMS du LFE et de la somme d'écran par bande (30–60,
 60–90, 90–120 Hz). Les marques sous le spectre se réchauffent quand les deux
