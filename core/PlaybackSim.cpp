@@ -12,9 +12,9 @@ namespace
 {
     using cd = std::complex<double>;
     constexpr double pi = 3.14159265358979323846;
-    constexpr double sumLoHz = 20.0, sumHiHz = 120.0;
     constexpr double lfeLowPassHz = 120.0;
     constexpr double silencePower = 1e-19;      // mean per-bin power under which there is no bass at all
+    constexpr int numBands = ChainResult::numBands;
 
     // Fourth-order Linkwitz-Riley low-pass (two cascaded Butterworth sections)
     cd lr4LowPass (double hz, double corner)
@@ -52,20 +52,30 @@ namespace
         const double lfeGain = std::pow (10.0, PlaybackSimulator::lfeInBandGainDb / 20.0);
 
         if (chain.kind == ChainResult::Kind::cinema)
-            return { 1.0, lfeGain * (chain.inverted ? -1.0 : 1.0) * std::polar (1.0, -2.0 * pi * hz * chain.delayMs * 0.001) };
+            return { 1.0, lfeGain * std::pow (10.0, chain.gainDb / 20.0) * (chain.inverted ? -1.0 : 1.0)
+                            * std::polar (1.0, -2.0 * pi * hz * chain.delayMs * 0.001) };
 
-        const cd redirected = lr4AllPass (hz, chain.crossoverHz);
         cd lfe = lfeGain * lr4LowPass (hz, lfeLowPassHz);
 
         if (chain.encoderFilter)
             lfe *= encoderLowPass (hz);
 
-        return { redirected, lfe };
+        return { lr4AllPass (hz, chain.crossoverHz), lfe };
     }
 
-    double toDb (double ratio)
+    int bandOf (double hz)
     {
-        return std::max (PlaybackSimulator::lossFloorDb, 10.0 * std::log10 (std::max (ratio, 1e-12)));
+        for (int b = 0; b < numBands; ++b)
+            if (hz >= PlaybackSimulator::bandLimits[b] && hz < PlaybackSimulator::bandLimits[b + 1])
+                return b;
+
+        return -1;
+    }
+
+    double limited (double ratio)
+    {
+        return std::clamp (10.0 * std::log10 (std::max (ratio, 1e-12)),
+                           -PlaybackSimulator::changeLimitDb, PlaybackSimulator::changeLimitDb);
     }
 }
 
@@ -94,19 +104,22 @@ Translation PlaybackSimulator::compute (const Analysis& a) const
         cFL[g] = m.cFLfe[g] * std::clamp ((coherence - 2.0 * sigma) / (full - 2.0 * sigma), 0.0, 1.0);
     }
 
-    // The chains
-    for (bool inverted : { false, true })
-        for (double delay : { -5.0, -2.5, 0.0, 2.5, 5.0 })
-        {
-            ChainResult c;
-            c.kind = ChainResult::Kind::cinema;
-            c.delayMs = delay;
-            c.inverted = inverted;
-            char text[64];
-            std::snprintf (text, sizeof (text), "Cinema, sub %+.1f ms%s", delay, inverted ? ", inverted" : "");
-            c.name = text;
-            t.chains.push_back (c);
-        }
+    // The systems and their weights
+    for (int pol = 0; pol < 2; ++pol)
+        for (int d = 0; d < 5; ++d)
+            for (int gi = 0; gi < 5; ++gi)
+            {
+                ChainResult c;
+                c.kind = ChainResult::Kind::cinema;
+                c.gainDb = gainSteps[gi];
+                c.delayMs = delaySteps[d];
+                c.inverted = pol == 1;
+                c.weight = cinemaShare * gainWeights[gi] * delayWeights[d] * polarityWeights[pol];
+                char text[96];
+                std::snprintf (text, sizeof (text), "cinema, sub %+.0f dB, %+.1f ms%s", c.gainDb, c.delayMs, c.inverted ? ", inverted" : "");
+                c.name = text;
+                t.chains.push_back (c);
+            }
 
     for (bool encoder : { false, true })
         for (double corner : { 60.0, 80.0, 100.0 })
@@ -115,106 +128,118 @@ Translation PlaybackSimulator::compute (const Analysis& a) const
             c.kind = ChainResult::Kind::bassManaged;
             c.crossoverHz = corner;
             c.encoderFilter = encoder;
-            c.name = "Bass managed " + std::to_string ((int) corner) + " Hz" + (encoder ? ", encoder filter" : "");
+            c.weight = homeShare / 6.0;
+            c.name = "bass managed " + std::to_string ((int) corner) + " Hz" + (encoder ? ", encoder filter" : "");
             t.chains.push_back (c);
         }
 
-    // Integrate each chain over frequency. The grid is logarithmic, so each
-    // point stands for a width proportional to its frequency.
-    double referenceTotal = 0.0, weightTotal = 0.0;
-
-    for (auto& chain : t.chains)
     {
-        double sum = 0.0, reference = 0.0, bandSum[3] = {}, bandReference[3] = {};
-
-        for (size_t g = 0; g < n; ++g)
-        {
-            const double hz = a.grid[g];
-
-            if (hz < sumLoHz || hz > sumHiHz)
-                continue;
-
-            const auto gain = gainsFor (chain, hz);
-            const double incoherent = std::norm (gain.screen) * m.pF[g] + std::norm (gain.lfe) * m.pLfe[g];
-            const double coherent = incoherent + 2.0 * (gain.screen * std::conj (gain.lfe) * cFL[g]).real();
-
-            sum += hz * std::max (coherent, 0.0);
-            reference += hz * incoherent;
-
-            for (int b = 0; b < 3; ++b)
-                if (hz >= Translation::bandEdges[b] && hz < Translation::bandEdges[b + 1])
-                {
-                    bandSum[b] += hz * std::max (coherent, 0.0);
-                    bandReference[b] += hz * incoherent;
-                }
-        }
-
-        chain.changeDb = reference > 0.0 ? toDb (sum / reference) : 0.0;
-
-        for (size_t b = 0; b < 3; ++b)
-            chain.bandChangeDb[b] = bandReference[b] > 0.0 ? toDb (bandSum[b] / bandReference[b]) : 0.0;
-
-        if (&chain == &t.chains.front())
-            referenceTotal = reference;
+        ChainResult c;
+        c.kind = ChainResult::Kind::stereo;
+        c.weight = stereoShare;
+        c.name = "stereo downmix without LFE";
+        t.chains.push_back (c);
     }
 
-    for (size_t g = 0; g < n; ++g)
-        if (a.grid[g] >= sumLoHz && a.grid[g] <= sumHiHz)
-            weightTotal += a.grid[g];
+    // Reference: screen plus LFE 10 dB up, on time and in polarity. The grid
+    // is logarithmic, so each point stands for a width proportional to its
+    // frequency.
+    double reference[numBands] = {}, referenceTotal = 0.0, weightTotal = 0.0;
+    double screenTotal = 0.0, lfeTotal = 0.0;
 
-    t.hasBass = weightTotal > 0.0 && referenceTotal / weightTotal > silencePower;
+    for (size_t g = 0; g < n; ++g)
+    {
+        const double hz = a.grid[g];
+        const int b = bandOf (hz);
+
+        if (b < 0)
+            continue;
+
+        const double lfe = lfeGain2 * m.pLfe[g];
+        const double power = std::max (0.0, m.pF[g] + lfe + 2.0 * std::sqrt (lfeGain2) * cFL[g].real());
+        reference[b] += hz * power;
+        referenceTotal += hz * power;
+        weightTotal += hz;
+        screenTotal += hz * m.pF[g];
+        lfeTotal += hz * lfe;
+    }
+
+    t.hasBass = weightTotal > 0.0 && (screenTotal + lfeTotal) / weightTotal > silencePower;
 
     if (! t.hasBass)
         return t;
 
-    // Stereo downmix without the LFE: Lo = L + 0.707 C, Ro = R + 0.707 C
+    t.lfeShare = lfeTotal / (lfeTotal + screenTotal + 1e-60);
+    t.lfeBalanceDb = std::clamp (10.0 * std::log10 ((lfeTotal + 1e-60) / (screenTotal + 1e-60)), -60.0, 60.0);
+
+    // Each system against the reference, band by band
+    double score = 0.0, worst = -1.0;
+
+    for (size_t k = 0; k < t.chains.size(); ++k)
     {
-        double downmix = 0.0, lfe = 0.0;
+        auto& chain = t.chains[k];
+        double band[numBands] = {}, total = 0.0;
 
         for (size_t g = 0; g < n; ++g)
         {
             const double hz = a.grid[g];
+            const int b = bandOf (hz);
 
-            if (hz < sumLoHz || hz > sumHiHz)
+            if (b < 0)
                 continue;
 
-            downmix += hz * std::max (0.0, m.pL[g] + m.pC[g] + m.pR[g] + std::sqrt (2.0) * (m.reLC[g] + m.reRC[g]));
-            lfe += hz * lfeGain2 * m.pLfe[g];
+            double power;
+
+            if (chain.kind == ChainResult::Kind::stereo)
+            {
+                // Lo = L + 0.707 C, Ro = R + 0.707 C, no LFE
+                power = m.pL[g] + m.pC[g] + m.pR[g] + std::sqrt (2.0) * (m.reLC[g] + m.reRC[g]);
+            }
+            else
+            {
+                const auto gain = gainsFor (chain, hz);
+                power = std::norm (gain.screen) * m.pF[g] + std::norm (gain.lfe) * m.pLfe[g]
+                          + 2.0 * (gain.screen * std::conj (gain.lfe) * cFL[g]).real();
+            }
+
+            band[b] += hz * std::max (power, 0.0);
+            total += hz * std::max (power, 0.0);
         }
 
-        t.lfeShare = lfe / (lfe + downmix + 1e-60);
-        t.downmixChangeDb = std::max (-60.0, 10.0 * std::log10 (std::max (1.0 - t.lfeShare, 1e-6)));
+        chain.changeDb = limited ((total + 1e-60) / (referenceTotal + 1e-60));
+        chain.penalty = 0.0;
+
+        for (int b = 0; b < numBands; ++b)
+        {
+            if (reference[b] <= 0.0 && band[b] <= 0.0)
+                continue;
+
+            chain.bandChangeDb[(size_t) b] = limited ((band[b] + 1e-60) / (reference[b] + 1e-60));
+
+            // What the band is worth: its share of the reference bass, or of
+            // this system's bass when the system has some where the reference
+            // had almost none.
+            const double share = std::max (reference[b] / (referenceTotal + 1e-60),
+                                           band[b] / (std::max (total, referenceTotal) + 1e-60));
+            const double rated = std::clamp ((std::abs (chain.bandChangeDb[(size_t) b]) - justNoticeableDb)
+                                               / (doublingDb[b] - justNoticeableDb), 0.0, 1.0);
+            chain.penalty += share * rated;
+        }
+
+        chain.penalty = std::min (chain.penalty, 1.0);
+        score += chain.weight * chain.penalty;
+
+        if (chain.penalty > worst)
+        {
+            worst = chain.penalty;
+            t.worstChain = (int) k;
+        }
+
+        if (chain.kind == ChainResult::Kind::stereo)
+            t.downmixChangeDb = chain.changeDb;
     }
 
-    // Robustness: one score per chain, 100 when its bass is exactly the power
-    // sum and 0 when it is scoreZeroDb away (louder or quieter), then a
-    // weighted average. The nominal alignment counts double, a subwoofer that
-    // arrives early counts half, the stereo downmix counts double.
-    double weighted = 0.0, weights = 0.0, lowest = 1e9, highest = -1e9;
-
-    for (auto& chain : t.chains)
-    {
-        chain.weight = 1.0;
-
-        if (chain.kind == ChainResult::Kind::cinema)
-            chain.weight = chain.delayMs == 0.0 ? nominalWeight : (chain.delayMs < 0.0 ? earlyWeight : 1.0);
-
-        chain.score = 100.0 * std::clamp (1.0 - std::abs (chain.changeDb) / scoreZeroDb, 0.0, 1.0);
-        weighted += chain.weight * chain.score;
-        weights += chain.weight;
-        lowest = std::min (lowest, chain.changeDb);
-        highest = std::max (highest, chain.changeDb);
-    }
-
-    t.worstChangeDb = lowest;
-    t.spreadDb = highest - lowest;
-    // The stereo downmix without the LFE is one more way the mix gets played:
-    // what goes missing there counts like a loss on any other system.
-    t.downmixScore = 100.0 * std::clamp (1.0 - std::abs (t.downmixChangeDb) / scoreZeroDb, 0.0, 1.0);
-    weighted += downmixWeight * t.downmixScore;
-    weights += downmixWeight;
-
-    t.robustness = weighted / weights;
+    t.robustness = 100.0 * std::clamp (1.0 - score, 0.0, 1.0);
 
     // Overlap: RMS level of each group per band. A mean per-bin power over a
     // band of width W becomes an RMS power of mean . W . window / 3 (Hann window).

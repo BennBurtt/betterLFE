@@ -91,58 +91,127 @@ Répond à : *quand le LCR attaque, le LFE attaque-t-il en même temps ?*
 
    2,5 ms est un quart de période à 100 Hz.
 
-## 3. Chaînes de lecture, robustesse et témoins
+## 3. Robustesse du grave : systèmes de lecture et score
 
-Tout ce qui suit utilise le LFE **tel qu'il est entendu**, soit 10 dB au-dessus
-d'un canal d'écran, quel que soit le réglage d'affichage.
+**Question posée :** une fois sorti de l'auditorium, de combien le grave du mix
+s'écarte-t-il de ce qui a été validé, selon la façon dont il est diffusé ?
 
-**Chaînes de lecture.** Chaque chaîne est une paire de filtres, l'un appliqué à
-F (L+C+R), l'autre au LFE, avant leur somme. La puissance de la somme se déduit
-des spectres et inter-spectres déjà moyennés, sans refiltrer l'audio :
+### 3.1 Ce que disent les normes et la littérature
+
+| Fait | Source | Conséquence dans l'algorithme |
+|---|---|---|
+| En salle, le canal sub est réglé 10 dB au-dessus d'un canal d'écran, dans sa bande | SMPTE RP 200 [9] | Le LFE est toujours compté à +10 dB |
+| Le même signal envoyé au centre et au sub doit donner +3 dB dans la bande commune | SMPTE RP 200 [9] | La norme suppose une addition en puissance : la relation de phase sub / écran n'est pas garantie |
+| La restitution varie largement d'une salle à l'autre, et surtout entre l'auditorium et la salle ; l'écart est sévère dans le grave | Rapport SMPTE TC-25CSS 2014 [10], Hill et al. [11] | Il faut simuler des erreurs de niveau, de retard et de polarité du sub |
+| Le LFE est optionnel à la réception, ne doit porter que de l'information d'appoint, et ne doit pas porter tout le grave du programme | UIT-R BS.775 [12] | Un LFE qui porte l'essentiel du grave est un défaut du mix |
+| Les downmix deux canaux omettent le LFE | Dolby [13], UIT-R BS.775 [12] | La stéréo sans LFE est un système de lecture à part entière |
+| Dans le grave, les courbes d'isosonie sont resserrées : de petits écarts de niveau s'entendent beaucoup | ISO 226:2003 [14], Leembruggen & Newell [15] | Les dB sont convertis en sensation, bande par bande |
+| Un écart de niveau commence à s'entendre vers 1 dB | psychoacoustique classique [16] | En dessous de 1 dB, aucune pénalité |
+
+### 3.2 Des dB à la sensation (ISO 226:2003)
+
+La sonie double tous les 10 phones. À 1 kHz cela fait 10 dB ; dans le grave,
+bien moins. Calcul à partir de la formule et des paramètres de la norme, autour
+de 80 phones :
+
+| Fréquence | dB pour doubler (ou diviser par deux) la sensation |
+|---|---|
+| 25 Hz | 5,0 dB |
+| 40 Hz | 5,5 dB |
+| 63 Hz | 6,2 dB |
+| 80 Hz | 6,5 dB |
+| 100 Hz | 6,9 dB |
+| 1 000 Hz | 10,0 dB |
+
+**Un écart de 6 dB sur le grave est donc entendu comme un grave deux fois plus
+fort ou deux fois plus faible.** C'est le fondement chiffré de la règle « plus
+de 6 dB, c'est grave ».
+
+### 3.3 Référence
+
+Le mix tel qu'il est entendu en auditorium calibré : canaux d'écran, plus LFE à
++10 dB, sub à l'heure et en polarité. Tout est mesuré par rapport à elle.
+
+### 3.4 Systèmes simulés
+
+Chaque système est une paire de filtres, l'un appliqué à F (L+C+R), l'autre au
+LFE, avant leur somme. La puissance de la somme se déduit des spectres et
+inter-spectres déjà mesurés, sans refiltrer l'audio :
 
 `P = |Gf|²·Sff + |Gl|²·Sll + 2·Re(Gf·conj(Gl)·Sfl)`
 
-Elle est comparée à la **somme en puissance** (la même expression sans les
-terme croisé), c'est-à-dire au grave qu'on aurait si le LFE et la façade
-n'interagissaient pas. Plusieurs dB en dessous : annulation.
+Le terme croisé que le hasard seul peut produire est d'abord retiré (effacé
+entre 3σ et 2σ de cohérence) : des signaux sans rapport ne sont jamais déclarés
+en interaction.
 
-| Chaîne | Modèle |
+| Famille | Cas | Nombre |
+|---|---|---|
+| Cinéma | niveau du sub faux de −6, −3, 0, +3, +6 dB × sub décalé de −5, −2,5, 0, +2,5, +5 ms × polarité normale ou inversée | 50 |
+| Bass management | canaux d'écran croisés vers le sub (Linkwitz-Riley 4ᵉ ordre) à 60, 80, 100 Hz, LFE passe-bas 120 Hz ; avec et sans passe-bas raide à 120 Hz tenant lieu de filtre d'encodeur | 6 |
+| Stéréo | `Lo = L + 0,707·C`, `Ro = R + 0,707·C`, sans LFE | 1 |
+
+### 3.5 Note d'un système
+
+Pour chaque système et chaque bande (20–30, 30–60, 60–90, 90–120 Hz) :
+
+1. `écart = niveau du système − niveau de la référence`, en dB, borné à ±24 dB.
+2. `pénalité de bande = borne((|écart| − 1 dB) / (D − 1 dB), 0, 1)`, avec `D` le
+   nombre de dB qui double la sonie dans cette bande : 5,0 ; 5,5 ; 6,4 ; 6,9.
+   Zéro jusqu'à 1 dB, 1 quand la bande est entendue deux fois plus forte ou
+   deux fois plus faible.
+3. `pénalité du système = Σ part de la bande × pénalité de bande`, la part étant
+   celle de la bande dans le grave de la référence. Juger par bande évite
+   qu'une annulation à 40 Hz soit masquée par du niveau à 100 Hz.
+
+### 3.6 Score
+
+`robustesse = 100 × (1 − Σ poids × pénalité)`, les poids valant 1 au total.
+
+| Famille | Part du score | Répartition interne |
+|---|---|---|
+| Cinéma | 10/18 | niveau : 0 dB 40 %, ±3 dB 20 % chacun, ±6 dB 10 % chacun · retard : 0 ms 40 %, en retard 20 % chacun, en avance 10 % chacun · polarité : 50 / 50 |
+| Bass management | 6/18 | six cas à parts égales |
+| Stéréo sans LFE | 2/18 | — |
+
+Les chaînes sont calculées sur une moyenne de 0,2 s : le score réagit en 0,7 à
+0,8 s avec la fenêtre d'analyse de 1 s. Le chiffre affiché ne change que
+lorsqu'il a bougé d'au moins 1,5 point.
+
+### 3.7 Valeurs de référence
+
+Vérifiées par les tests, sur bruit large bande :
+
+| Mix | Robustesse |
 |---|---|
-| Cinéma | somme acoustique écran + LFE ; sub décalé de −5, −2,5, 0, +2,5, +5 ms ; polarité normale ou inversée |
-| Bass management | canaux d'écran croisés vers le sub (Linkwitz-Riley 4ᵉ ordre à 60, 80 ou 100 Hz), LFE passe-bas 120 Hz ; somme électrique |
-| Filtre d'encodeur | idem avec un passe-bas raide à 120 Hz sur le LFE (Butterworth 8ᵉ ordre). C'est un modèle : le filtre LFE réel de Dolby Digital Plus n'est pas public |
+| Façade seule, LFE muet | 100 |
+| LFE sans rapport avec la façade, aussi fort qu'elle à l'écoute | 85 |
+| LFE sans rapport, 6 dB au-dessus de la façade | 70 |
+| LFE seul | 63 |
+| LFE identique à la façade | 48 |
 
-Le terme croisé que le hasard seul peut produire est retiré (effacé entre
-3σ et 2σ de cohérence) : des signaux sans rapport donnent exactement la somme
-en puissance.
+Pourquoi un LFE dominant coûte cher, même décorrélé : si le LFE porte une part
+`s` du grave, une erreur de `g` dB sur le sub déplace le grave total de
+`10·log10(1 − s + s·10^(g/10))`. À 6 dB au-dessus de la façade (`s` = 80 %), un
+sub réglé 6 dB trop fort donne +5,3 dB, et la stéréo perd 7 dB.
 
-**Robustesse (0 à 100).** Chacune des 16 chaînes (10 cinéma, 6 domestiques),
-plus le downmix stéréo sans LFE, reçoit sa propre note d'après son écart au
-grave attendu (la somme en puissance ; pour le downmix, le mix complet), sur
-20–120 Hz : `100 × (1 − |écart| / 6 dB)`, bornée entre 0 et 100. Un écart nul
-vaut 100 ; 6 dB de perte **ou de gain** valent 0. Le score est la moyenne
-pondérée de ces notes :
+### 3.8 Ce qui est établi et ce qui est supposé
 
-| Chaîne | Poids |
+| Élément | Statut |
 |---|---|
-| Cinéma, sub à 0 ms (les deux polarités) | 2 |
-| Cinéma, sub en avance (−5 et −2,5 ms) | 0,5 |
-| Cinéma, sub en retard (+2,5 et +5 ms) | 1 |
-| Bass management (60, 80, 100 Hz, avec et sans filtre d'encodeur) | 1 |
-| Downmix stéréo sans LFE (dépendance au LFE) | 2 |
+| LFE à +10 dB, omission du LFE en downmix, rôle d'appoint du LFE | Normes [9][12][13] |
+| Conversion dB → sensation (5,0 à 6,9 dB par doublement) | Calculé depuis ISO 226:2003 [14] |
+| Seuil de 1 dB | Ordre de grandeur admis [16] ; plus fin à fort niveau |
+| Filtres de bass management (Linkwitz-Riley 24 dB/oct) | Modèle courant, variable selon les appareils |
+| Filtre d'encodeur (Butterworth 8ᵉ ordre à 120 Hz) | Modèle : le filtre LFE de Dolby Digital Plus n'est pas public |
+| Étendue des défauts de salle (±6 dB, ±5 ms, polarité) | **Hypothèse.** Le rapport SMPTE constate de larges écarts mais ses chiffres ne sont pas publics |
+| Tous les poids | **Hypothèse** d'ingénierie, suivant la consigne (0 ms ×2, avance ×0,5). Aucune statistique publiée sur la fréquence de ces défauts |
+| Acoustique de la salle (modes, places) | Non simulée |
 
-Le score est quasi instantané : les chaînes sont calculées sur une moyenne de
-0,2 s, indépendante du réglage « Integration ». Le temps de réaction reste
-d'environ 0,8 s avec la fenêtre d'analyse de 1 s (0,5 s en mode « Fast ») :
-il faut que le son ait rempli la fenêtre. Le chiffre affiché ne change que
-lorsqu'il a bougé d'au moins 1,5 point, pour rester lisible.
+### 3.9 Autres témoins
 
-Comme beaucoup de chaînes se moyennent, un LFE strictement identique à la
-façade obtient environ 60, pas 0.
-
-**Dépendance au LFE.** Downmix stéréo du LCR sans LFE (`Lo = L + 0,707·C`,
-`Ro = R + 0,707·C`) : part de l'énergie de grave portée par le LFE, et perte en
-dB quand il disparaît. Signalé au-delà de 70 %.
+**Niveau du LFE face à la façade.** Rapport des énergies sur 20–120 Hz, LFE
+compté à +10 dB. Signalé au-delà de +6 dB : le grave dépend alors du réglage du
+sub de chaque salle.
 
 **Recouvrement.** Niveau RMS du LFE et de la somme d'écran par bande (30–60,
 60–90, 90–120 Hz). Les marques sous le spectre se réchauffent quand les deux
@@ -187,9 +256,8 @@ ressemble au-delà du seuil ; avec un LFE sans rapport, rien n'est affiché.
 - Tout en bas (5–15 Hz), la résolution est limitée par la durée de la fenêtre :
   utiliser le mode « Ultra (2 s) » pour cette zone.
 - Les surrounds ne sont pas analysés, ni redirigés dans les chaînes simulées.
-- Les chaînes de lecture sont des modèles électriques ; l'acoustique d'une salle
-  n'est pas simulée. Les seuils des témoins (70 %, −0,3, 6 dB) sont des choix de
-  conception.
+- Les systèmes de lecture sont des modèles électriques ; l'acoustique d'une
+  salle n'est pas simulée. Voir 3.8 pour ce qui est établi et ce qui est supposé.
 
 ## Références
 
@@ -210,3 +278,18 @@ ressemble au-delà du seuil ; avec un LFE sans rapport, rien n'est affiché.
    vol. 24, 1976.
 8. G. C. Carter, « Coherence and time delay estimation », *Proc. IEEE*,
    vol. 75, 1987.
+9. SMPTE RP 200, *Relative and Absolute Sound Pressure Levels for
+   Motion-Picture Multichannel Sound Systems*.
+10. SMPTE, *TC-25CSS B-Chain Frequency and Temporal Response Analysis of
+    Theatres and Dubbing Stages*, 2014.
+11. A. J. Hill, M. O. J. Hawksford, P. Newell, « Enhanced Wide-Area
+    Low-Frequency Sound Reproduction in Cinemas », *J. Audio Eng. Soc.*, 2016.
+12. UIT-R BS.775, *Multichannel stereophonic sound system with and without
+    accompanying picture*, annexe sur le canal LFE.
+13. Dolby Laboratories, *Dolby Digital Professional Encoding Guidelines* et
+    *5.1-Channel Production Guidelines*.
+14. ISO 226:2003, *Acoustics — Normal equal-loudness-level contours*.
+15. G. Leembruggen, P. Newell, « Why does cinema sound quality mostly fail to
+    realise its potential? », *Proc. Institute of Acoustics*, 2015.
+16. E. Zwicker, H. Fastl, *Psychoacoustics: Facts and Models*, Springer
+    (seuils différentiels de niveau).

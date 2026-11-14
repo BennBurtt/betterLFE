@@ -291,7 +291,7 @@ void MainComponent::buildCards()
                   levelWeightToggle.setBounds (r.removeFromTop (24));
               });
 
-    populate (chainsCard, 560, 300, { &chainsView, &resetSessionButton },
+    populate (chainsCard, 600, 350, { &chainsView, &resetSessionButton },
               [this] (juce::Rectangle<int> r)
               {
                   resetSessionButton.setBounds (r.removeFromBottom (24).removeFromRight (110));

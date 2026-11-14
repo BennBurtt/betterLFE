@@ -815,10 +815,10 @@ void Card::resized()
 }
 
 //==============================================================================
-juce::Colour ChainsView::colourFor (double changeDb)
+juce::Colour ChainsView::colourFor (double penalty)
 {
-    if (changeDb < -3.0)   return juce::Colour (0xffc0392b);   // a cancellation
-    if (changeDb < -1.0)   return juce::Colour (0xffb9770e);
+    if (penalty >= 0.5)    return juce::Colour (0xffc0392b);   // heard as clearly louder or quieter
+    if (penalty >= 0.15)   return juce::Colour (0xffb9770e);
     return juce::Colour (0xff2e6b4a);
 }
 
@@ -834,15 +834,27 @@ void ChainsView::paint (juce::Graphics& g)
     auto area = getLocalBounds().toFloat();
     const float rowHeight = 22.0f, labelWidth = 150.0f;
 
-    const auto find = [&t] (ChainResult::Kind kind, double value, bool flag) -> const ChainResult*
+    const auto cinema = [&t] (double gainDb, double delayMs, bool inverted) -> const ChainResult*
     {
         for (const auto& c : t.chains)
-            if (c.kind == kind
-                 && (kind == ChainResult::Kind::cinema ? (std::abs (c.delayMs - value) < 1e-9 && c.inverted == flag)
-                                                       : (std::abs (c.crossoverHz - value) < 1e-9 && c.encoderFilter == flag)))
+            if (c.kind == ChainResult::Kind::cinema && std::abs (c.gainDb - gainDb) < 1e-9 && std::abs (c.delayMs - delayMs) < 1e-9 && c.inverted == inverted)
                 return &c;
 
         return nullptr;
+    };
+
+    const auto home = [&t] (double corner, bool encoder) -> const ChainResult*
+    {
+        for (const auto& c : t.chains)
+            if (c.kind == ChainResult::Kind::bassManaged && std::abs (c.crossoverHz - corner) < 1e-9 && c.encoderFilter == encoder)
+                return &c;
+
+        return nullptr;
+    };
+
+    const auto stereo = [&t] () -> const ChainResult*
+    {
+        return ! t.chains.empty() && t.chains.back().kind == ChainResult::Kind::stereo ? &t.chains.back() : nullptr;
     };
 
     const auto heading = [&] (const juce::String& text)
@@ -867,18 +879,19 @@ void ChainsView::paint (juce::Graphics& g)
         }
 
         const double db = chain->changeDb;
-        g.setColour (colourFor (db));
+        g.setColour (colourFor (chain->penalty));
         g.fillRoundedRectangle (box, 3.0f);
         g.setColour (juce::Colours::white);
         g.setFont (uiFont (12.5f, true));
-        const auto value = db <= PlaybackSimulator::lossFloorDb + 0.05
-                             ? juce::String::fromUTF8 ("\xe2\x89\xa4") + juce::String ((int) PlaybackSimulator::lossFloorDb)
+        const auto value = db <= -PlaybackSimulator::changeLimitDb + 0.05
+                             ? juce::String::fromUTF8 ("\xe2\x89\xa4-") + juce::String ((int) PlaybackSimulator::changeLimitDb)
                              : (db >= 0.0 ? "+" : "") + juce::String (db, 1);
         g.drawText (value + " dB", box, juce::Justification::centred);
     };
 
     const auto table = [&] (const juce::StringArray& columns, const juce::StringArray& rows,
-                            const std::function<const ChainResult* (int row, int column)>& lookup)
+                            const std::function<const ChainResult* (int row, int column)>& lookup,
+                            const std::function<bool (int row, int column)>& exists = {})
     {
         auto header = area.removeFromTop (18.0f);
         header.removeFromLeft (labelWidth);
@@ -897,21 +910,31 @@ void ChainsView::paint (juce::Graphics& g)
             g.drawText (rows[r], row.removeFromLeft (labelWidth), juce::Justification::centredLeft);
 
             for (int c = 0; c < columns.size(); ++c)
-                cell (row.removeFromLeft (width), lookup (r, c));
+            {
+                const auto box = row.removeFromLeft (width);
+
+                if (! exists || exists (r, c))
+                    cell (box, lookup (r, c));
+            }
         }
 
         area.removeFromTop (8.0f);
     };
 
-    heading ("Bass level on each playback system, compared with LFE and screen simply added (20-120 Hz)");
+    heading ("Bass on each playback system against the mix as approved (cinema, sub on time, in polarity), 20-120 Hz");
 
     const double delays[] = { -5.0, -2.5, 0.0, 2.5, 5.0 };
     table ({ "-5 ms", "-2.5 ms", "0 ms", "+2.5 ms", "+5 ms" }, { "Cinema, sub in polarity", "Cinema, sub inverted" },
-           [&] (int r, int c) { return find (ChainResult::Kind::cinema, delays[c], r == 1); });
+           [&] (int r, int c) { return cinema (0.0, delays[c], r == 1); });
+
+    const double levels[] = { -6.0, -3.0, 3.0, 6.0 };
+    table ({ "-6 dB", "-3 dB", "+3 dB", "+6 dB" }, { "Cinema, sub level off by" },
+           [&] (int, int c) { return cinema (levels[c], 0.0, false); });
 
     const double corners[] = { 60.0, 80.0, 100.0 };
-    table ({ "60 Hz", "80 Hz", "100 Hz" }, { "Bass managed", "+ encoder LFE filter" },
-           [&] (int r, int c) { return find (ChainResult::Kind::bassManaged, corners[c], r == 1); });
+    table ({ "60 Hz", "80 Hz", "100 Hz", "Stereo, no LFE" }, { "Bass managed", "+ encoder LFE filter" },
+           [&] (int r, int c) { return c < 3 ? home (corners[c], r == 1) : stereo(); },
+           [] (int r, int c) { return c < 3 || r == 0; });
 
     // Read-outs
     const auto line = [&] (const juce::String& label, const juce::String& value, bool warn)
@@ -926,16 +949,22 @@ void ChainsView::paint (juce::Graphics& g)
     };
 
     const juce::String none = juce::String::fromUTF8 ("\xe2\x80\x94");
+    juce::String worst;
 
-    line ("Robustness", t.hasBass ? juce::String (juce::roundToInt (t.robustness)) + " / 100     weighted average of the systems above, worst "
-                                      + juce::String (t.worstChangeDb, 1) + " dB"
-                                  : none,
+    if (t.hasBass && t.worstChain >= 0)
+    {
+        const auto& c = t.chains[(size_t) t.worstChain];
+        worst = "     worst: " + juce::String (c.name) + " (" + (c.changeDb >= 0.0 ? "+" : "") + juce::String (c.changeDb, 1) + " dB)";
+    }
+
+    line ("Robustness", t.hasBass ? juce::String (juce::roundToInt (t.robustness)) + " / 100" + worst : none,
           t.hasBass && t.robustness < 50.0);
 
-    line ("Stereo downmix without LFE", t.hasBass ? juce::String (t.downmixChangeDb, 1) + " dB of bass (in the score)     LFE carries "
-                                                      + juce::String (juce::roundToInt (100.0 * t.lfeShare)) + " %"
-                                                  : none,
-          t.hasBass && t.lfeShare > dependenceWarning);
+    line ("LFE level against the screen", t.hasBass ? (t.lfeBalanceDb >= 0.0 ? "+" : "") + juce::String (t.lfeBalanceDb, 1)
+                                                        + " dB as heard     LFE carries " + juce::String (juce::roundToInt (100.0 * t.lfeShare))
+                                                        + " % of the bass"
+                                                    : none,
+          t.hasBass && t.lfeBalanceDb > PlaybackSimulator::balanceWarningDb);
 
     const auto signedValue = [] (double v) { return (v >= 0.0 ? "+" : "") + juce::String (v, 2); };
     const int seconds = (int) info.sessionSeconds;

@@ -1,30 +1,45 @@
-// Playback-chain simulation: what the bass of the mix becomes on different
-// reproduction systems. Portable C++17, no dependencies.
+// Playback-system simulation and robustness score. Portable C++17.
 //
-// Every chain is a pair of filters, one applied to F (L+C+R) and one to the
-// LFE, before the two are summed. The power of that sum follows from the
-// smoothed auto and cross spectra the engine already keeps, so nothing is
-// re-filtered:
+// Question answered: once it leaves the dubbing stage, how far does the bass of
+// this mix move from what was approved, across the ways it will be played?
 //
-//   P = |Gf|^2 Sff + |Gl|^2 Sll + 2 Re (Gf . conj(Gl) . Sfl)
+// REFERENCE
+//   The mix as heard on a calibrated stage: screen channels plus the LFE
+//   10 dB above a screen channel (SMPTE RP 200), subwoofer on time and in
+//   polarity.
 //
-// It is compared with the power sum (the same expression without the cross
-// terms), i.e. what the bass would be if the groups did not interact. A result
-// several dB below it is a cancellation.
+// SYSTEMS
+//   Each system is a pair of filters applied to F (L+C+R) and to the LFE before
+//   they are summed. The power of the sum follows from the smoothed auto and
+//   cross spectra the engine keeps, so nothing is re-filtered:
 //
-// Chains
-//   Cinema         LFE 10 dB above a screen channel, summed acoustically with
-//                  the screen; subwoofer offset -5..+5 ms, either polarity.
-//   Bass managed   Home system: screen channels crossed over to the subwoofer
+//     P = |Gf|^2 Sff + |Gl|^2 Sll + 2 Re (Gf . conj(Gl) . Sfl)
+//
+//   Cinema         subwoofer level off by -6, -3, 0, +3 or +6 dB, arriving
+//                  -5 .. +5 ms from the screen, in either polarity (50 cases).
+//   Bass managed   home system: screen channels crossed over to the subwoofer
 //                  (4th-order Linkwitz-Riley at 60, 80 or 100 Hz), LFE low-passed
-//                  at 120 Hz and added 10 dB up. The sum is electrical.
-//   Encoder        Same, with a steep 120 Hz low-pass on the LFE standing in for
-//                  the LFE filter of a Dolby Digital Plus encoder (a model: the
-//                  actual filter is not public).
+//                  at 120 Hz; with and without a steep 120 Hz low-pass standing
+//                  in for an encoder's LFE filter (a model, not Dolby's filter).
+//   Stereo         two-channel downmix of L, C, R; the LFE is left out, as in
+//                  the Dolby and ITU-R BS.775 downmixes.
 //
-// Cross terms that chance alone could produce are removed first (faded out
-// between 3 and 2 sigma on the coherence), so unrelated signals score as
-// perfectly robust instead of slightly fragile.
+// FROM dB TO PERCEPTION
+//   The difference between a system and the reference is taken per band, in dB.
+//   ISO 226:2003 gives how many dB double the loudness of a low tone around
+//   80 phon: 5.0 dB at 25 Hz, 5.5 dB at 40 Hz, 6.4 dB at 70 Hz, 6.9 dB at 100 Hz
+//   (10 dB at 1 kHz). Each band is then rated
+//
+//     penalty = clamp ((|difference| - 1 dB) / (doubling - 1 dB), 0, 1)
+//
+//   0 up to 1 dB (about the just-noticeable level difference), 1 when the band
+//   is heard twice as loud or half as loud. Bands are combined by their share
+//   of the bass, systems by their weights:
+//
+//     robustness = 100 . (1 - sum of weight . penalty)
+//
+// Cross terms that chance alone could produce are removed first, so unrelated
+// signals are never reported as interacting.
 
 #pragma once
 
@@ -39,38 +54,39 @@ namespace subguard
 
 struct ChainResult
 {
-    enum class Kind { cinema, bassManaged };
+    enum class Kind { cinema, bassManaged, stereo };
 
     Kind kind = Kind::cinema;
     std::string name;
+    double gainDb = 0.0;        // cinema: subwoofer level error
     double delayMs = 0.0;       // cinema: subwoofer offset
     bool inverted = false;      // cinema: subwoofer polarity
-    double crossoverHz = 0.0;   // home
-    bool encoderFilter = false; // home: LFE through the encoder low-pass model
+    double crossoverHz = 0.0;   // bass managed
+    bool encoderFilter = false; // bass managed: LFE through the encoder low-pass model
 
-    double changeDb = 0.0;                  // bass of this chain against the power sum, 20-120 Hz
-    double score = 100.0;                   // 0..100: how close that is to 0 dB
-    double weight = 1.0;                    // its share in the robustness score
-    std::array<double, 3> bandChangeDb {};  // same for 30-60, 60-90, 90-120 Hz
+    static constexpr int numBands = 4;
+    double changeDb = 0.0;                          // bass against the reference, 20-120 Hz
+    std::array<double, numBands> bandChangeDb {};   // same per band (20-30, 30-60, 60-90, 90-120 Hz)
+    double penalty = 0.0;                           // 0..1, perceptual, see the header comment
+    double weight = 0.0;                            // share in the score; all weights add up to 1
 };
 
 struct Translation
 {
-    static constexpr double bandEdges[4] = { 30.0, 60.0, 90.0, 120.0 };
+    static constexpr double bandEdges[4] = { 30.0, 60.0, 90.0, 120.0 };     // overlap bands
 
     bool hasBass = false;               // false: silence, nothing below is meaningful
 
     std::vector<ChainResult> chains;
-    double worstChangeDb = 0.0;         // deepest loss among the chains
-    double spreadDb = 0.0;              // how much the bass level moves between chains
-    double robustness = 100.0;          // 0..100: weighted average of the chain scores
+    double robustness = 100.0;          // 0..100
+    int worstChain = -1;                // index of the system with the highest penalty
 
-    // Stereo downmix of L, C, R without the LFE: bass left, against the full mix
-    double downmixChangeDb = 0.0;
+    // LFE as heard (+10 dB) against the screen channels, 20-120 Hz
+    double lfeBalanceDb = 0.0;          // positive: the LFE is the louder of the two
     double lfeShare = 0.0;              // 0..1, part of the bass energy carried by the LFE
-    double downmixScore = 100.0;        // its score in the robustness average
+    double downmixChangeDb = 0.0;       // bass left in the stereo downmix, against the reference
 
-    // LFE (as heard, +10 dB) and screen sum both active in the same band
+    // LFE (as heard) and screen sum both active in the same band
     struct Overlap
     {
         double screenDb = -200.0, lfeDb = -200.0;   // RMS level in the band, dBFS
@@ -83,13 +99,26 @@ struct Translation
 class PlaybackSimulator
 {
 public:
-    static constexpr double lfeInBandGainDb = 10.0;
-    static constexpr double lossFloorDb = -24.0;        // deeper cancellations all count the same
-    static constexpr double scoreZeroDb = 6.0;          // a chain this far from the power sum scores 0
-    static constexpr double nominalWeight = 2.0;        // cinema chains with the subwoofer on time
-    static constexpr double earlyWeight = 0.5;          // cinema chains with the subwoofer early
-    static constexpr double downmixWeight = 2.0;        // stereo downmix without the LFE
+    static constexpr double lfeInBandGainDb = 10.0;     // SMPTE RP 200
+    static constexpr double changeLimitDb = 24.0;       // larger differences all count the same
+    static constexpr double justNoticeableDb = 1.0;     // level difference that starts to count
     static constexpr double overlapWindowDb = 10.0;     // levels further apart than this do not overlap
+    static constexpr double balanceWarningDb = 6.0;     // LFE this far above the screen: at the mercy of the subwoofer level
+
+    // Rating bands and, for each, the level change that doubles loudness
+    // (ISO 226:2003 around 80 phon, at 25, 40, 70 and 100 Hz).
+    static constexpr double bandLimits[ChainResult::numBands + 1] = { 20.0, 30.0, 60.0, 90.0, 120.0 };
+    static constexpr double doublingDb[ChainResult::numBands] = { 5.0, 5.5, 6.4, 6.9 };
+
+    // Weights. Their shape follows the brief (on-time counts double, early
+    // counts half); how often each fault really occurs in cinemas is not
+    // published, so the figures are engineering assumptions, kept in one place.
+    static constexpr double cinemaShare = 10.0 / 18.0, homeShare = 6.0 / 18.0, stereoShare = 2.0 / 18.0;
+    static constexpr double gainSteps[5] = { -6.0, -3.0, 0.0, 3.0, 6.0 };
+    static constexpr double gainWeights[5] = { 0.10, 0.20, 0.40, 0.20, 0.10 };
+    static constexpr double delaySteps[5] = { -5.0, -2.5, 0.0, 2.5, 5.0 };
+    static constexpr double delayWeights[5] = { 0.10, 0.10, 0.40, 0.20, 0.20 };    // 0.5 : 0.5 : 2 : 1 : 1
+    static constexpr double polarityWeights[2] = { 0.5, 0.5 };                      // in polarity, inverted
 
     Translation compute (const Analysis&) const;
 };

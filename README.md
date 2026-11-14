@@ -50,10 +50,11 @@ Deux détecteurs indépendants, le LCR étant toujours la référence :
 Les deux fonctionnent de la même façon quel que soit le niveau, jusqu'à
 −120 dBFS.
 
-S'y ajoutent la simulation de chaînes de lecture (cinéma avec sub décalé ou
-inversé, bass management, filtre d'encodeur), un score de
-robustesse de 0 à 100, la dépendance au LFE, le recouvrement LFE / écran et la
-polarité cumulée de la séance.
+S'y ajoute un score de robustesse de 0 à 100 : le grave du mix est recalculé
+sur 57 systèmes de lecture (cinéma avec sub trop fort, trop faible, décalé ou
+inversé ; bass management ; stéréo sans LFE) et chaque écart est converti en
+sensation d'après ISO 226. S'y ajoutent le niveau du LFE face à la façade, leur
+recouvrement et la polarité cumulée de la séance.
 
 Le détail, les formules et les références publiées sont dans
 [`docs/ALGORITHME.md`](docs/ALGORITHME.md).

@@ -189,14 +189,13 @@ struct ChainsInfo
 class ChainsView : public juce::Component
 {
 public:
-    static constexpr double dependenceWarning = 0.7;      // LFE carries more than this share of the bass
     static constexpr double polarityWarning = -0.3;       // whole-session correlation below this
     static constexpr double polarityMinSeconds = 30.0;
 
     void update (const ChainsInfo&);
     void paint (juce::Graphics&) override;
 
-    static juce::Colour colourFor (double changeDb);
+    static juce::Colour colourFor (double penalty);
 
 private:
     ChainsInfo info;
