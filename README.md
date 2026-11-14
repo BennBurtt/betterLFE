@@ -41,10 +41,14 @@ Logo et icône sont optionnels : voir `assets/README.md`.
 
 Deux détecteurs indépendants, le LCR étant toujours la référence :
 
-- **Global** : corrélation, phase et interaction LFE ↔ L/C/R par fréquence, sur
-  la durée. Un LFE décorrélé n'alerte pas, quelle que soit sa phase.
+- **Global** : corrélation LFE ↔ L/C/R par fréquence de 5 à 150 Hz, sur la
+  durée. Un LFE décorrélé n'alerte pas, quelle que soit sa phase. L'alerte peut
+  être limitée à la phase négative.
 - **Transitoires** : à chaque attaque d'un canal d'écran, mesure du décalage du
   LFE (en avance / en retard, en ms, avec sa précision) et de sa polarité.
+
+Les deux fonctionnent de la même façon quel que soit le niveau, jusqu'à
+−120 dBFS.
 
 Le détail, les formules et les références publiées sont dans
 [`docs/ALGORITHME.md`](docs/ALGORITHME.md).

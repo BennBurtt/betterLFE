@@ -1,6 +1,7 @@
 // Accuracy checks of the analysis engine on synthetic signals.
 // Plain executable: exits with 0 when every check passes.
 
+#include "../core/AlertTracker.h"
 #include "../core/LfeEngine.h"
 
 #include <algorithm>
@@ -198,7 +199,7 @@ namespace
         return best;
     }
 
-    bool alerting (const Analysis& a, int pair, size_t i, double threshold = 0.33, double sigmas = 3.0)
+    bool alerting (const Analysis& a, int pair, size_t i, double threshold = 0.5, double sigmas = AlertTracker::alertSigmas)
     {
         return std::abs (a.interaction[(size_t) pair][i] * a.gate[(size_t) pair][i])
                  > std::max (threshold, sigmas * a.sigma[(size_t) pair][i]);
@@ -440,24 +441,34 @@ static void testChanceLevel()
     std::printf ("  false alerts: %.2f %% steady, %.2f %% at onsets; spread / sigma = %.2f\n",
                  100.0 * steady, 100.0 * onset, zRms);
 
-    // A truly shared signal must clear the chance level quickly
-    Scene s;
-    const auto n = delayed (noise (3.0, 60), 2.0);
-    s.l = n;
-    s.lfe = n;
-    LfeEngine e (sampleRate, 1.0, 0.0);
-    run (e, s, {}, {}, (size_t) (2.5 * sampleRate));
-    const auto& a = e.result();
-    int hits = 0, count = 0;
+    // A truly shared signal must clear the chance level as fast as the frequency
+    // allows: a few cycles are needed, so the low end takes longer.
+    const auto detected = [] (double seconds, double fromHz)
+    {
+        Scene s;
+        const auto n = delayed (noise (5.0, 60), 2.0);
+        s.l = n;
+        s.lfe = n;
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        run (e, s, {}, {}, (size_t) ((2.0 + seconds) * sampleRate));
+        const auto& a = e.result();
+        int hits = 0, count = 0;
 
-    for (size_t i = 0; i < a.grid.size(); ++i)
-        if (a.grid[i] >= 20.0 && a.grid[i] <= 150.0)
-        {
-            hits += alerting (a, chL, i);
-            ++count;
-        }
+        for (size_t i = 0; i < a.grid.size(); ++i)
+            if (a.grid[i] >= fromHz && a.grid[i] <= 150.0)
+            {
+                hits += alerting (a, chL, i);
+                ++count;
+            }
 
-    check (hits > 0.9 * count, "shared signal detected within 0.5 s", (double) hits / count);
+        return (double) hits / count;
+    };
+
+    check (detected (0.5, 50.0) > 0.9, "shared signal above 50 Hz detected within 0.5 s", detected (0.5, 50.0));
+    check (detected (1.5, 20.0) > 0.9, "shared signal above 20 Hz detected within 1.5 s", detected (1.5, 20.0));
+    check (detected (3.0, 8.0) > 0.9, "shared signal above 8 Hz detected within 3 s", detected (3.0, 8.0));
+    std::printf ("  shared signal detected: %.0f %% above 50 Hz at 0.5 s, %.0f %% above 20 Hz at 1.5 s, %.0f %% above 8 Hz at 3 s\n",
+                 100.0 * detected (0.5, 50.0), 100.0 * detected (1.5, 20.0), 100.0 * detected (3.0, 8.0));
 }
 
 static void testBlockSizeIndependence()
@@ -493,6 +504,103 @@ static void testBlockSizeIndependence()
     check (worst < 1e-9, "same result whatever the block size", worst);
 }
 
+static void testLowLevelAndLowFrequency()
+{
+    std::printf ("very low level, 5 Hz, level independence\n");
+    const auto n = noise (10.0, 31);
+
+    {
+        // The same signal 100 dB down (about -120 dBFS RMS) must read exactly the same
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        Scene s;
+        s.l = scaled (n, 1e-5);
+        s.lfe = scaled (n, 1e-5);
+        run (e, s);
+        const auto& a = e.result();
+        check (over (a, a.correlation[chL], 6.0, 120.0).lo > 0.97, "-120 dBFS: correlation still +1", over (a, a.correlation[chL], 6.0, 120.0).lo);
+        check (over (a, a.gate[chL], 6.0, 120.0).lo > 0.99, "-120 dBFS: not gated out", over (a, a.gate[chL], 6.0, 120.0).lo);
+    }
+    {
+        // Unrelated signals at that level stay quiet
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        Scene s;
+        s.l = scaled (noise (10.0, 32), 1e-5);
+        s.lfe = scaled (noise (10.0, 33), 1e-5);
+        run (e, s);
+        const auto& a = e.result();
+        int hits = 0, count = 0;
+
+        for (size_t i = 0; i < a.grid.size(); ++i)
+            if (a.grid[i] >= 5.0 && a.grid[i] <= 150.0)
+            {
+                hits += std::abs (a.correlation[chL][i] * a.gate[chL][i]) > std::max (0.5, AlertTracker::alertSigmas * a.sigma[chL][i]);
+                ++count;
+            }
+
+        check (hits == 0, "-120 dBFS unrelated: no alert", (double) hits / count);
+    }
+    {
+        // LFE 30 dB below the screen channel: the correlation does not care, the interaction does
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        Scene s;
+        s.l = n;
+        s.lfe = scaled (n, -0.0316);
+        run (e, s);
+        const auto& a = e.result();
+        check (over (a, a.correlation[chL]).hi < -0.97, "LFE 30 dB lower, inverted: correlation -1", over (a, a.correlation[chL]).hi);
+        check (std::abs (over (a, a.interaction[chL]).mean + 0.063) < 0.01, "LFE 30 dB lower: interaction -0.06", over (a, a.interaction[chL]).mean);
+
+        // "Out of phase only" and its opposite case
+        AlertTracker tracker;
+        AlertTracker::Options o;
+        o.outOfPhaseOnly = true;
+
+        for (int i = 0; i < 20; ++i)
+            tracker.update (a, o, 0.016);
+
+        check (tracker.speakerLevel[0] > 0.9, "out-of-phase-only mode: inverted LFE alerts", tracker.speakerLevel[0]);
+    }
+    {
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        Scene s;
+        s.l = n;
+        s.lfe = n;
+        run (e, s);
+        AlertTracker both, negative;
+        AlertTracker::Options o;
+
+        for (int i = 0; i < 20; ++i)
+        {
+            o.outOfPhaseOnly = false;
+            both.update (e.result(), o, 0.016);
+            o.outOfPhaseOnly = true;
+            negative.update (e.result(), o, 0.016);
+        }
+
+        check (both.speakerLevel[0] > 0.9, "default mode: in-phase LFE alerts", both.speakerLevel[0]);
+        check (negative.speakerLevel[0] < 1e-9, "out-of-phase-only mode: in-phase LFE is ignored", negative.speakerLevel[0]);
+    }
+    {
+        // Down to 5 Hz
+        LfeEngine e (sampleRate, 2.0, 0.0);
+        Scene s;
+        s.lfe = sine (6.0, -20.0, 8.0);
+        run (e, s);
+        double at = 0.0;
+        const double level = peakDb (e.result().lfeDb, e.result().freqs, &at);
+        check (std::abs (level + 20.0) < 0.3 && std::abs (at - 6.0) < 0.2, "6 Hz sine reads -20 dB", level);
+
+        LfeEngine e2 (sampleRate, 2.0, 0.0);
+        Scene s2;
+        s2.l = n;
+        s2.lfe = scaled (n, -1.0);
+        run (e2, s2);
+        const auto& a = e2.result();
+        check (a.grid.front() <= 5.0, "analysis grid starts at 5 Hz or below", a.grid.front());
+        check (over (a, a.correlation[chL], 5.0, 20.0).hi < -0.95, "5-20 Hz: inverted LFE reads -1", over (a, a.correlation[chL], 5.0, 20.0).hi);
+    }
+}
+
 static void testTransients()
 {
     std::printf ("transient detector\n");
@@ -521,6 +629,9 @@ static void testTransients()
         return s;
     };
 
+    // Events the app would act on: those whose match clears the default threshold.
+    // Weaker ones (chance likeness of two unrelated noise floors) are reported
+    // by the detector but never shown.
     const auto collect = [] (const Scene& scene)
     {
         LfeEngine e (sampleRate, 1.0, 0.0);
@@ -532,7 +643,8 @@ static void testTransients()
             e.push (data.data() + pos * 4, (int) std::min ((size_t) blockSize, scene.length() - pos));
 
             for (const auto& ev : e.takeTransientEvents())
-                all.push_back (ev);
+                if (ev.match > 0.5)
+                    all.push_back (ev);
         }
 
         return all;
@@ -581,6 +693,65 @@ static void testTransients()
                events.empty() ? 0.0 : events[0].interactionBest);
         check (! events.empty() && events[0].interactionNow < 0.2, "late kick: no longer sums in phase",
                events.empty() ? 0.0 : events[0].interactionNow);
+    }
+    {
+        // The same kicks 84 dB down (peaks around -90 dBFS): found exactly the same
+        Scene s;
+        s.c = kicks (6.0, 0.0, 6.3e-5);
+        s.lfe = kicks (6.0, 0.010, 6.3e-5);
+        const auto events = collect (s);
+        check (events.size() == 5, "kicks at -90 dBFS: all found", (double) events.size());
+
+        for (const auto& ev : events)
+            check (std::abs (ev.delayMs - 10.0) < 0.5 && ev.match > 0.95, "kicks at -90 dBFS: delay and match", ev.delayMs);
+    }
+    {
+        // LFE 30 dB below the screen channel: still matched, whatever the balance
+        Scene s;
+        s.c = kicks (6.0, 0.0, 1.0);
+        s.lfe = kicks (6.0, 0.010, 0.0316);
+        const auto events = collect (s);
+        check (events.size() == 5 && events[0].match > 0.95, "LFE 30 dB lower: transient still matched",
+               events.empty() ? 0.0 : events[0].match);
+        check (! events.empty() && events[0].interactionBest < 0.1, "LFE 30 dB lower: level-weighted value is small",
+               events.empty() ? 0.0 : events[0].interactionBest);
+    }
+    {
+        // A 28 Hz boom under a louder 60-190 Hz bed, both channels sharing the boom
+        Signal booms ((size_t) (8.0 * sampleRate), 0.0f), bed = noise (8.0, 41);
+
+        for (size_t i = 0; i < booms.size(); ++i)
+        {
+            const double t = (double) i / sampleRate;
+
+            for (double t0 = 1.0; t0 < 7.0; t0 += 1.5)
+            {
+                const double u = t - t0;
+
+                if (u >= 0.0)
+                    booms[i] += (float) (0.5 * std::sin (2.0 * pi * 28.0 * u) * std::exp (-u / 0.25) * (1.0 - std::exp (-u / 0.03)));
+            }
+        }
+
+        // crude 60 Hz high-pass of the bed, so it sits above the boom
+        double lp = 0.0;
+
+        for (auto& v : bed)
+        {
+            lp += 0.008 * (v - lp);
+            v = (float) (4.0 * (v - lp));
+        }
+
+        Scene s;
+        s.c = sum (booms, bed);
+        s.lfe = delayed (booms, 0.008);
+        const auto events = collect (s);
+        int good = 0;
+
+        for (const auto& ev : events)
+            good += std::abs (ev.delayMs - 8.0) < std::max (1.5, 3.0 * ev.delayUncertaintyMs) && ev.match > 0.5;
+
+        check (good >= 4, "28 Hz boom under a louder bed: found with the right delay", good);
     }
     {
         // Narrow-band thump under noise: the stated precision must cover the real error
@@ -637,7 +808,7 @@ static void testTransients()
         int strong = 0;
 
         for (const auto& ev : events)
-            strong += ev.interactionBest > 0.5;
+            strong += ev.match > 0.5;
 
         check (strong == 0, "steady unrelated noise: nothing above the default threshold", strong);
     }
@@ -652,6 +823,7 @@ int main()
     testLevelBalanceAndPartial();
     testChanceLevel();
     testBlockSizeIndependence();
+    testLowLevelAndLowFrequency();
     testTransients();
 
     std::printf ("\n%d checks, %d failed\n", checks, failures);

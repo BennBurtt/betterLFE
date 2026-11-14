@@ -72,6 +72,7 @@ private:
     AudioInput input;
     std::unique_ptr<LfeEngine> engine;
     AlertTracker alerts;
+    AlertTracker::Options alertOptions() const;
     Settings engineSettings;
 
     HeaderBar header;
@@ -81,11 +82,15 @@ private:
 
     juce::Component panel;
     juce::GroupComponent sourceGroup { {}, "Source & Format" }, analysisGroup { {}, "Analysis" },
-                         responseGroup { {}, "Responsiveness" }, alertGroup { {}, "Phase Alert" };
+                         displayGroup { {}, "Spectrum" }, responseGroup { {}, "Responsiveness" },
+                         alertGroup { {}, "Alert" };
     juce::Label formatLabel { {}, "Channel Format:" }, deviceLabel { {}, "Input Device:" },
-                fpsLabel { {}, "Refresh Rate:" }, windowLabel { {}, "Time / Frequency:" }, statusLabel;
-    juce::ComboBox formatBox, deviceBox, fpsBox, windowBox;
-    juce::ToggleButton lfeGainToggle { "LFE +10 dB (theatre level)" }, animationToggle { "Background animation" };
+                fpsLabel { {}, "Refresh Rate:" }, windowLabel { {}, "Time / Frequency:" },
+                rangeLabel { {}, "Level range:" }, statusLabel;
+    juce::ComboBox formatBox, deviceBox, fpsBox, windowBox, rangeBox, alertModeBox;
+    juce::ToggleButton lfeGainToggle { "LFE +10 dB (theatre level)" }, animationToggle { "Background animation" },
+                       peakHoldToggle { "Peak hold" }, tiltToggle { "Bass tilt (old display)" },
+                       levelWeightToggle { "Weigh by level balance" };
     LabelledSlider inertia { "Inertia:", 0, 100, 1, 70 }, integration { "Integration:", 0.5, 5.0, 0.1, 2.0 },
                    threshold { "Threshold:", 0.0, 1.0, 0.01, 0.5 }, decay { "Decay:", 0.1, 4.0, 0.05, 1.0 };
     juce::TextButton settingsButton { "Settings" };

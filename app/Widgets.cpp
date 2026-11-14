@@ -1,5 +1,7 @@
 #include "Widgets.h"
 
+#include <limits>
+
 namespace subguard
 {
 
@@ -11,7 +13,8 @@ juce::Font uiFont (float height, bool bold)
 namespace
 {
     constexpr double lfeCutHz = 120.0;
-    constexpr float topDb = 6.0f, bottomDb = -90.0f;
+    constexpr float topDb = 6.0f;
+    constexpr double peakFallDbPerSecond = 9.0;
 
     struct RampStop { double pos; juce::uint8 r, g, b, a; };
 
@@ -44,15 +47,16 @@ namespace
         return juce::Colours::transparentBlack;
     }
 
-    // Display weighting of the original app: tilt below 150 Hz plus a bump at 80 Hz
+    // Optional display tilt of the original app: -12 dB at 20 Hz rising to 0 dB
+    // at 150 Hz, plus a 3 dB bump at 80 Hz. Off by default: levels are true dBFS.
     double displayWeightDb (double hz)
     {
-        const double pos = juce::jlimit (0.0, 1.0, std::log (hz / FrequencyAxis::lo)
-                                                     / std::log (FrequencyAxis::hi / FrequencyAxis::lo));
+        const double pos = juce::jlimit (0.0, 1.0, std::log (hz / 20.0) / std::log (150.0 / 20.0));
         return -12.0 * (1.0 - pos) + 3.0 * std::exp (-0.5 * std::pow ((hz - 80.0) / 25.0, 2.0));
     }
 
-    const int frequencyTicks[] = { 20, 30, 40, 50, 60, 80, 100, 120, 150 };
+    const int frequencyTicks[] = { 5, 7, 10, 15, 20, 30, 40, 50, 60, 80, 100, 120, 150 };
+    const int minorTicks[] = { 6, 8, 9, 12, 25, 35, 45, 70, 90, 110, 130, 140 };
 }
 
 //==============================================================================
@@ -251,10 +255,25 @@ void HeaderBar::paint (juce::Graphics& g)
 //==============================================================================
 void FrequencyAxis::drawVerticalGrid (juce::Graphics& g, juce::Rectangle<float> area)
 {
+    g.setColour (theme::grid.withMultipliedAlpha (0.35f));
+
+    for (int f : minorTicks)
+        g.fillRect (xFor (f, area), area.getY(), 1.0f, area.getHeight());
+
     g.setColour (theme::grid);
 
     for (int f : frequencyTicks)
         g.fillRect (xFor (f, area), area.getY(), 1.0f, area.getHeight());
+}
+
+void FrequencyAxis::drawLabels (juce::Graphics& g, juce::Rectangle<float> area)
+{
+    g.setColour (theme::dimText);
+    g.setFont (uiFont (12.0f));
+
+    for (int f : frequencyTicks)
+        g.drawText (juce::String (f), juce::Rectangle<float> (xFor (f, area) - 20.0f, area.getBottom() + 4.0f, 40.0f, 16.0f),
+                    juce::Justification::centred);
 }
 
 //==============================================================================
@@ -264,14 +283,45 @@ juce::Rectangle<float> SpectrumPlot::plotArea() const
                                      .withTrimmedRight ((float) FrequencyAxis::rightMargin).withTrimmedTop (30.0f);
 }
 
-void SpectrumPlot::update (const Analysis& a, const AlertTracker& alerts)
+void SpectrumPlot::update (const Analysis& a, const AlertTracker& alerts, double seconds)
 {
+    if (peakFacade.size() != a.freqs.size())
+    {
+        peakFacade.assign (a.freqs.size(), -200.0);
+        peakLfe.assign (a.freqs.size(), -200.0);
+    }
+
     freqs = a.freqs;
     facadeDb = a.facadeDb;
     lfeDb = a.lfeDb;
     grid = a.grid;
     heatLevel = alerts.heatLevel;
     heatSign = alerts.heatSign;
+
+    const double fall = peakFallDbPerSecond * seconds;
+
+    for (size_t i = 0; i < freqs.size(); ++i)
+    {
+        peakFacade[i] = std::max (facadeDb[i], peakFacade[i] - fall);
+        peakLfe[i] = std::max (lfeDb[i], peakLfe[i] - fall);
+    }
+
+    repaint();
+}
+
+void SpectrumPlot::setFloorDb (double db)      { floorDb = db; repaint(); }
+void SpectrumPlot::setPeakHold (bool on)       { peakHold = on; repaint(); }
+void SpectrumPlot::setTilt (bool on)           { tilt = on; repaint(); }
+
+void SpectrumPlot::mouseMove (const juce::MouseEvent& e)
+{
+    hoverX = plotArea().contains (e.position) ? e.position.x : -1.0f;
+    repaint();
+}
+
+void SpectrumPlot::mouseExit (const juce::MouseEvent&)
+{
+    hoverX = -1.0f;
     repaint();
 }
 
@@ -279,27 +329,33 @@ void SpectrumPlot::paint (juce::Graphics& g)
 {
     g.fillAll (theme::plot);
     const auto area = plotArea();
+    const auto bottomDb = (float) floorDb;
 
-    const auto yFor = [area] (double db)
+    const auto yFor = [area, bottomDb] (double db)
     {
         return area.getY() + area.getHeight() * (topDb - (float) db) / (topDb - bottomDb);
     };
 
+    const auto shown = [this] (double db, double hz)
+    {
+        return db + (tilt ? displayWeightDb (hz) : 0.0);
+    };
+
     g.setColour (theme::dimText);
     g.setFont (uiFont (15.0f));
-    g.drawText ("SubGUARD Analyzer : 20Hz - 150Hz", getLocalBounds().removeFromTop (28), juce::Justification::centred);
+    g.drawText ("SubGUARD Analyzer : 5Hz - 150Hz", getLocalBounds().removeFromTop (28), juce::Justification::centred);
 
-    // Left axis
+    // Left axis: a line every 12 dB
     g.setFont (uiFont (12.0f));
 
-    for (int db : { 0, -18, -36, -54, -72 })
+    for (int db = 0; db > (int) bottomDb; db -= 12)
         g.drawText (juce::String (db), juce::Rectangle<float> (0.0f, yFor (db) - 8.0f, (float) FrequencyAxis::leftMargin - 8.0f, 16.0f),
                     juce::Justification::centredRight);
 
     {
         juce::Graphics::ScopedSaveState state (g);
         g.addTransform (juce::AffineTransform::rotation (-juce::MathConstants<float>::halfPi, 10.0f, area.getCentreY()));
-        g.drawText ("Level (dBFS)", juce::Rectangle<float> (-60.0f, area.getCentreY() - 8.0f, 140.0f, 16.0f),
+        g.drawText (tilt ? "Level (dB, tilted)" : "Level (dBFS)", juce::Rectangle<float> (-60.0f, area.getCentreY() - 8.0f, 140.0f, 16.0f),
                     juce::Justification::centred);
     }
 
@@ -326,61 +382,98 @@ void SpectrumPlot::paint (juce::Graphics& g)
 
     // Grid
     FrequencyAxis::drawVerticalGrid (g, area);
-    g.setColour (theme::grid);
 
-    for (int db : { 0, -18, -36, -54, -72 })
+    for (int db = 0; db > (int) bottomDb; db -= 6)
+    {
+        g.setColour (theme::grid.withMultipliedAlpha (db % 12 == 0 ? 1.0f : 0.35f));
         g.fillRect (area.getX(), yFor (db), area.getWidth(), 1.0f);
+    }
 
     const float xCut = FrequencyAxis::xFor (lfeCutHz, area);
     const float dashes[] = { 4.0f, 4.0f };
     g.setColour (juce::Colour (0xff666666));
     g.drawDashedLine ({ xCut, area.getY(), xCut, area.getBottom() }, dashes, 2, 1.0f);
 
-    // Spectra
-    const auto drawCurve = [&] (const std::vector<double>& db, juce::Colour colour, float fillAlpha, float thickness)
+    // One point per pixel column, keeping the highest bin: no peak is lost
+    // where several bins share a pixel.
+    const auto buildLine = [&] (const std::vector<double>& db, float& firstX, float& lastX)
+    {
+        juce::Path line;
+        bool started = false;
+        int column = std::numeric_limits<int>::min();
+        float bestX = 0.0f;
+        double best = -1e9;
+
+        const auto flush = [&]
+        {
+            if (best < -1e8)
+                return;
+
+            const float y = yFor (juce::jlimit ((double) bottomDb - 6.0, 12.0, best));
+
+            if (! started)  { line.startNewSubPath (bestX, y); firstX = bestX; started = true; }
+            else            { line.lineTo (bestX, y); }
+
+            lastX = bestX;
+        };
+
+        for (size_t i = 0; i < freqs.size(); ++i)
+        {
+            if (freqs[i] < 0.8 * FrequencyAxis::lo || freqs[i] > 1.1 * FrequencyAxis::hi)
+                continue;
+
+            const float x = FrequencyAxis::xFor (freqs[i], area);
+            const int col = (int) std::floor (x);
+
+            if (col != column)
+            {
+                flush();
+                column = col;
+                best = -1e9;
+            }
+
+            const double value = shown (db[i], freqs[i]);
+
+            if (value > best)
+            {
+                best = value;
+                bestX = x;
+            }
+        }
+
+        flush();
+        return line;
+    };
+
+    const auto drawCurve = [&] (const std::vector<double>& db, const std::vector<double>& peaks,
+                                juce::Colour colour, float fillAlpha, float thickness)
     {
         if (freqs.empty())
             return;
 
-        juce::Path line;
-        bool started = false;
-        float lastX = area.getX(), firstX = area.getX();
-
-        for (size_t i = 0; i < freqs.size(); ++i)
-        {
-            if (freqs[i] < 10.0 || freqs[i] > 165.0)
-                continue;
-
-            const float x = FrequencyAxis::xFor (freqs[i], area);
-            const float y = yFor (juce::jlimit (-120.0, 10.0, db[i] + displayWeightDb (freqs[i])));
-
-            if (! started)
-            {
-                line.startNewSubPath (x, y);
-                firstX = x;
-                started = true;
-            }
-            else
-            {
-                line.lineTo (x, y);
-            }
-
-            lastX = x;
-        }
+        float firstX = area.getX(), lastX = area.getX();
+        const auto line = buildLine (db, firstX, lastX);
 
         juce::Path filled (line);
         filled.lineTo (lastX, area.getBottom() + 2.0f);
         filled.lineTo (firstX, area.getBottom() + 2.0f);
         filled.closeSubPath();
 
-        g.setColour (colour.withAlpha (fillAlpha));
+        g.setGradientFill (juce::ColourGradient (colour.withAlpha (fillAlpha), 0.0f, area.getY(),
+                                                 colour.withAlpha (fillAlpha * 0.35f), 0.0f, area.getBottom(), false));
         g.fillPath (filled);
         g.setColour (colour);
         g.strokePath (line, juce::PathStrokeType (thickness, juce::PathStrokeType::curved));
+
+        if (peakHold)
+        {
+            g.setColour (colour.brighter (0.5f).withAlpha (0.65f));
+            g.strokePath (buildLine (peaks, firstX, lastX), juce::PathStrokeType (1.0f));
+        }
     };
 
-    drawCurve (facadeDb, theme::facade, 0.43f, 2.0f);
-    drawCurve (lfeDb, theme::lfe, 0.39f, 1.5f);
+    drawCurve (facadeDb, peakFacade, theme::facade, 0.50f, 2.0f);
+    drawCurve (lfeDb, peakLfe, theme::lfe, 0.42f, 1.8f);
 
     // Fade out above the LFE cut-off (whole-pixel strips, fully black near the edge)
     const int strips = 24;
@@ -393,6 +486,47 @@ void SpectrumPlot::paint (juce::Graphics& g)
         const float t = (float) (i + 1) / (float) strips;
         g.setColour (juce::Colours::black.withAlpha (juce::jmin (1.0f, std::pow (t / 0.8f, 1.4f))));
         g.fillRect (x0, juce::roundToInt (area.getY()), x1 - x0, juce::roundToInt (area.getHeight()) + 1);
+    }
+
+    // Legend
+    {
+        auto legend = juce::Rectangle<float> (area.getX() + 8.0f, area.getY() + 6.0f, 150.0f, 20.0f);
+        g.setColour (theme::plot.withAlpha (0.75f));
+        g.fillRoundedRectangle (legend, 4.0f);
+        g.setFont (uiFont (12.0f, true));
+
+        for (const auto& item : { std::pair<const char*, juce::Colour> { "LCR sum", theme::facade }, { "LFE", theme::lfe } })
+        {
+            auto cell = legend.removeFromLeft (item.second == theme::facade ? 88.0f : 62.0f);
+            g.setColour (item.second);
+            g.fillRect (cell.getX() + 8.0f, cell.getCentreY() - 4.0f, 10.0f, 8.0f);
+            g.setColour (theme::text);
+            g.drawText (item.first, cell.withTrimmedLeft (24.0f), juce::Justification::centredLeft);
+        }
+    }
+
+    // Cursor read-out: exact frequency and levels under the mouse
+    if (hoverX >= 0.0f && ! freqs.empty())
+    {
+        const double hz = FrequencyAxis::hzFor (hoverX, area);
+        const auto nearest = (size_t) std::distance (freqs.begin(), std::min_element (freqs.begin(), freqs.end(),
+                                 [hz] (double a, double b) { return std::abs (a - hz) < std::abs (b - hz); }));
+
+        g.setColour (juce::Colours::white.withAlpha (0.55f));
+        g.fillRect (hoverX, area.getY(), 1.0f, area.getHeight());
+
+        const auto text = juce::String (hz, 1) + " Hz     LCR " + juce::String (shown (facadeDb[nearest], hz), 1)
+                            + " dB     LFE " + juce::String (shown (lfeDb[nearest], hz), 1) + " dB";
+        const float width = 290.0f;
+        auto box = juce::Rectangle<float> (juce::jlimit (area.getX() + 4.0f, area.getRight() - width - 4.0f, hoverX + 10.0f),
+                                           area.getY() + 32.0f, width, 22.0f);
+        g.setColour (juce::Colour (0xe6101010));
+        g.fillRoundedRectangle (box, 4.0f);
+        g.setColour (juce::Colour (0xff666666));
+        g.drawRoundedRectangle (box, 4.0f, 1.0f);
+        g.setColour (theme::text);
+        g.setFont (uiFont (13.0f, true));
+        g.drawText (text, box, juce::Justification::centred);
     }
 }
 
@@ -535,11 +669,12 @@ juce::Rectangle<float> CorrelationPlot::plotArea() const
                                      .withTrimmedRight ((float) FrequencyAxis::rightMargin).withTrimmedBottom (40.0f);
 }
 
-void CorrelationPlot::update (const Analysis& a, const AlertTracker& alerts, double thresholdToShow)
+void CorrelationPlot::update (const Analysis& a, const AlertTracker& alerts, double thresholdToShow, bool outOfPhaseOnly)
 {
     grid = a.grid;
     curves = alerts.curves;
     threshold = thresholdToShow;
+    negativeOnly = outOfPhaseOnly;
     repaint();
 }
 
@@ -561,10 +696,8 @@ void CorrelationPlot::paint (juce::Graphics& g)
         g.drawText (tick.second, juce::Rectangle<float> (0.0f, yFor (tick.first) - 8.0f, (float) FrequencyAxis::leftMargin - 8.0f, 16.0f),
                     juce::Justification::centredRight);
 
-    for (int f : frequencyTicks)
-        g.drawText (juce::String (f), juce::Rectangle<float> (FrequencyAxis::xFor (f, area) - 20.0f, area.getBottom() + 4.0f, 40.0f, 16.0f),
-                    juce::Justification::centred);
-
+    FrequencyAxis::drawLabels (g, area);
+    g.setColour (theme::dimText);
     g.drawText ("Frequency (Hz)", juce::Rectangle<float> (area.getX(), area.getBottom() + 20.0f, area.getWidth(), 18.0f),
                 juce::Justification::centred);
 
@@ -573,6 +706,13 @@ void CorrelationPlot::paint (juce::Graphics& g)
 
     juce::Graphics::ScopedSaveState clip (g);
     g.reduceClipRegion (area.toNearestInt());
+
+    // The zones that raise an alert
+    g.setColour (theme::accent.withAlpha (0.10f));
+    g.fillRect (area.getX(), yFor (-threshold), area.getWidth(), yFor (-1.0) - yFor (-threshold));
+
+    if (! negativeOnly)
+        g.fillRect (area.getX(), yFor (1.0), area.getWidth(), yFor (threshold) - yFor (1.0));
 
     FrequencyAxis::drawVerticalGrid (g, area);
     g.setColour (theme::grid);
@@ -583,9 +723,10 @@ void CorrelationPlot::paint (juce::Graphics& g)
 
     const float dashes[] = { 5.0f, 4.0f };
     g.setColour (theme::accent);
+    g.drawDashedLine ({ area.getX(), yFor (-threshold), area.getRight(), yFor (-threshold) }, dashes, 2, 1.0f);
 
-    for (double v : { threshold, -threshold })
-        g.drawDashedLine ({ area.getX(), yFor (v), area.getRight(), yFor (v) }, dashes, 2, 1.0f);
+    if (! negativeOnly)
+        g.drawDashedLine ({ area.getX(), yFor (threshold), area.getRight(), yFor (threshold) }, dashes, 2, 1.0f);
 
     const juce::Colour colours[] = { theme::curveL, theme::curveC, theme::curveR };
     const char* names[] = { "L", "C", "R" };
@@ -596,15 +737,14 @@ void CorrelationPlot::paint (juce::Graphics& g)
             break;
 
         juce::Path line;
+        bool started = false;
 
         for (size_t i = 0; i < grid.size(); ++i)
         {
             const float x = FrequencyAxis::xFor (grid[i], area), y = yFor (curves[c][i]);
 
-            if (i == 0)
-                line.startNewSubPath (x, y);
-            else
-                line.lineTo (x, y);
+            if (! started)  { line.startNewSubPath (x, y); started = true; }
+            else            { line.lineTo (x, y); }
         }
 
         g.setColour (colours[c]);

@@ -9,6 +9,7 @@
 // (a single frame always looks 100 % coherent). The engine keeps time-averaged
 // auto and cross spectra, smoothed over 1/3 octave, and derives:
 //
+//   correlation  c  = Re(Sxy) / sqrt(Sxx Syy)      in [-1, +1]
 //   interaction  s  = 2 Re(Sxy) / (Sxx + Syy)     in [-1, +1]
 //   coherence    g2 = |Sxy|^2 / (Sxx Syy)          in [0, 1]
 //   phase        ph = arg(Sxy)
@@ -84,7 +85,9 @@ struct Analysis
     std::vector<double> grid;        // log frequency axis of what follows (Hz)
 
     // Indexed [pair][grid point]; pairs are L, C, R, facade, each against the LFE.
-    std::array<std::vector<double>, numPairs> interaction, coherence, phase, gate, sigma;
+    // correlation is level independent: it reads the same however quiet the LFE
+    // is. interaction is the same quantity weighted by the level balance.
+    std::array<std::vector<double>, numPairs> correlation, interaction, coherence, phase, gate, sigma;
 };
 
 class LfeEngine
@@ -129,6 +132,7 @@ private:
     std::vector<Kernel> kernels;                          // fine bins -> log grid
 
     std::array<std::vector<double>, numChannels> ring;    // decimated audio
+    std::array<std::vector<double>, numChannels> windowed; // last analysed segment
     int ringPos = 0, pending = 0;
 
     std::vector<double> specPower;                        // [bin * 2]: facade, LFE

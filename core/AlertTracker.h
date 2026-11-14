@@ -17,9 +17,9 @@ namespace subguard
 class AlertTracker
 {
 public:
-    static constexpr double displayLoHz = 20.0, displayHiHz = 150.0;
+    static constexpr double displayLoHz = 5.0, displayHiHz = 150.0;
     static constexpr double alertGain = 3.5;
-    static constexpr double alertSigmas = 3.0;        // an alert must stand this far above chance
+    static constexpr double alertSigmas = 2.5;        // an alert must stand this far above chance
     static constexpr double speakerDecaySeconds = 0.10;
 
     // Signed LFE/screen interaction per channel, zero where nothing plays [L, C, R][grid]
@@ -44,8 +44,32 @@ public:
         speakerLevel.fill (0.0);
     }
 
-    void update (const Analysis& a, double threshold, double decaySeconds, double frameSeconds)
+    struct Options
     {
+        double threshold = 0.5;
+        double decaySeconds = 1.0;
+        bool outOfPhaseOnly = false;    // alert only where the LFE works against the screen channel
+        bool levelWeighted = false;     // weigh by the LFE / screen level balance (a much quieter LFE counts less)
+    };
+
+    /** The value an alert is judged on, for one transient. */
+    static double transientMeasure (const TransientEvent& e, const Options& o)
+    {
+        if (o.outOfPhaseOnly)
+            return std::max (0.0, -(o.levelWeighted ? e.interactionNow : e.correlationNow));
+
+        return o.levelWeighted ? e.interactionBest : e.match;
+    }
+
+    static double severity (double measure, double threshold)
+    {
+        const double thr = std::min (threshold, 0.99);
+        return std::clamp (alertGain * (measure - thr) / (1.0 - thr), 0.0, 1.0);
+    }
+
+    void update (const Analysis& a, const Options& options, double frameSeconds)
+    {
+        const double threshold = options.threshold, decaySeconds = options.decaySeconds;
         const auto n = a.grid.size();
 
         if (heatLevel.size() != n)
@@ -61,14 +85,14 @@ public:
 
             for (size_t i = 0; i < n; ++i)
             {
-                const double s = a.interaction[c][i] * a.gate[c][i];
+                const double s = (options.levelWeighted ? a.interaction[c][i] : a.correlation[c][i]) * a.gate[c][i];
                 curves[c][i] = s;
 
                 // Alert above the user threshold, but never on a value that pure
                 // chance could produce (little data right after an onset).
                 double target = 0.0;
 
-                if (a.grid[i] >= displayLoHz && a.grid[i] <= displayHiHz)
+                if (a.grid[i] >= displayLoHz && a.grid[i] <= displayHiHz && ! (options.outOfPhaseOnly && s > 0.0))
                 {
                     const double thr = std::clamp (std::max (threshold, alertSigmas * a.sigma[c][i]), 0.0, 0.99);
                     target = std::clamp ((std::abs (s) - thr) / (1.0 - thr), 0.0, 1.0);

@@ -2,7 +2,12 @@
 
 Le LCR est toujours la référence : tout est exprimé comme « ce que fait le LFE
 par rapport au canal d'écran ». L'analyse porte sur la bande commune aux deux,
-de 15 à 190 Hz, après filtrage anti-repliement et décimation vers ~500 Hz.
+de 5 à 190 Hz (affichée de 5 à 150 Hz), après filtrage anti-repliement et
+décimation vers ~500 Hz.
+
+Tout est calculé sur des rapports ou en énergie logarithmique : les deux
+détecteurs se comportent de la même façon à −10 dBFS et à −120 dBFS. Seul le
+silence numérique est écarté.
 
 Deux détecteurs indépendants tournent en parallèle.
 
@@ -16,31 +21,46 @@ Répond à : *sur la durée, le LFE est-il lié au canal d'écran, et dans quel 
 
    | Grandeur | Formule |
    |---|---|
-   | Cohérence (corrélation par fréquence) | `γ² = |Sxy|² / (Sxx·Syy)` [2][3] |
+   | Cohérence | `γ² = |Sxy|² / (Sxx·Syy)` [2][3] |
    | Phase | `arg(Sxy)` |
+   | Corrélation | `c = Re(Sxy) / √(Sxx·Syy)` |
    | Interaction | `s = 2·Re(Sxy) / (Sxx + Syy)` |
 
-   `s` vaut `|γ|·cos(phase)` pondéré par l'équilibre des niveaux. La somme
-   X + LFE change de `10·log10(1 + s)` dB : +1 en phase à niveau égal, −1
-   annulation, 0 aucune interaction. Un LFE décorrélé donne `s ≈ 0` quelle que
-   soit sa phase : **la corrélation prime sur la phase**.
+   `c` vaut `|γ|·cos(phase)` : +1 même signal en phase, −1 même signal inversé,
+   0 décorrélé ou en quadrature. Elle ne dépend pas des niveaux : c'est la
+   grandeur jugée par défaut, pour qu'un LFE très bas soit analysé comme un LFE
+   fort. Un LFE décorrélé donne `c ≈ 0` quelle que soit sa phase : **la
+   corrélation prime sur la phase**.
+
+   `s` est la même grandeur pondérée par l'équilibre des niveaux (option
+   « Weigh by level balance ») : la somme X + LFE change de `10·log10(1 + s)` dB.
 3. Incertitude. La cohérence estimée sur `K` moyennes indépendantes n'est jamais
    nulle, même pour des signaux sans rapport [2]. `K` vaut la largeur de bande
    multipliée par la durée réellement moyennée ; cette durée est calculée comme
    une taille d'échantillon effective pondérée par l'énergie [4], pour tenir
-   compte du fait qu'un son fort qui démarre écrase tout ce qui précède.
-   L'écart-type de `s` sous l'hypothèse « signaux sans rapport » est
+   compte du fait qu'un son fort qui démarre écrase tout ce qui précède, et de
+   la portion de la fenêtre d'analyse réellement occupée par le signal.
+   L'écart-type de `c` sous l'hypothèse « signaux sans rapport » est
    `σ = 1/√(2K)`.
-4. Alerte quand `|s|` dépasse le seuil réglé (0,5 par défaut) **et** `3σ`.
+4. Alerte quand `|c|` dépasse le seuil réglé (0,5 par défaut) **et** `2,5σ`.
+   En mode « Out of phase only », seules les valeurs négatives alertent.
+
+Conséquence physique : il faut quelques cycles pour conclure. Un signal commun
+est reconnu en 0,5 s au-dessus de 50 Hz, 1,5 s au-dessus de 20 Hz, 3 s
+au-dessus de 8 Hz.
 
 ## 2. Détecteur de transitoires
 
 Répond à : *quand le LCR attaque, le LFE attaque-t-il en même temps ?*
 
-1. **Détection d'attaque** sur chaque canal d'écran : l'enveloppe d'énergie
-   rapide (20 ms) est comparée au niveau récent (250 ms). Une attaque est
-   déclarée quand elle le dépasse de 6 dB. C'est la détection par différence
-   relative d'enveloppe [5][6].
+1. **Détection d'attaque** sur chaque canal d'écran, dans cinq bandes
+   (10–190, 10–30, 30–50, 50–80, 80–190 Hz), pour qu'un boom à 25 Hz soit vu
+   sous un fond plus fort à 100 Hz. Dans chaque bande, l'enveloppe d'énergie
+   en dB (lissée sur environ une période) est comparée à son niveau récent
+   (0,3 s) : c'est la différence relative d'enveloppe [5]. Le seuil s'adapte à
+   la bande [6] : au moins 6 dB, et au moins 3,5 fois la fluctuation habituelle
+   de cette bande, pour ne pas prendre les ondulations d'un grondement pour des
+   attaques.
 2. **Mesure du décalage** : corrélation croisée entre le segment du canal
    d'écran (300 ms autour de l'attaque) et le LFE, pour tous les décalages de
    −50 à +50 ms. C'est la corrélation croisée généralisée non pondérée [7]. On
@@ -57,7 +77,9 @@ Répond à : *quand le LCR attaque, le LFE attaque-t-il en même temps ?*
    efficace qu'ils partagent et `N = 2·B·T` le nombre d'échantillons
    indépendants du segment. Un coup à bande étroite ou noyé dans autre chose
    reçoit une grande incertitude.
-4. **Verdict**, seulement si l'interaction une fois réaligné dépasse le seuil :
+4. **Verdict**, seulement si la ressemblance des deux transitoires une fois
+   réalignés dépasse le seuil (en mode « Out of phase only » : seulement si la
+   corrélation sans réalignement est négative au-delà du seuil) :
 
    | Condition | Verdict |
    |---|---|
@@ -73,16 +95,35 @@ Répond à : *quand le LCR attaque, le LFE attaque-t-il en même temps ?*
 
 `tests/EngineTests.cpp` contrôle sur signaux synthétiques : niveaux, repliement,
 phase d'un retard connu, taux de fausses alertes sur signaux indépendants,
+comportement identique 100 dB plus bas, lecture jusqu'à 5 Hz, modes d'alerte,
 retards de transitoires retrouvés à 0,5 ms près, inversion de polarité, et
 cohérence entre l'erreur réelle et l'incertitude annoncée.
+
+Détection d'attaque, sur 79 coups espacés de 1,5 s, LFE = même coup retardé :
+
+| Cas | Coups trouvés |
+|---|---|
+| Kick seul, y compris à −90 dBFS | tous |
+| Kick sur un fond 20 ou 14 dB plus bas | tous |
+| Kick sur un fond seulement 8 dB plus bas | environ 4 sur 10 |
+| Boom 28 Hz seul, y compris à −90 dBFS | tous |
+| Boom 28 Hz sous un fond 60–190 Hz | tous |
+| Coup 45 Hz sous un fond 80–190 Hz plus fort | tous |
+| Coup à 12 Hz | tous |
+| Bruit tenu sans aucun coup | 1 à 5 fausses attaques par minute |
+
+Une fausse attaque sur un bruit tenu ne produit un verdict que si le LFE lui
+ressemble au-delà du seuil ; avec un LFE sans rapport, rien n'est affiché.
 
 ## Limites
 
 - L'analyse porte sur le signal du mix, pas sur l'acoustique d'une salle.
-- Les seuils (0,5 ; 3σ ; 6 dB ; 2,5 ms) sont des choix de conception, pas des
-  valeurs normalisées. Ils restent à ajuster sur de vrais mixes.
-- Un transitoire à moins de ~14 dB au-dessus du fond sonore peut ne pas être
-  détecté comme attaque.
+- Les seuils (0,5 ; 2,5σ ; 6 dB ; 3,5× ; 2,5 ms) sont des choix de conception,
+  pas des valeurs normalisées. Ils restent à ajuster sur de vrais mixes.
+- Un transitoire qui dépasse à peine le fond dans toutes les bandes à la fois
+  (moins de ~10 dB) peut ne pas être détecté comme attaque.
+- Tout en bas (5–15 Hz), la résolution est limitée par la durée de la fenêtre :
+  utiliser le mode « Ultra (2 s) » pour cette zone.
 - Les surrounds ne sont pas analysés.
 
 ## Références

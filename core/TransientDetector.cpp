@@ -11,17 +11,25 @@ namespace
 {
     constexpr double pi = 3.14159265358979323846;
 
-    constexpr double highPassHz = 15.0;         // keeps DC and rumble out of the envelopes
-    constexpr double fastSeconds = 0.020;       // envelope that follows the attack
-    constexpr double slowSeconds = 0.250;       // envelope of the recent level
-    constexpr double onsetRatio = 4.0;          // attack: fast envelope 6 dB above the recent level
-    constexpr double rearmRatio = 2.0;
-    constexpr double floorPower = 1e-7;         // about -70 dBFS: nothing below counts as an attack
-    constexpr double refractorySeconds = 0.150;
+    constexpr double inputHighPassHz = 8.0;     // keeps DC and infrasonic drift out
+    constexpr double floorPower = 1e-11;        // -110 dBFS: only digital silence is ignored
+    constexpr double minimumRiseDb = 6.0;       // an attack rises at least this far above the recent level...
+    constexpr double roughnessFactor = 3.5;     // ...and this many times the band's usual fluctuation
+    constexpr double slowSeconds = 0.30;        // "recent level"
+    constexpr double roughnessSeconds = 1.0;
+    constexpr double roughnessLagSeconds = 0.040;
+    constexpr double freezeSeconds = 0.25;      // an attack does not count as usual fluctuation
+    constexpr int confirmSamples = 2;
+    constexpr double refractorySeconds = 0.120;
     constexpr double preSeconds = 0.060;        // analysed segment: from 60 ms before the detection...
     constexpr double segmentSeconds = 0.300;    // ...over 300 ms
-    constexpr double bandLoHz = 15.0, bandHiHz = 190.0;
-    constexpr double minimumInteraction = 0.15; // weaker pairs are not reported at all
+    constexpr double bandLoHz = 8.0, bandHiHz = 190.0;
+    constexpr double minimumMatch = 0.2;        // weaker pairs are not reported at all
+
+    // Detection bands (Hz). The first one is the whole range: wide-band hits
+    // are steadier there; the others catch attacks confined to one region.
+    constexpr double bandEdges[5][2] = { { 10.0, 190.0 }, { 10.0, 30.0 }, { 30.0, 50.0 }, { 50.0, 80.0 }, { 80.0, 190.0 } };
+
     constexpr int fftSize = 512;
 
     // In-place radix-2 FFT, forward when inverse is false.
@@ -68,6 +76,20 @@ namespace
 }
 
 //==============================================================================
+TransientDetector::Biquad TransientDetector::highPass (double hz, double sampleRate)
+{
+    const double w0 = 2.0 * pi * hz / sampleRate;
+    const double alpha = std::sin (w0) / std::sqrt (2.0), c = std::cos (w0), a0 = 1.0 + alpha;
+    return { (1.0 + c) / 2.0 / a0, -(1.0 + c) / a0, (1.0 + c) / 2.0 / a0, -2.0 * c / a0, (1.0 - alpha) / a0 };
+}
+
+TransientDetector::Biquad TransientDetector::lowPass (double hz, double sampleRate)
+{
+    const double w0 = 2.0 * pi * hz / sampleRate;
+    const double alpha = std::sin (w0) / std::sqrt (2.0), c = std::cos (w0), a0 = 1.0 + alpha;
+    return { (1.0 - c) / 2.0 / a0, (1.0 - c) / a0, (1.0 - c) / 2.0 / a0, -2.0 * c / a0, (1.0 - alpha) / a0 };
+}
+
 TransientDetector::TransientDetector (double sampleRate)
     : fs (sampleRate)
 {
@@ -75,13 +97,22 @@ TransientDetector::TransientDetector (double sampleRate)
     segmentLength = std::min ((int) std::lround (segmentSeconds * fs), fftSize);
     maxLag = (int) std::lround (maxLagSeconds * fs);
     refractory = (int) std::lround (refractorySeconds * fs);
-    fastCoeff = 1.0 - std::exp (-1.0 / (fs * fastSeconds));
+    roughnessLag = std::clamp ((int) std::lround (roughnessLagSeconds * fs), 1, logHistory - 1);
+    freezeSamples = (int) std::lround (freezeSeconds * fs);
     slowCoeff = 1.0 - std::exp (-1.0 / (fs * slowSeconds));
+    roughnessCoeff = 1.0 - std::exp (-1.0 / (fs * roughnessSeconds));
+    inputHighPass = highPass (inputHighPassHz, fs);
 
-    // Second-order Butterworth high-pass
-    const double w0 = 2.0 * pi * highPassHz / fs;
-    const double alpha = std::sin (w0) / std::sqrt (2.0), c = std::cos (w0), a0 = 1.0 + alpha;
-    highPass = { (1.0 + c) / 2.0 / a0, -(1.0 + c) / a0, (1.0 + c) / 2.0 / a0, -2.0 * c / a0, (1.0 - alpha) / a0 };
+    for (int b = 0; b < numBands; ++b)
+    {
+        const double lo = bandEdges[b][0], hi = std::min (bandEdges[b][1], 0.45 * fs);
+        bands[(size_t) b].hp = highPass (lo, fs);
+        bands[(size_t) b].lp = lowPass (hi, fs);
+
+        // Envelope smoothing of about one period of the band centre
+        const double tau = std::clamp (1.0 / std::sqrt (lo * hi), 0.008, 0.060);
+        bands[(size_t) b].envelopeCoeff = 1.0 - std::exp (-1.0 / (fs * tau));
+    }
 
     // Tukey window: flat, with 20 % raised-cosine edges
     window.resize ((size_t) segmentLength);
@@ -101,8 +132,8 @@ void TransientDetector::reset()
     for (auto& r : ring)
         r.assign (historySize, 0.0);
 
-    for (auto& s : filterState)
-        s.fill (0.0);
+    for (auto& st : filterState)
+        st.fill (0.0);
 
     for (auto& c : channels)
         c = {};
@@ -131,36 +162,73 @@ double TransientDetector::history (int channel, long long index) const
 
 void TransientDetector::process (const double* frame)
 {
-    for (int c = 0; c < 4; ++c)
+    const auto run = [] (const Biquad& f, double* st, double x)
     {
-        auto& st = filterState[(size_t) c];
-        const double x = frame[c];
-        const double y = highPass.b0 * x + st[0];
-        st[0] = highPass.b1 * x - highPass.a1 * y + st[1];
-        st[1] = highPass.b2 * x - highPass.a2 * y;
-        ring[(size_t) c][(size_t) (sampleIndex & (historySize - 1))] = y;
-    }
+        const double y = f.b0 * x + st[0];
+        st[0] = f.b1 * x - f.a1 * y + st[1];
+        st[1] = f.b2 * x - f.a2 * y;
+        return y;
+    };
+
+    for (int c = 0; c < 4; ++c)
+        ring[(size_t) c][(size_t) (sampleIndex & (historySize - 1))]
+            = run (inputHighPass, filterState[(size_t) c].data(), frame[c]);
+
+    const auto slot = (size_t) (sampleIndex % logHistory);
+    const auto lagged = (size_t) ((sampleIndex + logHistory - roughnessLag) % logHistory);
 
     for (int c = 0; c < 3; ++c)
     {
         auto& ch = channels[(size_t) c];
-        const double v = history (c, sampleIndex) * screenGain[(size_t) c];
-        const double power = v * v;
+        const double gain = screenGain[(size_t) c];
+        const double x = frame[c] * gain;
+        const bool frozen = sampleIndex - ch.lastOnset <= freezeSamples;
+        double score = 0.0;
 
-        // The recent level is read before this sample updates it
-        const double reference = ch.slow + floorPower;
-        ch.fast += fastCoeff * (power - ch.fast);
-        ch.slow += slowCoeff * (power - ch.slow);
-        const double ratio = ch.fast / reference;
+        for (int b = 0; b < numBands; ++b)
+        {
+            const auto& band = bands[(size_t) b];
+            auto& st = ch.band[(size_t) b];
 
-        if (ratio < rearmRatio)
+            const double y = run (band.lp, st.filter.data() + 2, run (band.hp, st.filter.data(), x));
+            st.envelope += band.envelopeCoeff * (y * y - st.envelope);
+            const double logEnergy = 10.0 * std::log10 (st.envelope + floorPower);
+
+            if (! st.primed)
+            {
+                st.level = logEnergy;
+                st.recent.fill (logEnergy);
+                st.primed = true;
+            }
+
+            // Rise above the recent level, measured against what this band
+            // usually does: a noisy band needs a bigger jump than a steady one.
+            const double threshold = std::max (minimumRiseDb, roughnessFactor * st.roughness);
+            score = std::max (score, (logEnergy - st.level) / threshold);
+
+            if (! frozen)
+                st.roughness += roughnessCoeff * (std::min (std::abs (logEnergy - st.recent[lagged]), threshold) - st.roughness);
+
+            st.level += slowCoeff * (logEnergy - st.level);
+            st.recent[slot] = logEnergy;
+        }
+
+        if (score < 0.5)
             ch.armed = true;
 
-        if (ch.armed && ratio > onsetRatio && sampleIndex - ch.lastOnset > refractory)
+        ch.run = score > 1.0 ? ch.run + 1 : 0;
+
+        if (gain > 0.0 && ch.armed && ch.run >= confirmSamples && sampleIndex - ch.lastOnset > refractory)
         {
             ch.armed = false;
             ch.lastOnset = sampleIndex;
-            ch.pending.push_back (sampleIndex);
+
+            // An attack that follows another one closely makes the earlier
+            // segment unusable (it would contain both): keep the later one.
+            while (! ch.pending.empty() && sampleIndex - ch.pending.back() < segmentLength - preSamples)
+                ch.pending.pop_back();
+
+            ch.pending.push_back (sampleIndex - confirmSamples + 1);
         }
 
         // Analyse once the whole segment, and the LFE around it, has arrived
@@ -237,7 +305,7 @@ void TransientDetector::analyse (int channel, long long onsetIndex)
 
         cross[(size_t) li] = sum;
         energyLfe[(size_t) li] = energy;
-        envelope[(size_t) li] = std::abs (sum) / std::sqrt (energyX * energy + 1e-30);
+        envelope[(size_t) li] = std::abs (sum) / std::sqrt (energyX * energy + 1e-60);
 
         if (envelope[(size_t) li] > envelope[(size_t) best])
             best = li;
@@ -246,7 +314,7 @@ void TransientDetector::analyse (int channel, long long onsetIndex)
     const auto interaction = [&] (int li, double correlation)
     {
         const double el = energyLfe[(size_t) li];
-        return correlation * 2.0 * std::sqrt (energyX * el) / (energyX + el + 1e-30);
+        return correlation * 2.0 * std::sqrt (energyX * el) / (energyX + el + 1e-60);
     };
 
     TransientEvent e;
@@ -254,10 +322,10 @@ void TransientDetector::analyse (int channel, long long onsetIndex)
     e.match = std::min (1.0, envelope[(size_t) best]);
     e.phase = std::arg (cross[(size_t) best]);
     e.interactionBest = interaction (best, e.match);
-    e.interactionNow = std::clamp (interaction (maxLag, cross[(size_t) maxLag].real()
-                                                          / std::sqrt (energyX * energyLfe[(size_t) maxLag] + 1e-30)),
-                                   -1.0, 1.0);
-    e.levelDb = 10.0 * std::log10 (energyX / segmentLength + 1e-15);
+    e.correlationNow = std::clamp (cross[(size_t) maxLag].real()
+                                     / std::sqrt (energyX * energyLfe[(size_t) maxLag] + 1e-60), -1.0, 1.0);
+    e.interactionNow = std::clamp (interaction (maxLag, e.correlationNow), -1.0, 1.0);
+    e.levelDb = 10.0 * std::log10 (energyX / segmentLength + 1e-30);
     e.delayAtLimit = (best == 0 || best == lags - 1);
 
     // Sub-sample position of the envelope peak (parabolic interpolation)
@@ -312,7 +380,7 @@ void TransientDetector::analyse (int channel, long long onsetIndex)
     e.delayUncertaintyMs = 1000.0 * std::sqrt ((1.0 - m2) / (m2 * independent))
                              / (2.0 * pi * std::max (rmsBandwidth, 0.5));
 
-    if (e.interactionBest >= minimumInteraction)
+    if (e.match >= minimumMatch)
         events.push_back (e);
 }
 

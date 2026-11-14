@@ -11,7 +11,7 @@ namespace
 {
     constexpr double preferredSampleRate = 48000.0;
     constexpr double lfeInBandGainDb = 10.0;    // cinema B-chain: LFE plays 10 dB above a screen channel
-    constexpr int headerHeight = 170, panelHeight = 178;
+    constexpr int headerHeight = 170, panelHeight = 214;
 }
 
 //==============================================================================
@@ -117,7 +117,7 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
         statusLabel.setText ("Demo signal (no audio device)", juce::dontSendNotification);
     }
 
-    setSize (1000, 900);
+    setSize (1200, 980);
     lastTick = juce::Time::getMillisecondCounterHiRes() * 0.001;
     startTimerHz (fpsBox.getSelectedId());
 }
@@ -140,14 +140,14 @@ const ChannelFormat& MainComponent::format() const
 //==============================================================================
 void MainComponent::buildSettingsPanel()
 {
-    for (auto* group : { &sourceGroup, &analysisGroup, &responseGroup, &alertGroup })
+    for (auto* group : { &sourceGroup, &analysisGroup, &displayGroup, &responseGroup, &alertGroup })
     {
         group->setColour (juce::GroupComponent::outlineColourId, theme::outline);
         group->setColour (juce::GroupComponent::textColourId, theme::dimText);
         panel.addAndMakeVisible (group);
     }
 
-    for (auto* label : { &formatLabel, &deviceLabel, &fpsLabel, &windowLabel, &statusLabel })
+    for (auto* label : { &formatLabel, &deviceLabel, &fpsLabel, &windowLabel, &rangeLabel, &statusLabel })
     {
         label->setFont (uiFont (13.0f));
         panel.addAndMakeVisible (label);
@@ -188,8 +188,29 @@ void MainComponent::buildSettingsPanel()
     windowBox.setSelectedId (2, juce::dontSendNotification);
     windowBox.onChange = [this] { rebuildEngine (engineRate); };
 
-    for (auto* box : { &formatBox, &deviceBox, &fpsBox, &windowBox })
+    for (int db : { 72, 96, 120, 144 })
+        rangeBox.addItem ("0 to -" + juce::String (db) + " dB", db);
+
+    rangeBox.setSelectedId (96, juce::dontSendNotification);
+    rangeBox.onChange = [this] { spectrum.setFloorDb (-(double) rangeBox.getSelectedId()); };
+
+    alertModeBox.addItem ("In phase and out of phase", 1);
+    alertModeBox.addItem ("Out of phase only", 2);
+    alertModeBox.setSelectedId (1, juce::dontSendNotification);
+    alertModeBox.setTooltip ("Out of phase only: alert just where the LFE works against the screen channel.");
+
+    for (auto* box : { &formatBox, &deviceBox, &fpsBox, &windowBox, &rangeBox, &alertModeBox })
         panel.addAndMakeVisible (box);
+
+    peakHoldToggle.setToggleState (true, juce::dontSendNotification);
+    peakHoldToggle.onClick = [this] { spectrum.setPeakHold (peakHoldToggle.getToggleState()); };
+    tiltToggle.setTooltip ("Display tilt of the first version: -12 dB at 20 Hz. Off: levels are true dBFS.");
+    tiltToggle.onClick = [this] { spectrum.setTilt (tiltToggle.getToggleState()); };
+    levelWeightToggle.setTooltip ("Off: the alert follows the correlation alone, however quiet the LFE is.\n"
+                                  "On: an LFE much quieter (or louder) than the screen channel counts less.");
+
+    for (auto* toggle : { &peakHoldToggle, &tiltToggle, &levelWeightToggle })
+        panel.addAndMakeVisible (toggle);
 
     lfeGainToggle.setTooltip ("Weigh the LFE as it plays in a cinema: 10 dB of in-band gain over a screen channel.");
     animationToggle.setToggleState (true, juce::dontSendNotification);
@@ -240,7 +261,7 @@ void MainComponent::resized()
             return group.getBounds().reduced (12, 6).withTrimmedTop (14);
         };
 
-        auto source = place (sourceGroup, juce::jmax (290, row.getWidth() * 32 / 100));
+        auto source = place (sourceGroup, juce::jmax (240, row.getWidth() * 24 / 100));
         formatLabel.setBounds (source.removeFromTop (20));
         formatBox.setBounds (source.removeFromTop (26));
         source.removeFromTop (4);
@@ -248,9 +269,9 @@ void MainComponent::resized()
         deviceBox.setBounds (source.removeFromTop (26));
         statusLabel.setBounds (source.removeFromTop (30));
 
-        auto analysis = place (analysisGroup, 300);
+        auto analysis = place (analysisGroup, 280);
         auto combos = analysis.removeFromTop (46);
-        auto fpsArea = combos.removeFromLeft (100);
+        auto fpsArea = combos.removeFromLeft (96);
         fpsLabel.setBounds (fpsArea.removeFromTop (20));
         fpsBox.setBounds (fpsArea.withTrimmedRight (6));
         windowLabel.setBounds (combos.removeFromTop (20));
@@ -259,16 +280,26 @@ void MainComponent::resized()
         lfeGainToggle.setBounds (analysis.removeFromTop (26));
         animationToggle.setBounds (analysis.removeFromTop (26));
 
-        const int sliderWidth = juce::jmax (150, (row.getWidth() - 8) / 2);
-        auto response = place (responseGroup, sliderWidth);
-        inertia.setBounds (response.removeFromTop (48));
-        response.removeFromTop (8);
-        integration.setBounds (response.removeFromTop (48));
+        auto display = place (displayGroup, 190);
+        rangeLabel.setBounds (display.removeFromTop (20));
+        rangeBox.setBounds (display.removeFromTop (26));
+        display.removeFromTop (10);
+        peakHoldToggle.setBounds (display.removeFromTop (26));
+        tiltToggle.setBounds (display.removeFromTop (26));
 
-        auto alert = place (alertGroup, juce::jmax (150, row.getWidth()));
-        threshold.setBounds (alert.removeFromTop (48));
-        alert.removeFromTop (8);
-        decay.setBounds (alert.removeFromTop (48));
+        auto response = place (responseGroup, juce::jmax (140, (row.getWidth() - 8) * 42 / 100));
+        inertia.setBounds (response.removeFromTop (46));
+        response.removeFromTop (8);
+        integration.setBounds (response.removeFromTop (46));
+
+        auto alert = place (alertGroup, juce::jmax (190, row.getWidth()));
+        threshold.setBounds (alert.removeFromTop (44));
+        alert.removeFromTop (4);
+        decay.setBounds (alert.removeFromTop (44));
+        alert.removeFromTop (6);
+        alertModeBox.setBounds (alert.removeFromTop (26));
+        alert.removeFromTop (2);
+        levelWeightToggle.setBounds (alert.removeFromTop (24));
     }
 
     const int correlationHeight = juce::jmax (150, area.getHeight() * 2 / 7);
@@ -372,6 +403,16 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster*)
     updateStatus();
 }
 
+AlertTracker::Options MainComponent::alertOptions() const
+{
+    AlertTracker::Options o;
+    o.threshold = threshold.value();
+    o.decaySeconds = decay.value();
+    o.outOfPhaseOnly = alertModeBox.getSelectedId() == 2;
+    o.levelWeighted = levelWeightToggle.getToggleState();
+    return o;
+}
+
 void MainComponent::rebuildEngine (double sampleRate)
 {
     const double windows[] = { 0.5, 1.0, 2.0 };
@@ -473,18 +514,19 @@ void MainComponent::timerCallback()
     engineSettings.tauSpectrum = 0.010 * std::pow (60.0, inertia.value() / 100.0);    // 10 ms .. 600 ms
     engineSettings.tauCorrelation = integration.value();
 
+    const auto alerting = alertOptions();
+
     if (engine->analyze (engineSettings))
     {
-        alerts.update (engine->result(), threshold.value(), decay.value(), dt);
-        spectrum.update (engine->result(), alerts);
-        correlation.update (engine->result(), alerts, threshold.value());
+        alerts.update (engine->result(), alerting, dt);
+        spectrum.update (engine->result(), alerts, dt);
+        correlation.update (engine->result(), alerts, alerting.threshold, alerting.outOfPhaseOnly);
     }
 
     // Transient detector: one verdict per attack found in a screen channel
     for (const auto& event : engine->takeTransientEvents())
     {
-        const double thr = juce::jmin (threshold.value(), 0.99);
-        const double severity = juce::jmin (1.0, AlertTracker::alertGain * (event.interactionBest - thr) / (1.0 - thr));
+        const double severity = AlertTracker::severity (AlertTracker::transientMeasure (event, alerting), alerting.threshold);
 
         if (severity > 0.0)
         {
@@ -534,6 +576,14 @@ void MainComponent::loadState()
     integration.setValue (settings->getDoubleValue ("integration", 2.0));
     threshold.setValue (settings->getDoubleValue ("alertThreshold", 0.5));
     decay.setValue (settings->getDoubleValue ("decay", 1.0));
+    rangeBox.setSelectedId (settings->getIntValue ("levelRange", 96), juce::dontSendNotification);
+    alertModeBox.setSelectedId (settings->getIntValue ("alertMode", 1), juce::dontSendNotification);
+    peakHoldToggle.setToggleState (settings->getBoolValue ("peakHold", true), juce::dontSendNotification);
+    tiltToggle.setToggleState (settings->getBoolValue ("tilt", false), juce::dontSendNotification);
+    levelWeightToggle.setToggleState (settings->getBoolValue ("levelWeighted", false), juce::dontSendNotification);
+    spectrum.setFloorDb (-(double) rangeBox.getSelectedId());
+    spectrum.setPeakHold (peakHoldToggle.getToggleState());
+    spectrum.setTilt (tiltToggle.getToggleState());
     restoring = false;
 }
 
@@ -553,6 +603,11 @@ void MainComponent::saveState()
     settings->setValue ("integration", integration.value());
     settings->setValue ("alertThreshold", threshold.value());
     settings->setValue ("decay", decay.value());
+    settings->setValue ("levelRange", rangeBox.getSelectedId());
+    settings->setValue ("alertMode", alertModeBox.getSelectedId());
+    settings->setValue ("peakHold", peakHoldToggle.getToggleState());
+    settings->setValue ("tilt", tiltToggle.getToggleState());
+    settings->setValue ("levelWeighted", levelWeightToggle.getToggleState());
 
     if (auto xml = deviceManager.createStateXml())
         settings->setValue ("audioDevice", xml.get());

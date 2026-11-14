@@ -12,13 +12,13 @@ namespace
 
     constexpr double targetRate = 500.0;     // decimated sample rate, approximately
     constexpr double aliasFreeHz = 150.0;    // band that must stay free of aliasing
-    constexpr int fftSize = 2048;            // zero-padded FFT length
-    constexpr double bandLo = 8.0, bandHi = 190.0;    // bins kept for the analysis
-    constexpr double gridLo = 15.0, gridHi = 160.0;   // log grid of the outputs
-    constexpr int gridPoints = 128;
+    constexpr int fftSize = 4096;            // zero-padded FFT length (0.12 Hz grid: a sine reads within 0.1 dB)
+    constexpr double bandLo = 2.5, bandHi = 190.0;    // bins kept for the analysis
+    constexpr double gridLo = 4.5, gridHi = 160.0;    // log grid of the outputs
+    constexpr int gridPoints = 160;
     constexpr double smoothOctaves = 1.0 / 3.0;
-    constexpr double gateLoDb = -90.0, gateHiDb = -75.0;
-    constexpr double tiny = 1e-30;
+    constexpr double gateLoDb = -210.0, gateHiDb = -195.0;   // only digital silence is gated out
+    constexpr double tiny = 1e-60;
 
     // Layout of one row of the statistics: power of L, C, R, F, LFE, then the
     // real and imaginary parts of X.conj(LFE) for X = L, C, R, F.
@@ -260,7 +260,8 @@ void LfeEngine::configure (double windowSeconds)
         s.assign (nb, {});
 
     for (int p = 0; p < numPairs; ++p)
-        for (auto* v : { &out.interaction[(size_t) p], &out.coherence[(size_t) p], &out.phase[(size_t) p],
+        for (auto* v : { &out.interaction[(size_t) p], &out.correlation[(size_t) p],
+                         &out.coherence[(size_t) p], &out.phase[(size_t) p],
                          &out.gate[(size_t) p], &out.sigma[(size_t) p] })
             v->assign (gridPoints, 0.0);
 
@@ -269,6 +270,9 @@ void LfeEngine::configure (double windowSeconds)
 
     for (auto& r : ring)
         r.assign ((size_t) nWin, 0.0);
+
+    for (auto& w : windowed)
+        w.assign ((size_t) nWin, 0.0);
 
     ringPos = 0;
     pending = 0;
@@ -370,6 +374,8 @@ bool LfeEngine::analyze (const Settings& settings)
         for (int i = 0; i < nWin; ++i)
             workRe[(size_t) i] = (r[(size_t) ((ringPos + i) % nWin)] - mean) * window[(size_t) i];
 
+        std::copy (workRe.begin(), workRe.begin() + nWin, windowed[(size_t) c].begin());
+
         std::fill (workRe.begin() + nWin, workRe.end(), 0.0);
         std::fill (workIm.begin(), workIm.end(), 0.0);
         fft();
@@ -382,6 +388,40 @@ bool LfeEngine::analyze (const Settings& settings)
             const auto bin = (size_t) bandBins[i];
             spectrum[(size_t) c][i] = { workRe[bin] * scale[i] * gain, workIm[bin] * scale[i] * gain };
         }
+    }
+
+    // How much of the window actually holds signal for each pair (energy-weighted
+    // duration). Right after an onset this is far shorter than the window, and
+    // the estimate rests on correspondingly little data.
+    double frameSeconds[numPairs];
+
+    for (int p = 0; p < numPairs; ++p)
+    {
+        double sum = 0.0, squares = 0.0;
+
+        for (int i = 0; i < nWin; ++i)
+        {
+            double x;
+
+            if (p == pairFacade)
+            {
+                x = 0.0;
+
+                for (int c = 0; c < 3; ++c)
+                    if (! settings.mute[(size_t) c])
+                        x += windowed[(size_t) c][(size_t) i];
+            }
+            else
+            {
+                x = windowed[(size_t) p][(size_t) i];
+            }
+
+            const double e = std::abs (x * windowed[chLFE][(size_t) i]);
+            sum += e;
+            squares += e * e;
+        }
+
+        frameSeconds[p] = sum * sum / (squares + tiny) / fs;
     }
 
     // Instantaneous statistics, then exponential averaging
@@ -416,8 +456,8 @@ bool LfeEngine::analyze (const Settings& settings)
         specPower[i * 2] += aSpec * (row[statPower + pairFacade] - specPower[i * 2]);
         specPower[i * 2 + 1] += aSpec * (row[statPower + 4] - specPower[i * 2 + 1]);
 
-        out.facadeDb[i] = 10.0 * std::log10 (specPower[i * 2] + 1e-15);
-        out.lfeDb[i] = 10.0 * std::log10 (specPower[i * 2 + 1] + 1e-15);
+        out.facadeDb[i] = 10.0 * std::log10 (specPower[i * 2] + 1e-24);
+        out.lfeDb[i] = 10.0 * std::log10 (specPower[i * 2 + 1] + 1e-24);
     }
 
     // 1/3-octave smoothing and derived quantities
@@ -449,6 +489,7 @@ bool LfeEngine::analyze (const Settings& settings)
             const double px = sm[statPower + p], re = sm[statRe + p], im = sm[statIm + p];
 
             out.interaction[(size_t) p][g] = std::clamp (2.0 * re / (px + pl + tiny), -1.0, 1.0);
+            out.correlation[(size_t) p][g] = std::clamp (re / (std::sqrt (px * pl) + tiny), -1.0, 1.0);
             out.coherence[(size_t) p][g] = std::clamp ((re * re + im * im) / (px * pl + tiny), 0.0, 1.0);
             out.phase[(size_t) p][g] = std::atan2 (im, re);
 
@@ -466,7 +507,7 @@ bool LfeEngine::analyze (const Settings& settings)
             a2 = a2 * m2Decay + q * q * dt / (tauCorr * tauCorr);
 
             const double effectiveSeconds = a1 * a1 / (a2 + tiny);
-            const double dof = bandwidth[g] * (effectiveSeconds + windowSec / 1.5);
+            const double dof = bandwidth[g] * (effectiveSeconds + frameSeconds[p]);
             out.sigma[(size_t) p][g] = std::min (1.0, 1.0 / std::sqrt (2.0 * std::max (dof, 0.5)));
         }
     }

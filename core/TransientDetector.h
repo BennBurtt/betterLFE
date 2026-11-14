@@ -1,8 +1,13 @@
 // Transient detector: finds attacks in the screen channels (the reference) and
 // measures how the LFE lines up with each of them. Portable C++17.
 //
-// 1. Onset detection on each screen channel, from the rise of its energy
-//    envelope relative to its recent level (Klapuri 1999; Bello et al. 2005).
+// 1. Onset detection on each screen channel, in several frequency bands so
+//    that a 25 Hz boom is found under a louder 100 Hz bed. In each band the
+//    log-energy envelope is compared with its recent level (relative
+//    difference, Klapuri 1999), against a threshold that adapts to how much
+//    that band normally fluctuates (adaptive thresholding, Bello et al. 2005).
+//    Working on log energy makes the detection independent of level: a
+//    transient at -90 dBFS is found like one at -10 dBFS.
 // 2. For each onset, the cross-correlation between the screen channel and
 //    the LFE over +/- 50 ms (Knapp & Carter 1976, unweighted generalized
 //    cross-correlation). The peak of its envelope gives the time offset of
@@ -33,8 +38,9 @@ struct TransientEvent
     bool delayAtLimit = false;  // the best match sits at the edge of the +/- 50 ms search
     double match = 0.0;         // 0..1, likeness of the two transients once re-aligned
     double phase = 0.0;         // radians at the best alignment; 0 same polarity, pi inverted
-    double interactionBest = 0.0;   // 0..1, interaction the pair would have if re-aligned
-    double interactionNow = 0.0;    // -1..1, interaction as it is (sum changes by 10 log10 (1 + s) dB)
+    double correlationNow = 0.0;    // -1..1, correlation as it is, without re-aligning; level independent
+    double interactionBest = 0.0;   // 0..1, like match but weighted by the level balance of the pair
+    double interactionNow = 0.0;    // -1..1, like correlationNow, level weighted (sum changes by 10 log10 (1 + s) dB)
     double levelDb = -150.0;    // RMS level of the screen-channel transient, dBFS
 };
 
@@ -61,20 +67,44 @@ private:
     double history (int channel, long long index) const;
 
     double fs;
-    int preSamples, segmentLength, maxLag, refractory;
-    double fastCoeff, slowCoeff;
+    int preSamples, segmentLength, maxLag, refractory, roughnessLag, freezeSamples;
+    double slowCoeff, roughnessCoeff;
 
-    struct HighPass { double b0, b1, b2, a1, a2; } highPass {};
+    struct Biquad { double b0, b1, b2, a1, a2; };
+    static Biquad highPass (double hz, double sampleRate);
+    static Biquad lowPass (double hz, double sampleRate);
+
+    Biquad inputHighPass {};
     std::array<std::array<double, 2>, 4> filterState {};
 
     static constexpr int historySize = 1024;
     std::array<std::vector<double>, 4> ring;
     long long sampleIndex = 0;
 
+    static constexpr int numBands = 5;
+    static constexpr int logHistory = 64;
+
+    struct Band
+    {
+        Biquad hp {}, lp {};
+        double envelopeCoeff = 0.0;
+    };
+
+    std::array<Band, numBands> bands;
+
+    struct BandState
+    {
+        std::array<double, 4> filter {};
+        double envelope = 0.0, level = 0.0, roughness = 0.0;
+        std::array<double, logHistory> recent {};
+        bool primed = false;
+    };
+
     struct ChannelState
     {
-        double fast = 0.0, slow = 0.0;
+        std::array<BandState, numBands> band;
         bool armed = true;
+        int run = 0;
         long long lastOnset = -1000000;
         std::vector<long long> pending;
     };

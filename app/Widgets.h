@@ -71,10 +71,10 @@ private:
 };
 
 //==============================================================================
-/** Shared log-frequency axis (20 - 150 Hz) of the two plots. */
+/** Shared log-frequency axis (5 - 150 Hz) of the two plots. */
 struct FrequencyAxis
 {
-    static constexpr double lo = 20.0, hi = 150.0;
+    static constexpr double lo = 5.0, hi = 150.0;
     static constexpr int leftMargin = 62, rightMargin = 22;
 
     static float xFor (double hz, juce::Rectangle<float> area)
@@ -82,20 +82,35 @@ struct FrequencyAxis
         return area.getX() + area.getWidth() * (float) (std::log (hz / lo) / std::log (hi / lo));
     }
 
+    static double hzFor (float x, juce::Rectangle<float> area)
+    {
+        return lo * std::pow (hi / lo, (double) ((x - area.getX()) / area.getWidth()));
+    }
+
     static void drawVerticalGrid (juce::Graphics&, juce::Rectangle<float> area);
+    static void drawLabels (juce::Graphics&, juce::Rectangle<float> area);
 };
 
 /** Level spectrum of the L+C+R sum and the LFE, with the alert heat map behind. */
 class SpectrumPlot : public juce::Component
 {
 public:
-    void update (const Analysis&, const AlertTracker&);
+    void update (const Analysis&, const AlertTracker&, double seconds);
+    void setFloorDb (double);
+    void setPeakHold (bool);
+    void setTilt (bool);
+
     void paint (juce::Graphics&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
 
 private:
     juce::Rectangle<float> plotArea() const;
 
-    std::vector<double> freqs, facadeDb, lfeDb, grid, heatLevel, heatSign;
+    std::vector<double> freqs, facadeDb, lfeDb, peakFacade, peakLfe, grid, heatLevel, heatSign;
+    double floorDb = -96.0;
+    bool peakHold = true, tilt = false;
+    float hoverX = -1.0f;
 };
 
 /** Last attack found in each screen channel and how the LFE lines up with it. */
@@ -124,7 +139,7 @@ private:
 class CorrelationPlot : public juce::Component
 {
 public:
-    void update (const Analysis&, const AlertTracker&, double thresholdToShow);
+    void update (const Analysis&, const AlertTracker&, double thresholdToShow, bool outOfPhaseOnly);
     void paint (juce::Graphics&) override;
 
 private:
@@ -132,7 +147,8 @@ private:
 
     std::vector<double> grid;
     std::array<std::vector<double>, 3> curves;
-    double threshold = 0.33;
+    double threshold = 0.5;
+    bool negativeOnly = false;
 };
 
 } // namespace subguard
