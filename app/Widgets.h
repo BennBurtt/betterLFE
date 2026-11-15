@@ -209,12 +209,13 @@ public:
     {
         float alert = 0.0f;         // 0..1, strongest alert
         bool outOfPhase = false;    // its sign
-        float fragility = 0.0f;     // 0..1, 1 - robustness
+        float score = 1.0f;         // 0..1, lowest robustness over the column
+        bool scored = false;        // false: nothing to score (silence)
         float dependence = 0.0f;    // 0..1, LFE share of the bass
     };
 
     static constexpr double secondsPerColumn = 0.5;
-    static constexpr int columns = 600;                 // five minutes
+    static constexpr int columns = 300;                 // two and a half minutes
 
     void push (const Sample&);
     void paint (juce::Graphics&) override;

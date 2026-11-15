@@ -42,8 +42,13 @@ Répond à : *sur la durée, le LFE est-il lié au canal d'écran, et dans quel 
    la portion de la fenêtre d'analyse réellement occupée par le signal.
    L'écart-type de `c` sous l'hypothèse « signaux sans rapport » est
    `σ = 1/√(2K)`.
-4. Alerte quand `|c|` dépasse le seuil réglé (0,5 par défaut) **et** `2,5σ`.
-   En mode « Out of phase only », seules les valeurs négatives alertent.
+4. Alerte quand `|c|` dépasse le seuil choisi **et** `2,5σ`. Trois réglages :
+   Soft (0,90), Medium (0,75), Strong (0,50, par défaut). En mode « Out of
+   phase only », seules les valeurs négatives alertent.
+5. Quand le LFE est absent (moins de −100 dBFS RMS pendant 0,5 s), tout ce qui
+   a été mesuré face à lui est effacé : la courbe et les alertes repartent de
+   zéro au lieu de garder la trace d'un son terminé. Un LFE très bas, à
+   −80 dBFS par exemple, reste analysé normalement.
 
 Conséquence physique : il faut quelques cycles pour conclure. Un signal commun
 est reconnu en 0,5 s au-dessus de 50 Hz, 1,5 s au-dessus de 20 Hz, 3 s
@@ -231,6 +236,25 @@ grave de près de 6 dB entre un sub en polarité et un sub inversé.
 | Pertinences des systèmes, plafond de dépendance (0,72) | **Hypothèse** d'ingénierie, suivant la consigne (0 ms ×2, avance ×0,5 ; LFE seul vers 20–25). Aucune statistique publiée sur la fréquence de ces défauts |
 | Acoustique de la salle (modes, places) | Non simulée |
 
+### 3.8 bis Dépendance au LFE : ce que dit la littérature
+
+| Source | Ce qu'elle établit |
+|---|---|
+| UIT-R BS.775 [12] | Le LFE est optionnel à la réception et ne doit porter que de l'information d'appoint, pas tout le grave du programme |
+| AES TD1009 [17] | Le LFE est en général omis des downmix automatiques ; éviter d'y placer seul un contenu essentiel |
+| ATSC A/52 (AC-3, E-AC-3) [18], Dolby [13] | Le downmix deux canaux réunit tous les canaux sauf le LFE |
+| EBU Tech 3343 / UIT-R BS.1770 [19] | Le LFE est exclu de la mesure de sonie : un grave placé dans le LFE échappe au contrôle de loudness |
+| Netflix, spécifications de mixage [20] | Un stéréo fabriqué à la main peut inclure le LFE, replié entre −8 et −12 dB et filtré à 200 Hz ou moins |
+
+Toutes vont dans le même sens : ce qui n'existe que dans le LFE peut manquer.
+Mesurer la dépendance par ce que perd la stéréo sans LFE est donc la traduction
+directe de ces textes. Aucune ne donne de seuil chiffré (« à partir de quelle
+part le LFE porte trop »), ni de statistique sur la proportion de spectateurs
+écoutant sans caisson : le plafond de 0,72 reste un choix.
+
+Le repli manuel décrit par Netflix n'est pas simulé : à −10 dB, le LFE y arrive
+20 dB sous son niveau de salle, ce qui change peu le résultat.
+
 ### 3.9 Autres témoins
 
 **Niveau du LFE face à la façade.** Rapport des énergies sur 20–120 Hz, LFE
@@ -246,6 +270,24 @@ jouent à moins de 10 dB l'un de l'autre dans 60–120 Hz.
 cumulée sans oubli depuis la dernière remise à zéro. Signalée sous −0,3 après
 30 s. Elle reflète ce qui a été joué : rejouer une scène la compte plusieurs
 fois.
+
+## 4. Inertie d'affichage
+
+Les chiffres et les courbes affichés (score, tableau des systèmes, niveaux,
+courbes de corrélation) passent par un filtre qui regarde depuis combien de
+temps la valeur reste du même côté de ce qui est affiché :
+
+- elle repasse sans cesse de part et d'autre (elle papillonne) : le filtre est
+  lent (constante de temps 1,5 s) et l'affichage se pose sur la moyenne ;
+- elle reste du même côté (un vrai changement) : après 0,15 s le filtre
+  accélère, et à 0,6 s il tourne à pleine vitesse (0,12 s).
+
+Mesuré : une valeur qui oscille entre 0,1 et 0,9 dix fois par seconde fait
+bouger l'affichage de 0,03 ; un saut de 1 à 2 est suivi à 90 % en 0,7 s.
+
+La frise du bas montre les 2 min 30 dernières (une colonne par demi-seconde).
+Sa ligne « Robustness » est toujours colorée tant qu'il y a du grave : vert
+pour un score de 100, orange à 50, rouge à 0, en dégradé continu.
 
 ## Ce qui est vérifié
 
@@ -318,3 +360,10 @@ ressemble au-delà du seuil ; avec un LFE sans rapport, rien n'est affiché.
     realise its potential? », *Proc. Institute of Acoustics*, 2015.
 16. E. Zwicker, H. Fastl, *Psychoacoustics: Facts and Models*, Springer
     (seuils différentiels de niveau).
+17. AES Technical Document TD1009 (recommandations sur le canal LFE et les
+    downmix automatiques).
+18. ATSC A/52, *Digital Audio Compression (AC-3, E-AC-3)*, traitement du
+    downmix deux canaux.
+19. EBU Tech 3343, *Guidelines for Production of Programmes in accordance with
+    EBU R 128* ; UIT-R BS.1770.
+20. Netflix, *Sound Mix Specifications & Best Practices*.

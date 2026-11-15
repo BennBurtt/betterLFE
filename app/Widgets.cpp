@@ -996,7 +996,7 @@ void HistoryStrip::paint (juce::Graphics& g)
 
     auto area = getLocalBounds().toFloat().withTrimmedLeft ((float) FrequencyAxis::leftMargin + 36.0f)
                                           .withTrimmedRight ((float) FrequencyAxis::rightMargin).reduced (0.0f, 5.0f);
-    const char* names[] = { "Alert", "Fragile", "LFE-dependent" };
+    const char* names[] = { "Alert", "Robustness", "LFE-dependent" };
     const int lanes = 3;
     const float lane = area.getHeight() / (float) lanes;
 
@@ -1019,20 +1019,31 @@ void HistoryStrip::paint (juce::Graphics& g)
         for (int c = 0; c < columns; ++c)
         {
             const auto& s = samples[(writePos + (size_t) c) % samples.size()];
-            float value = 0.0f;
-            juce::Colour colour;
+            const float x = row.getX() + width * (float) c;
 
-            switch (i)
+            if (i == 1)
             {
-                case 0:  value = s.alert;       colour = s.outOfPhase ? juce::Colour (0xffff3a2a) : juce::Colour (0xfff5c400); break;
-                case 1:  value = s.fragility;   colour = juce::Colour (0xffff7043); break;
-                default: value = s.dependence;  colour = juce::Colour (0xff7e9cff); break;
+                // Robustness: always coloured while there is bass, green for a
+                // sound mix, through orange, to red for a fragile one.
+                if (! s.scored)
+                    continue;
+
+                const auto red = juce::Colour (0xffe53935), orange = juce::Colour (0xffff9800), green = juce::Colour (0xff43a047);
+                const auto colour = s.score < 0.5f ? red.interpolatedWith (orange, s.score / 0.5f)
+                                                   : orange.interpolatedWith (green, (s.score - 0.5f) / 0.5f);
+                g.setColour (colour);
+                g.fillRect (x, row.getY(), width + 0.5f, row.getHeight());
+                continue;
             }
+
+            const float value = i == 0 ? s.alert : s.dependence;
+            const auto colour = i == 0 ? (s.outOfPhase ? juce::Colour (0xffff3a2a) : juce::Colour (0xfff5c400))
+                                       : juce::Colour (0xff7e9cff);
 
             if (value > 0.02f)
             {
                 g.setColour (colour.withAlpha (juce::jlimit (0.0f, 1.0f, 0.15f + 0.85f * value)));
-                g.fillRect (row.getX() + width * (float) c, row.getY(), width + 0.5f, row.getHeight());
+                g.fillRect (x, row.getY(), width + 0.5f, row.getHeight());
             }
         }
     }

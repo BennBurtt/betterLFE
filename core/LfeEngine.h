@@ -135,6 +135,22 @@ public:
     double globalSeconds() const    { return globalTime; }
     void resetGlobal();
 
+    /** Forgets what has been measured between the LFE and the screen channels
+        (correlation, alerts, playback chains), not the audio or the spectra. */
+    void resetCorrelation();
+
+    /** True once after the engine cleared those measurements by itself because
+        the LFE had gone silent: nothing left to compare, nothing left to show. */
+    bool takeAutoReset()
+    {
+        const bool happened = autoResetPending;
+        autoResetPending = false;
+        return happened;
+    }
+
+    /** RMS level of the LFE over the analysis window, below 200 Hz, dBFS. */
+    double lfeLevelDb() const       { return lfeWindowDb; }
+
     double decimatedRate() const    { return fs; }
     double windowSeconds() const    { return windowSec; }
 
@@ -147,6 +163,9 @@ private:
     std::array<double, numPairs> globalRe {}, globalPx {}, globalPl {};
     double globalTime = 0.0;
     size_t globalBinLo = 0, globalBinHi = 0;
+
+    double lfeWindowDb = -200.0, lfeSilentSeconds = 0.0;
+    bool autoResetPending = false, correlationCleared = true;
     TransientDetector transients;
     int nWin = 0, stride = 1;
 

@@ -208,10 +208,17 @@ void MainComponent::buildCards()
 
     inertia.format = [] (double v) { return juce::String ((int) v) + "%"; };
     integration.format = [] (double v) { return juce::String (v, 1) + " s"; };
-    threshold.format = [] (double v) { return juce::String::fromUTF8 ("\xc2\xb1") + juce::String (v, 2); };
+    // Phase alert sensitivity: how close to a full copy the LFE must be
+    sensitivityBox.addItem ("Soft (-0.90)", 1);
+    sensitivityBox.addItem ("Medium (-0.75)", 2);
+    sensitivityBox.addItem ("Strong (-0.50)", 3);
+    sensitivityBox.setSelectedId (3, juce::dontSendNotification);
+    sensitivityBox.setTooltip ("Correlation between the LFE and a screen channel from which the phase alert fires.\n"
+                               "Soft: only near-copies. Strong: from half-correlated content.");
+    sensitivityLabel.setFont (uiFont (13.0f));
     decay.format = [] (double v) { return juce::String (v, 2) + " s"; };
 
-    for (auto* slider : { &inertia, &integration, &threshold, &decay })
+    for (auto* slider : { &inertia, &integration, &decay })
         slider->refresh();
 
 
@@ -279,10 +286,11 @@ void MainComponent::buildCards()
                   integration.setBounds (r.removeFromTop (46));
               });
 
-    populate (alertCard, 320, 206, { &threshold, &decay, &alertModeBox, &levelWeightToggle },
+    populate (alertCard, 320, 206, { &sensitivityLabel, &sensitivityBox, &decay, &alertModeBox, &levelWeightToggle },
               [this] (juce::Rectangle<int> r)
               {
-                  threshold.setBounds (r.removeFromTop (46));
+                  sensitivityLabel.setBounds (r.removeFromTop (20));
+                  sensitivityBox.setBounds (r.removeFromTop (26));
                   r.removeFromTop (6);
                   decay.setBounds (r.removeFromTop (46));
                   r.removeFromTop (8);
@@ -463,7 +471,8 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster*)
 AlertTracker::Options MainComponent::alertOptions() const
 {
     AlertTracker::Options o;
-    o.threshold = threshold.value();
+    const double thresholds[] = { 0.90, 0.75, 0.50 };
+    o.threshold = thresholds[juce::jlimit (0, 2, sensitivityBox.getSelectedId() - 1)];
     o.decaySeconds = decay.value();
     o.outOfPhaseOnly = alertModeBox.getSelectedId() == 2;
     o.levelWeighted = levelWeightToggle.getToggleState();
@@ -575,36 +584,71 @@ void MainComponent::timerCallback()
 
     if (engine->analyze (engineSettings))
     {
+        // Nothing in the LFE any more: the engine has cleared what it measured
+        // against it, so the display starts from a clean slate too.
+        if (engine->takeAutoReset())
+        {
+            alerts.reset (engine->result().grid.size());
+
+            for (auto& channel : curveInertia)
+                channel.clear();
+        }
+
         alerts.update (engine->result(), alerting, dt);
         spectrum.update (engine->result(), alerts, dt);
-        correlation.update (engine->result(), alerts, alerting.threshold, alerting.outOfPhaseOnly);
+
+        // Everything shown as a curve or a number goes through the display
+        // inertia: flicker is averaged out, real changes are followed quickly.
+        auto shownAlerts = alerts;
+
+        for (size_t c = 0; c < 3; ++c)
+        {
+            auto& filters = curveInertia[c];
+            filters.resize (alerts.curves[c].size());
+
+            for (size_t i = 0; i < filters.size(); ++i)
+                shownAlerts.curves[c][i] = filters[i].update (alerts.curves[c][i], dt);
+        }
+
+        correlation.update (engine->result(), shownAlerts, alerting.threshold, alerting.outOfPhaseOnly);
 
         // Playback chains, robustness, LFE dependence, overlap
         ChainsInfo info;
         info.translation = simulator.compute (engine->result());
         info.sessionCorrelation = { { engine->globalCorrelation (0), engine->globalCorrelation (1), engine->globalCorrelation (2) } };
         info.sessionSeconds = engine->globalSeconds();
-        const auto& t = info.translation;
+        auto& t = info.translation;
 
-        if (cards[chainsCard].isVisible())
-            chainsView.update (info);
-
-        // The score follows the mix within a fraction of a second, but the
-        // number on screen only changes once it has really moved, so that it
-        // can be read instead of flickering between two values.
         if (! t.hasBass)
         {
-            shownScore = -1.0;
+            for (auto& filter : readoutInertia)
+                filter.reset();
+
+            chainInertia.clear();
             displayedScore = -1;
         }
         else
         {
-            shownScore = shownScore < 0.0 ? t.robustness
-                                          : shownScore + juce::jmin (1.0, dt / 0.15) * (t.robustness - shownScore);
+            t.robustness = readoutInertia[0].update (t.robustness, dt);
+            t.interaction = readoutInertia[1].update (t.interaction, dt);
+            t.dependence = readoutInertia[2].update (t.dependence, dt);
+            t.lfeBalanceDb = readoutInertia[3].update (t.lfeBalanceDb, dt);
+            t.lfeShare = readoutInertia[4].update (t.lfeShare, dt);
+            chainInertia.resize (t.chains.size() * 2);
 
-            if (displayedScore < 0 || std::abs (shownScore - displayedScore) >= 1.5)
-                displayedScore = juce::roundToInt (shownScore);
+            for (size_t k = 0; k < t.chains.size(); ++k)
+            {
+                t.chains[k].changeDb = chainInertia[k * 2].update (t.chains[k].changeDb, dt);
+                t.chains[k].penalty = chainInertia[k * 2 + 1].update (t.chains[k].penalty, dt);
+            }
+
+            // The number on screen only changes once it has really moved
+            if (displayedScore < 0 || std::abs (t.robustness - displayedScore) >= 1.5)
+                displayedScore = juce::roundToInt (t.robustness);
         }
+
+        if (cards[chainsCard].isVisible())
+            chainsView.update (info);
 
         spectrum.setScore ((double) displayedScore);
         spectrum.setOverlap ({ { t.overlap[0].amount, t.overlap[1].amount, t.overlap[2].amount } });
@@ -628,11 +672,12 @@ void MainComponent::timerCallback()
 
         if (t.hasBass)
         {
-            historySample.fragility = juce::jmax (historySample.fragility, (float) (1.0 - t.robustness / 100.0));
+            const auto score = (float) (t.robustness / 100.0);
+            historySample.score = historySample.scored ? juce::jmin (historySample.score, score) : score;
+            historySample.scored = true;
             historySample.dependence = juce::jmax (historySample.dependence,
                                                    (float) juce::jlimit (0.0, 1.0, (t.lfeShare - 0.5) / 0.5));
         }
-
     }
 
     historyClock += dt;
@@ -695,7 +740,7 @@ void MainComponent::loadState()
     header.setAnimationEnabled (animationToggle.getToggleState());
     inertia.setValue (settings->getDoubleValue ("inertia", 70.0));
     integration.setValue (settings->getDoubleValue ("integration", 2.0));
-    threshold.setValue (settings->getDoubleValue ("alertThreshold", 0.5));
+    sensitivityBox.setSelectedId (settings->getIntValue ("alertSensitivity", 3), juce::dontSendNotification);
     decay.setValue (settings->getDoubleValue ("decay", 1.0));
     rangeBox.setSelectedId (settings->getIntValue ("levelRange", 96), juce::dontSendNotification);
     alertModeBox.setSelectedId (settings->getIntValue ("alertMode", 1), juce::dontSendNotification);
@@ -722,7 +767,7 @@ void MainComponent::saveState()
     settings->setValue ("animation", animationToggle.getToggleState());
     settings->setValue ("inertia", inertia.value());
     settings->setValue ("integration", integration.value());
-    settings->setValue ("alertThreshold", threshold.value());
+    settings->setValue ("alertSensitivity", sensitivityBox.getSelectedId());
     settings->setValue ("decay", decay.value());
     settings->setValue ("levelRange", rangeBox.getSelectedId());
     settings->setValue ("alertMode", alertModeBox.getSelectedId());

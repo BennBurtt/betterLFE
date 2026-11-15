@@ -6,6 +6,7 @@
 #include "AudioInput.h"
 #include "ChannelFormats.h"
 #include "Widgets.h"
+#include "../core/Inertia.h"
 
 namespace subguard
 {
@@ -96,18 +97,24 @@ private:
     juce::Label formatLabel { {}, "Channel Format:" }, deviceLabel { {}, "Input Device:" },
                 fpsLabel { {}, "Refresh Rate:" }, windowLabel { {}, "Time / Frequency:" },
                 rangeLabel { {}, "Level range:" }, statusLabel;
-    juce::ComboBox formatBox, deviceBox, fpsBox, windowBox, rangeBox, alertModeBox;
+    juce::ComboBox formatBox, deviceBox, fpsBox, windowBox, rangeBox, alertModeBox, sensitivityBox;
+    juce::Label sensitivityLabel { {}, "Phase alert sensitivity:" };
     juce::ToggleButton lfeGainToggle { "LFE +10 dB (theatre level)" }, animationToggle { "Background animation" },
                        peakHoldToggle { "Peak hold" }, tiltToggle { "Bass tilt (old display)" },
                        levelWeightToggle { "Weigh by level balance" };
     LabelledSlider inertia { "Inertia:", 0, 100, 1, 70 }, integration { "Integration:", 0.5, 5.0, 0.1, 2.0 },
-                   threshold { "Threshold:", 0.0, 1.0, 0.01, 0.5 }, decay { "Decay:", 0.1, 4.0, 0.05, 1.0 };
+                   decay { "Decay:", 0.1, 4.0, 0.05, 1.0 };
     ChainsView chainsView;
     juce::TextButton resetSessionButton { "Reset session" };
 
     double lastTick = 0.0, engineRate = 0.0, demoTime = 0.0;
-    double shownScore = -1.0, historyClock = 0.0;
+    double historyClock = 0.0;
     int displayedScore = -1;
+
+    // Display inertia of every number and curve shown
+    std::array<Inertia, 5> readoutInertia;              // score, interaction, dependence, LFE balance, LFE share
+    std::vector<Inertia> chainInertia;                  // two per playback system: dB and penalty
+    std::array<std::vector<Inertia>, 3> curveInertia;   // correlation curves
     HistoryStrip::Sample historySample;
     std::array<double, 3> transientFlash { { 0.0, 0.0, 0.0 } };
     int inputGeneration = -1, framesShown = 0;

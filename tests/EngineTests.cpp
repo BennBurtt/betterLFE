@@ -2,6 +2,7 @@
 // Plain executable: exits with 0 when every check passes.
 
 #include "../core/AlertTracker.h"
+#include "../core/Inertia.h"
 #include "../core/LfeEngine.h"
 #include "../core/PlaybackSim.h"
 
@@ -1019,6 +1020,117 @@ static void testPlaybackChains()
     }
 }
 
+static void testInertiaAndAutoReset()
+{
+    std::printf ("display inertia, automatic reset\n");
+    const double frame = 1.0 / 60.0;
+
+    {
+        // A value that flickers between 0.1 and 0.9 ten times a second: the read-out settles near 0.5
+        Inertia shown;
+        double lo = 1e9, hi = -1e9;
+
+        for (int i = 0; i < 600; ++i)
+        {
+            const double v = shown.update ((i / 6) % 2 == 0 ? 0.1 : 0.9, frame);
+
+            if (i >= 360)
+            {
+                lo = std::min (lo, v);
+                hi = std::max (hi, v);
+            }
+        }
+
+        check (lo > 0.40 && hi < 0.60, "flicker 0.1 / 0.9: read-out stays near the middle", hi - lo);
+        check (hi - lo < 0.08, "flicker 0.1 / 0.9: read-out barely moves", hi - lo);
+        std::printf ("  flicker between 0.1 and 0.9: read-out moves by %.3f\n", hi - lo);
+    }
+    {
+        // A real change from 1 to 2: followed quickly
+        Inertia shown;
+
+        for (int i = 0; i < 120; ++i)
+            shown.update (1.0, frame);
+
+        check (std::abs (shown.value() - 1.0) < 1e-12, "steady input: read-out equals it", shown.value());
+        int frames = 0;
+
+        while (shown.update (2.0, frame) < 1.9 && frames < 600)
+            ++frames;
+
+        check (frames * frame < 0.8, "step from 1 to 2: 90 % of the way in under 0.8 s", frames * frame);
+        std::printf ("  step from 1 to 2: 90 %% reached after %.2f s\n", frames * frame);
+    }
+    {
+        // Slow drift on top of flicker: the read-out follows the drift, not the flicker
+        Inertia shown;
+        double worst = 0.0;
+
+        for (int i = 0; i < 1200; ++i)
+        {
+            const double trend = i * frame * 0.05;      // +0.05 per second
+            const double v = shown.update (trend + ((i / 3) % 2 == 0 ? -0.3 : 0.3), frame);
+
+            if (i > 300)
+                worst = std::max (worst, std::abs (v - trend));
+        }
+
+        check (worst < 0.12, "drift under flicker: read-out stays on the drift", worst);
+    }
+    {
+        // The LFE stops: what was measured against it is cleared by itself
+        const auto n = noise (9.0, 81);
+        Scene s;
+        s.l = n;
+        s.lfe = Signal (n.begin(), n.begin() + 4 * sampleRate);     // LFE present for 4 s only
+
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        const auto data = s.interleaved();
+        int resets = 0;
+        double before = 0.0, after = 1.0, resetAt = -1.0;
+
+        for (size_t pos = 0; pos + 800 <= s.length(); pos += 800)
+        {
+            e.push (data.data() + pos * numChannels, 800);
+            e.analyze ({});
+            const double t = (double) pos / sampleRate;
+
+            if (e.takeAutoReset())
+            {
+                ++resets;
+                resetAt = t;
+            }
+
+            const double c = over (e.result(), e.result().correlation[chL]).mean;
+
+            if (t > 3.0 && t < 3.9)
+                before = c;
+
+            if (t > 7.5)
+                after = std::abs (c);
+        }
+
+        check (before > 0.95, "while the LFE plays: correlation +1", before);
+        check (resets == 1, "the LFE goes silent: one automatic reset", resets);
+        check (resetAt > 4.0 && resetAt < 6.5, "reset within about 2 s of the LFE stopping", resetAt - 4.0);
+        check (after < 0.02, "after the reset: nothing left on the correlation curve", after);
+        check (e.lfeLevelDb() < -100.0, "LFE level reads as silent", e.lfeLevelDb());
+        std::printf ("  automatic reset %.1f s after the LFE stopped\n", resetAt - 4.0);
+    }
+    {
+        // A very quiet LFE (-80 dBFS) is not silence: no reset
+        const auto n = noise (6.0, 82);
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        Scene s;
+        s.l = n;
+        s.lfe = scaled (n, 0.001);
+        int resets = 0;
+        run (e, s, {}, [&] (double) { resets += e.takeAutoReset(); });
+        check (resets == 0, "LFE at -80 dBFS: still analysed, no reset", resets);
+        check (over (e.result(), e.result().correlation[chL]).lo > 0.95, "LFE at -80 dBFS: correlation +1", 0.0);
+    }
+}
+
 int main()
 {
     testFilterDesign();
@@ -1031,6 +1143,7 @@ int main()
     testLowLevelAndLowFrequency();
     testTransients();
     testPlaybackChains();
+    testInertiaAndAutoReset();
 
     std::printf ("\n%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;

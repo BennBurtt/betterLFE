@@ -30,6 +30,11 @@ namespace
 
     constexpr double globalLoHz = 20.0, globalHiHz = 120.0;
 
+    // Below this level for this long, the LFE is considered absent and what was
+    // measured against it is cleared.
+    constexpr double lfeSilenceDb = -100.0;
+    constexpr double lfeSilenceSeconds = 0.5;
+
     double dbToGain (double db)   { return std::pow (10.0, db / 20.0); }
 }
 
@@ -420,6 +425,27 @@ bool LfeEngine::analyze (const Settings& settings)
         }
     }
 
+    // LFE level over the window, and automatic clearing once it has gone
+    {
+        const auto& r = ring[chLFE];
+        double sum = 0.0;
+
+        for (double v : r)
+            sum += v * v;
+
+        lfeWindowDb = 10.0 * std::log10 (sum / nWin + 1e-30);
+        lfeSilentSeconds = lfeWindowDb < lfeSilenceDb ? lfeSilentSeconds + dt : 0.0;
+
+        if (lfeSilentSeconds >= lfeSilenceSeconds && ! correlationCleared)
+        {
+            resetCorrelation();
+            autoResetPending = true;
+        }
+
+        if (lfeWindowDb >= lfeSilenceDb)
+            correlationCleared = false;
+    }
+
     // How much of the window actually holds signal for each pair (energy-weighted
     // duration). Right after an onset this is far shorter than the window, and
     // the estimate rests on correspondingly little data.
@@ -600,6 +626,17 @@ double LfeEngine::globalCorrelation (int pair) const
 {
     const auto p = (size_t) pair;
     return std::clamp (globalRe[p] / (std::sqrt (globalPx[p] * globalPl[p]) + tiny), -1.0, 1.0);
+}
+
+void LfeEngine::resetCorrelation()
+{
+    std::fill (stats.begin(), stats.end(), 0.0);
+    std::fill (fastStats.begin(), fastStats.end(), 0.0);
+    std::fill (m1.begin(), m1.end(), 0.0);
+    std::fill (m2.begin(), m2.end(), 0.0);
+    std::fill (m1Fast.begin(), m1Fast.end(), 0.0);
+    std::fill (m2Fast.begin(), m2Fast.end(), 0.0);
+    correlationCleared = true;
 }
 
 void LfeEngine::resetGlobal()
