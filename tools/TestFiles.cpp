@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <functional>
 #include <memory>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -175,8 +176,8 @@ namespace
 
         const size_t frames = interleaved6.size() / 6, block = 800;
         std::vector<float> four (block * 4);
-        std::array<std::vector<double>, 3> delays;
-        std::array<int, 3> inverted {}, counted {};
+        std::vector<double> delays;
+        int mixAttacks = 0, inLfe = 0, inverted = 0;
         double scoreSum = 0, interactionSum = 0, dependenceSum = 0, balanceSum = 0;
         std::array<double, 3> correlationSum {}, alertSum {};
         int averaged = 0;
@@ -202,13 +203,20 @@ namespace
             tracker.update (engine.result(), options, (double) block / sampleRate);
 
             for (const auto& e : engine.takeTransientEvents())
-                if (AlertTracker::severity (AlertTracker::transientMeasure (e, options), options.threshold) > 0.0)
+            {
+                ++mixAttacks;
+
+                if (! e.inLfe)
+                    continue;
+
+                ++inLfe;
+
+                if (e.match > 0.5)
                 {
-                    const auto c = (size_t) e.channel;
-                    delays[c].push_back (e.delayMs);
-                    inverted[c] += std::abs (e.phase) > 2.0 * pi / 3.0;
-                    ++counted[c];
+                    delays.push_back (e.delayMs);
+                    inverted += std::abs (e.phase) > 2.0 * pi / 3.0;
                 }
+            }
 
             // read-outs averaged over the last four seconds of the file
             if (pos + (size_t) (4 * sampleRate) >= frames)
@@ -257,23 +265,19 @@ namespace
             r.alert[c] = alertSum[c] / n;
         }
 
-        std::string text;
-        const char* names[] = { "L", "C", "R" };
-
-        for (size_t c = 0; c < 3; ++c)
+        if (mixAttacks > 0)
         {
-            if (delays[c].empty())
-                continue;
+            char buffer[160];
+            std::sort (delays.begin(), delays.end());
 
-            std::sort (delays[c].begin(), delays[c].end());
-            char buffer[96];
-            std::snprintf (buffer, sizeof (buffer), "%s%s: %d hits, LFE %+.1f ms%s", text.empty() ? "" : "; ", names[c], counted[c],
-                           delays[c][delays[c].size() / 2], inverted[c] * 2 > counted[c] ? ", inverted" : "");
-            text += buffer;
+            if (delays.empty())
+                std::snprintf (buffer, sizeof (buffer), "%d attacks in the mix, %d of them in the LFE", mixAttacks, inLfe);
+            else
+                std::snprintf (buffer, sizeof (buffer), "%d attacks in the mix, %d of them in the LFE: LFE %+.1f ms%s", mixAttacks, inLfe,
+                               delays[delays.size() / 2], inverted * 2 > (int) delays.size() ? ", inverted" : "");
+
+            r.transients = buffer;
         }
-
-        if (! text.empty())
-            r.transients = text;
 
         return r;
     }
@@ -408,18 +412,18 @@ int main (int argc, char** argv)
     };
 
     hits ("11_transients_aligned", "Kicks in the centre channel, the LFE hits at the same instant",
-          "Transients strip, C: 'Aligned, in phase'.", 0.0, 1.0, 1.0, false);
+          "Transients strip: 'Aligned, in phase'.", 0.0, 1.0, 1.0, false);
     hits ("12_transients_lfe_12ms_late", "Kicks in the centre channel, the LFE hits 12 ms late",
-          "Transients strip, C: 'LFE late 12.0 ms'.", 0.012, 1.0, 1.0, false);
+          "Transients strip: 'LFE late 12.0 ms'.", 0.012, 1.0, 1.0, false);
     hits ("13_transients_lfe_6ms_early", "Kicks in the centre channel, the LFE hits 6 ms early",
-          "Transients strip, C: 'LFE early 6.0 ms'.", -0.006, 1.0, 1.0, false);
+          "Transients strip: 'LFE early 6.0 ms'.", -0.006, 1.0, 1.0, false);
     hits ("14_transients_inverted", "Kicks in the centre channel, the LFE hits at the same instant with flipped polarity",
-          "Transients strip, C: 'Aligned, polarity inverted'.", 0.0, -1.0, 1.0, false);
+          "Transients strip: 'Aligned, polarity inverted'.", 0.0, -1.0, 1.0, false);
     hits ("15_transients_very_quiet", "Same as file 12, 60 dB lower (peaks around -68 dBFS)",
-          "Transients strip, C: 'LFE late 12.0 ms', exactly as at full level. Set the level range to -120 dB to see the curves.",
+          "Transients strip: 'LFE late 12.0 ms', exactly as at full level. Set the level range to -120 dB to see the curves.",
           0.012, 1.0, 0.001, false);
     hits ("16_transients_low_boom_under_bed", "28 Hz booms in the centre under a louder 60-180 Hz bed; the LFE boom is 8 ms late",
-          "Transients strip, C: 'LFE late' around 8-10 ms with a wide +/-, or 'timing not measurable': a single low frequency is hard to time.",
+          "Transients strip: 'LFE late' around 8-10 ms with a wide +/-, or 'timing not measurable': a single low frequency is hard to time.",
           0.008, 1.0, 1.0, true);
 
     add ("17_level_calibration", "Pure tones: 40 Hz at -20 dBFS in the LFE, 80 Hz at -20 dBFS in the centre, 8 Hz at -30 dBFS in the LFE",
@@ -437,6 +441,41 @@ int main (int argc, char** argv)
          });
 
     add ("18_silence", "Digital silence", "Score shows '--'. Nothing moves.", 10.0, [] { return [] (double) { return Frame {}; }; });
+
+    // Music-like: bass line in L, R and LFE, kick (thump and click) in the centre, hi-hat off the beat in L and R
+    const auto music = [&add] (std::string file, std::string title, std::string lookFor, bool lfeKick, double lfeDelay, double lfeGain)
+    {
+        add (std::move (file), std::move (title), std::move (lookFor), 30.0, [=]
+        {
+            auto rng = std::make_shared<std::mt19937> (77u);
+            auto low = std::make_shared<double> (0.0);
+            return [=] (double t)
+            {
+                if (t < 0.0)
+                    return Frame {};
+
+                std::normal_distribution<double> normal (0.0, 1.0);
+                const double beat = 0.5, onBeat = std::fmod (t, beat), offBeat = std::fmod (t + beat / 2.0, beat);
+                const double click = onBeat < 0.004 ? normal (*rng) * std::exp (-onBeat / 0.0012) : 0.0;
+                const double white = normal (*rng);
+                *low += 0.35 * (white - *low);
+                const double hat = offBeat < 0.05 ? (white - *low) * std::exp (-offBeat / 0.012) : 0.0;
+                const double bass = 0.25 * std::sin (2.0 * pi * 55.0 * t) * (0.7 + 0.3 * std::sin (2.0 * pi * 0.5 * t))
+                                      + 0.1 * std::sin (2.0 * pi * 110.0 * t);
+                const double lfe = 0.3 * asHeard * std::sin (2.0 * pi * 55.0 * t + 1.0)
+                                     + (lfeKick ? 0.5 * asHeard * lfeGain * kick (std::fmod (t - lfeDelay + beat, beat)) : 0.0);
+                return Frame { 0.5 * (0.7 * bass + 0.15 * hat), 0.5 * (0.7 * bass - 0.12 * hat), 0.5 * (0.5 * kick (onBeat) + 0.25 * click), 0.5 * lfe };
+            };
+        });
+    };
+
+    music ("19_music_kick_in_lfe_12ms_late", "Bass line, kick and hi-hat; the LFE carries the bass and the kick, 12 ms late",
+           "Transients strip: about four attacks of the mix per second, half of them (the kicks) in the LFE: 'LFE late' around 12 ms. The hi-hats are not in the LFE.",
+           true, 0.012, 1.0);
+    music ("20_music_kick_in_lfe_inverted", "Same music; the LFE kick is on time with flipped polarity",
+           "Transients strip: the kicks are in the LFE: 'Aligned, polarity inverted'.", true, 0.0, -1.0);
+    music ("21_music_kick_not_in_lfe", "Same music; the LFE only carries the bass line, no kick",
+           "Transients strip: attacks of the mix are counted, none of them in the LFE.", false, 0.0, 1.0);
 
     //==========================================================================
     const std::string notes = folder + "/README.txt";

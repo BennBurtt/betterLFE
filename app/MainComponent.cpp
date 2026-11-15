@@ -711,16 +711,16 @@ void MainComponent::timerCallback()
         historySample = {};
     }
 
-    // Transient detector: one verdict per attack found in a screen channel
+    // Transient engine: one event per attack of the mix; those the LFE shares get a verdict
     for (const auto& event : engine->takeTransientEvents())
     {
-        const double severity = AlertTracker::severity (AlertTracker::transientMeasure (event, alerting), alerting.threshold);
+        const double severity = event.inLfe ? AlertTracker::severity (AlertTracker::transientMeasure (event, alerting), alerting.threshold) : 0.0;
+        transientStrip.show (event, severity);
 
+        // The reference is the downmix: every screen channel that is not muted lights up
         if (severity > 0.0)
-        {
-            transientStrip.show (event, severity);
-            transientFlash[(size_t) event.channel] = juce::jmax (transientFlash[(size_t) event.channel], severity);
-        }
+            for (auto& flash : transientFlash)
+                flash = juce::jmax (flash, severity);
     }
 
     transientStrip.advance (dt);

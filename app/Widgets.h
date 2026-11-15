@@ -1,5 +1,7 @@
 #pragma once
 
+#include <deque>
+
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "../core/AlertTracker.h"
@@ -129,6 +131,9 @@ public:
     static constexpr double unmeasurableMs = 8.0;       // precision too poor to say anything about timing
     static constexpr double holdSeconds = 4.0, fadeSeconds = 1.5;
 
+    static constexpr double countSeconds = 10.0;        // the counters cover this long
+
+    /** Every attack found in the mix goes through here. `severity` > 0 shows it as the current verdict. */
     void show (const TransientEvent&, double severity);
     void advance (double seconds);
     void paint (juce::Graphics&) override;
@@ -140,7 +145,8 @@ private:
         double severity = 0.0, age = 1e9;
     };
 
-    std::array<Cell, 3> cells;
+    Cell cell;
+    std::deque<std::pair<double, bool>> recent;         // age, in the LFE
 };
 
 /** Signed LFE / screen-channel interaction per frequency, -1 .. +1. */

@@ -44,9 +44,10 @@
 //                   bass-managed systems. The worst case, not an average: a
 //                   mix that cancels on one plausible system is not made safe
 //                   by the systems where it survives.
-//     dependence  = 0.72 x the penalty of the stereo downmix without LFE, i.e.
+//     dependence  = 0.95 x the penalty of the stereo downmix without LFE, i.e.
 //                   of what the bass loses wherever the LFE is missing or
-//                   wrongly set.
+//                   wrongly set. Infra-bass is left out of it: below 25 Hz
+//                   it does not count at all, from 60 Hz up it counts fully.
 //
 //     robustness = 100 . (1 - interaction) . (1 - dependence)
 //
@@ -138,6 +139,15 @@ public:
     static constexpr double overlapWindowDb = 10.0;     // levels further apart than this do not overlap
     static constexpr double balanceWarningDb = 6.0;     // LFE this far above the screen: the bass then follows each room's subwoofer level
 
+    // What losing the LFE costs in a stereo downmix depends on frequency. Below
+    // about 25 Hz a tone is close to the threshold of hearing (78.5 dB SPL at
+    // 20 Hz, 68.7 dB at 25 Hz in ISO 226) and no television, soundbar or small
+    // loudspeaker reproduces it: it is felt in a cinema, and its absence
+    // changes nothing in the downmix. From about 60 Hz up (threshold 37.5 dB at
+    // 63 Hz; a television that reaches 60 Hz is already a good one) it counts
+    // fully. In between, the weight rises linearly in octaves.
+    static constexpr double infraLoHz = 25.0, infraHiHz = 60.0;
+
     // Rating bands and, for each, the level change that doubles loudness
     // (ISO 226:2003 around 80 phon, at 25, 40, 70 and 100 Hz).
     static constexpr double bandLimits[ChainResult::numBands + 1] = { 20.0, 30.0, 60.0, 90.0, 120.0 };
@@ -152,9 +162,10 @@ public:
     static constexpr double delayRelevance[5] = { 0.25, 0.25, 1.0, 0.5, 0.5 };
     static constexpr double homeRelevance = 1.0;
 
-    // With all the bass in the LFE the score stops at about 22: bad, since the
-    // room alone then decides the bass, but not as bad as a cancellation.
-    static constexpr double dependenceCeiling = 0.72;
+    // With all the bass in the LFE, spread over 20-120 Hz, the score stops at
+    // about 22: bad, since the room alone then decides the bass, but not as bad
+    // as a cancellation. (The infra-bass part of it is not counted.)
+    static constexpr double dependenceCeiling = 0.95;
 
     Translation compute (const Analysis&, Level level = Level::strong) const;
 };

@@ -1,6 +1,6 @@
 # Fichiers de test 5.1
 
-Le générateur `subguard_testfiles` écrit 18 fichiers WAV et mesure chacun avec le
+Le générateur `subguard_testfiles` écrit 21 fichiers WAV et mesure chacun avec le
 moteur d'analyse. `./build_mac.sh` les crée dans `test-files/` (environ 300 Mo,
 hors git), avec un `README.txt` qui reprend ce tableau.
 
@@ -11,27 +11,33 @@ hors git), avec un `README.txt` qui reprend ce tableau.
 
 | Fichier | Contenu | À observer | Score mesuré | Transitoires mesurés |
 |---|---|---|---|---|
-| `01_clean_mix` | Mix propre : la façade porte le grave, LFE sans rapport et 10 dB dessous | Score proche de 100, aucune alerte | 100 | — |
-| `02_lfe_copies_centre` | LFE = copie du centre, aussi fort à l'écoute | Score 0, enceinte C en alerte, heat-map ambre, courbe C à +1 | 0 | C: 3 coups, LFE -0.0 ms |
-| `03_lfe_inverted_copy` | LFE = centre en polarité inversée | Score 0, heat-map rouge, courbe C à −1 ; alerte aussi en mode « Out of phase only » ; polarité de séance négative pour C | 0 | C: 3 coups, LFE -0.0 ms, inversé |
-| `04_lfe_copy_5ms_late` | LFE = copie du centre, 5 ms en retard | Score bas ; la courbe C passe de +1 en bas à −1 vers 100 Hz | 0 | C: 3 coups, LFE +5.0 ms |
-| `05_lfe_only` | Tout le grave dans le LFE, façade muette | Score 20–25, « LFE dependence » bas, aucune alerte de phase | 24 | — |
-| `06_lfe_6dB_above_screen` | LFE sans rapport, 6 dB au-dessus de la façade | Score 20–30, ligne « LFE against the screen » en orange | 27 | — |
-| `07_lfe_equal_unrelated` | LFE sans rapport, aussi fort que la façade | Score 60–70 : pas d'interaction, mais la moitié du grave repose sur le LFE | 70 | — |
-| `08_lfe_partly_shared` | LFE 10 dB sous le centre, copié à 60 % sur lui | Score vers 60–65, « dangereux mais passable » ; courbe C vers +0,6 | 65 | C: 3 coups, LFE -0.4 ms |
-| `09_per_channel` | L en phase avec le LFE, R hors phase, C sans rapport | Enceinte L en ambre, R en rouge, C au repos. Le score reste haut : ce que L ajoute, R le retire | 99 | L: 3 coups, LFE +0.7 ms; R: 3 coups, LFE -0.4 ms, inversé |
-| `10_overlap_60_120` | Façade et LFE forts et sans rapport | Marques de recouvrement ambre sous 60–90 et 90–120 Hz | 70 | — |
-| `11_transients_aligned` | Kicks au centre, LFE au même instant | Bandeau Transients, C : « Aligned, in phase » | 0 | C: 14 coups, LFE -0.0 ms |
-| `12_transients_lfe_12ms_late` | Kicks au centre, LFE 12 ms en retard | C : « LFE late 12.0 ms » | 5 | C: 14 coups, LFE +12.0 ms |
-| `13_transients_lfe_6ms_early` | Kicks au centre, LFE 6 ms en avance | C : « LFE early 6.0 ms » | 0 | C: 14 coups, LFE -6.0 ms |
-| `14_transients_inverted` | Kicks au centre, LFE au même instant, polarité inversée | C : « Aligned, polarity inverted » | 0 | C: 14 coups, LFE +0.0 ms, inversé |
-| `15_transients_very_quiet` | Comme le 12, mais 60 dB plus bas (crêtes vers −68 dBFS) | C : « LFE late 12.0 ms », identique au plein niveau | 5 | C: 14 coups, LFE +12.0 ms |
-| `16_transients_low_boom_under_bed` | Booms à 28 Hz au centre sous un fond 60–180 Hz plus fort ; boom du LFE 8 ms en retard | C : « LFE late » vers 8–10 ms avec un ± large, ou « timing not measurable » | 58 | C: 14 coups, LFE +10.1 ms |
-| `17_level_calibration` | Sinusoïdes : 40 Hz à −20 dBFS dans le LFE, 80 Hz à −20 dBFS au centre, 8 Hz à −30 dBFS dans le LFE | Au curseur : LFE −20,0 dB à 40 Hz, LCR −23,0 dB à 80 Hz (la somme d'écran est affichée 3 dB plus bas), LFE −30,0 dB à 8 Hz | 35 | — |
+| `01_clean_mix` | Mix propre : la façade porte le grave, LFE sans rapport et 10 dB dessous | Score proche de 100, aucune alerte | 100 | 4 attaques du mix, 2 dans le LFE |
+| `02_lfe_copies_centre` | LFE = copie du centre, aussi fort à l'écoute | Score 0, enceinte C en alerte, heat-map ambre, courbe C à +1 | 0 | 5 attaques du mix, 4 dans le LFE : LFE -0.0 ms |
+| `03_lfe_inverted_copy` | LFE = centre en polarité inversée | Score 0, heat-map rouge, courbe C à −1 ; alerte aussi en mode « Out of phase only » ; polarité de séance négative pour C | 0 | 5 attaques du mix, 4 dans le LFE : LFE -0.0 ms, inversé |
+| `04_lfe_copy_5ms_late` | LFE = copie du centre, 5 ms en retard | Score bas ; la courbe C passe de +1 en bas à −1 vers 100 Hz | 0 | 5 attaques du mix, 4 dans le LFE : LFE +5.0 ms |
+| `05_lfe_only` | Tout le grave dans le LFE, façade muette | Score 20–25, « LFE dependence » bas, aucune alerte de phase | 23 | — |
+| `06_lfe_6dB_above_screen` | LFE sans rapport, 6 dB au-dessus de la façade | Score 20–30, ligne « LFE against the screen » en orange | 26 | 2 attaques du mix, 2 dans le LFE |
+| `07_lfe_equal_unrelated` | LFE sans rapport, aussi fort que la façade | Score 60–70 : pas d'interaction, mais la moitié du grave repose sur le LFE | 71 | 2 attaques du mix, 2 dans le LFE |
+| `08_lfe_partly_shared` | LFE 10 dB sous le centre, copié à 60 % sur lui | Score vers 60–65, « dangereux mais passable » ; courbe C vers +0,6 | 65 | 2 attaques du mix, 2 dans le LFE : LFE -0.4 ms |
+| `09_per_channel` | L en phase avec le LFE, R hors phase, C sans rapport | Enceinte L en ambre, R en rouge, C au repos. Le score reste haut : ce que L ajoute, R le retire | 99 | 3 attaques du mix, 1 dans le LFE |
+| `10_overlap_60_120` | Façade et LFE forts et sans rapport | Marques de recouvrement ambre sous 60–90 et 90–120 Hz | 71 | 2 attaques du mix, 1 dans le LFE |
+| `11_transients_aligned` | Kicks au centre, LFE au même instant | Bandeau Transients : « Aligned, in phase » | 0 | 14 attaques du mix, 14 dans le LFE : LFE -0.0 ms |
+| `12_transients_lfe_12ms_late` | Kicks au centre, LFE 12 ms en retard | « LFE late 12.0 ms » | 4 | 14 attaques du mix, 14 dans le LFE : LFE +12.0 ms |
+| `13_transients_lfe_6ms_early` | Kicks au centre, LFE 6 ms en avance | « LFE early 6.0 ms » | 0 | 14 attaques du mix, 14 dans le LFE : LFE -6.0 ms |
+| `14_transients_inverted` | Kicks au centre, LFE au même instant, polarité inversée | « Aligned, polarity inverted » | 0 | 14 attaques du mix, 14 dans le LFE : LFE +0.0 ms, inversé |
+| `15_transients_very_quiet` | Comme le 12, mais 60 dB plus bas (crêtes vers −68 dBFS) | « LFE late 12.0 ms », identique au plein niveau | 4 | 14 attaques du mix, 14 dans le LFE : LFE +12.0 ms |
+| `16_transients_low_boom_under_bed` | Booms à 28 Hz au centre sous un fond 60–180 Hz plus fort ; boom du LFE 8 ms en retard | « LFE late » vers 8–10 ms avec un ± large, ou « timing not measurable » | 65 | 19 attaques du mix, 14 dans le LFE : LFE +11.7 ms |
+| `17_level_calibration` | Sinusoïdes : 40 Hz à −20 dBFS dans le LFE, 80 Hz à −20 dBFS au centre, 8 Hz à −30 dBFS dans le LFE | Au curseur : LFE −20,0 dB à 40 Hz, LCR −23,0 dB à 80 Hz (la somme d'écran est affichée 3 dB plus bas), LFE −30,0 dB à 8 Hz | 53 | 1 attaques du mix, 1 dans le LFE |
 | `18_silence` | Silence numérique | Score « -- », rien ne bouge | -- | — |
-| `18 files and README.txt written to /` | Silence numérique | Score « -- », rien ne bouge | tmp/claude-0/-home-user-betterlfe/114ecf6f-41d6-525e-8c8d-460cc9303e4e/scratchpad/testfiles | — |
+| `19_music_kick_in_lfe_12ms_late` | Musique : ligne de basse (L, R et LFE), kick au centre (grave + clic), charleston à contretemps ; le LFE porte la basse et le kick, 12 ms en retard | Bandeau Transients : environ quatre attaques du mix par seconde, dont la moitié (les kicks) dans le LFE ; « LFE late » vers 12 ms. Les charlestons ne sont pas dans le LFE | 2 | 119 attaques du mix, 60 dans le LFE : LFE +12.0 ms |
+| `20_music_kick_in_lfe_inverted` | Même musique ; kick du LFE à l'heure, polarité inversée | Les kicks sont dans le LFE : « Aligned, polarity inverted » | 5 | 119 attaques du mix, 60 dans le LFE : LFE +0.0 ms, inversé |
+| `21_music_kick_not_in_lfe` | Même musique ; le LFE ne porte que la ligne de basse | Les attaques du mix sont comptées, aucune n'est dans le LFE | 3 | 119 attaques du mix, 1 dans le LFE : LFE -17.0 ms |
 
-Les fichiers 02 à 04, 08 et 09 signalent quelques « coups » alors qu'ils ne
-contiennent que du bruit tenu : le détecteur prend le début du son et certaines
-ondulations du bruit pour des attaques. Le verdict affiché reste juste (aligné,
-inversé, ou 5 ms de retard), puisque le LFE y est bien une copie de la façade.
+La colonne « Transitoires mesurés » compte les attaques trouvées dans le
+downmix L+C+R, puis celles que le LFE partage, avec le décalage médian du LFE.
+
+Sur les fichiers de bruit tenu (01 à 10), le moteur compte quelques attaques :
+le début du son, qui en est une, et de rares ondulations du bruit (une à deux
+sur 20 s). Quand le LFE est une copie de la façade, le verdict reste juste
+(aligné, inversé, ou 5 ms de retard). Le fichier 21 compte une attaque « dans
+le LFE » : c'est le début du fichier, où basse et LFE démarrent ensemble.

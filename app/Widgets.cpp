@@ -562,22 +562,28 @@ void SpectrumPlot::paint (juce::Graphics& g)
 //==============================================================================
 void TransientStrip::show (const TransientEvent& e, double severity)
 {
-    auto& cell = cells[(size_t) juce::jlimit (0, 2, e.channel)];
-    cell.event = e;
-    cell.severity = severity;
-    cell.age = 0.0;
+    recent.emplace_back (0.0, e.inLfe);
+
+    if (e.inLfe && severity > 0.0)
+    {
+        cell.event = e;
+        cell.severity = severity;
+        cell.age = 0.0;
+    }
+
     repaint();
 }
 
 void TransientStrip::advance (double seconds)
 {
-    bool visible = false;
+    const bool visible = cell.age < holdSeconds + fadeSeconds || ! recent.empty();
+    cell.age += seconds;
 
-    for (auto& cell : cells)
-    {
-        visible = visible || cell.age < holdSeconds + fadeSeconds;
-        cell.age += seconds;
-    }
+    for (auto& r : recent)
+        r.first += seconds;
+
+    while (! recent.empty() && recent.front().first > countSeconds)
+        recent.pop_front();
 
     if (visible)
         repaint();
@@ -591,18 +597,41 @@ void TransientStrip::paint (juce::Graphics& g)
 
     g.setColour (theme::dimText);
     g.setFont (uiFont (12.0f));
-    g.drawFittedText ("Transients\nLFE vs screen", 4, 0, FrequencyAxis::leftMargin + 30, getHeight(), juce::Justification::centredLeft, 2);
+    g.drawFittedText ("Transients\nmix vs LFE", 4, 0, FrequencyAxis::leftMargin + 30, getHeight(), juce::Justification::centredLeft, 2);
 
     auto area = getLocalBounds().toFloat().withTrimmedLeft ((float) FrequencyAxis::leftMargin + 36.0f)
                                           .withTrimmedRight ((float) FrequencyAxis::rightMargin).reduced (0.0f, 6.0f);
-    const float cellWidth = area.getWidth() / 3.0f;
-    const char* names[] = { "L", "C", "R" };
     const double range = TransientDetector::maxLagSeconds * 1000.0;
 
-    for (size_t c = 0; c < 3; ++c)
+    // Left: how many attacks of the mix, and how many of them are in the LFE too
     {
-        const auto& cell = cells[c];
-        auto box = area.removeFromLeft (cellWidth).reduced (6.0f, 0.0f);
+        auto box = area.removeFromLeft (area.getWidth() * 0.36f).reduced (6.0f, 0.0f);
+        g.setColour (juce::Colour (0xff1b1b1b));
+        g.fillRoundedRectangle (box, 5.0f);
+
+        int total = 0, shared = 0;
+
+        for (const auto& r : recent)
+        {
+            ++total;
+            shared += r.second;
+        }
+
+        auto inner = box.reduced (10.0f, 4.0f);
+        auto number = inner.removeFromLeft (86.0f);
+        g.setColour (total == 0 ? juce::Colour (0xff555555) : (shared > 0 ? juce::Colour (0xfff5c400) : theme::text));
+        g.setFont (uiFont (24.0f, true));
+        g.drawText (total == 0 ? juce::String::fromUTF8 ("\xe2\x80\x94") : juce::String (shared) + " / " + juce::String (total),
+                    number, juce::Justification::centredLeft);
+        g.setColour (theme::dimText);
+        g.setFont (uiFont (11.0f));
+        g.drawFittedText ("attacks of the mix also in the LFE\n(downmix L+C+R, last " + juce::String ((int) countSeconds) + " s)",
+                          inner.toNearestInt(), juce::Justification::centredLeft, 2);
+    }
+
+    // Right: how the LFE lines up with the last attack it shares with the mix
+    {
+        auto box = area.reduced (6.0f, 0.0f);
 
         g.setColour (juce::Colour (0xff1b1b1b));
         g.fillRoundedRectangle (box, 5.0f);
@@ -610,7 +639,7 @@ void TransientStrip::paint (juce::Graphics& g)
         auto inner = box.reduced (10.0f, 4.0f);
         g.setColour (theme::dimText);
         g.setFont (uiFont (15.0f, true));
-        g.drawText (names[c], inner.removeFromLeft (20.0f), juce::Justification::centredLeft);
+        g.drawText ("LFE", inner.removeFromLeft (40.0f), juce::Justification::centredLeft);
 
         // Delay scale: LFE early on the left, late on the right
         auto scaleRow = inner.removeFromBottom (14.0f);
@@ -631,7 +660,7 @@ void TransientStrip::paint (juce::Graphics& g)
             g.setColour (juce::Colour (0xff555555));
             g.setFont (uiFont (12.0f));
             g.drawText (juce::String::fromUTF8 ("\xe2\x80\x94"), inner, juce::Justification::centred);
-            continue;
+            return;
         }
 
         const auto& e = cell.event;

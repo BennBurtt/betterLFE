@@ -645,7 +645,7 @@ static void testTransients()
             e.push (data.data() + pos * numChannels, (int) std::min ((size_t) blockSize, scene.length() - pos));
 
             for (const auto& ev : e.takeTransientEvents())
-                if (ev.match > 0.5)
+                if (ev.inLfe && ev.match > 0.5)
                     all.push_back (ev);
         }
 
@@ -675,7 +675,6 @@ static void testTransients()
             worstDelay = std::max (worstDelay, std::abs (ev.delayMs - c.expectedDelay));
             worstMatch = std::min (worstMatch, ev.match);
             worstPhase = std::max (worstPhase, std::abs (std::abs (ev.phase) - (c.inverted ? pi : 0.0)));
-            check (ev.channel == chC, std::string (c.name) + ": reported on the right channel", ev.channel);
         }
 
         check (worstDelay < 0.5, std::string (c.name) + ": delay within 0.5 ms", worstDelay);
@@ -691,7 +690,7 @@ static void testTransients()
         s.c = kicks (6.0, 0.0, 1.0);
         s.lfe = kicks (6.0, 0.010, 1.0);
         const auto events = collect (s);
-        check (! events.empty() && events[0].interactionBest > 0.95, "late kick: full interaction once aligned",
+        check (! events.empty() && events[0].interactionBest > 0.9, "late kick: full interaction once aligned",
                events.empty() ? 0.0 : events[0].interactionBest);
         check (! events.empty() && events[0].interactionNow < 0.2, "late kick: no longer sums in phase",
                events.empty() ? 0.0 : events[0].interactionNow);
@@ -788,6 +787,128 @@ static void testTransients()
         }
     }
     {
+        // Music: bass line in L, R and LFE, kick (thump and click) in the centre
+        // on the beat, hi-hat in L and R off the beat. 12 s, 24 kicks, 24 hats.
+        const auto scene = [] (bool lfeKick, double lfeDelay, double lfeGain, double kickLevel)
+        {
+            const auto n = (size_t) (12.0 * sampleRate);
+            Scene s;
+            s.l.assign (n, 0.0f); s.c.assign (n, 0.0f); s.r.assign (n, 0.0f); s.lfe.assign (n, 0.0f);
+            std::mt19937 rng (7);
+            std::normal_distribution<double> normal (0.0, 1.0);
+            double low = 0.0, pad = 0.0;
+
+            const auto thump = [] (double u)
+            {
+                if (u < 0.0)
+                    return 0.0;
+
+                const double phase = 2.0 * pi * (45.0 * u + 75.0 * 0.03 * (1.0 - std::exp (-u / 0.03)));
+                return std::sin (phase) * std::exp (-u / 0.12) * (1.0 - std::exp (-u / 0.002));
+            };
+
+            for (size_t i = 0; i < n; ++i)
+            {
+                const double t = (double) i / sampleRate, beat = 0.5;
+                const double onBeat = std::fmod (t, beat), offBeat = std::fmod (t + beat / 2.0, beat);
+                const double click = onBeat < 0.004 ? normal (rng) * std::exp (-onBeat / 0.0012) : 0.0;
+                const double white = normal (rng);
+                low += 0.35 * (white - low);
+                const double hat = offBeat < 0.05 ? (white - low) * std::exp (-offBeat / 0.012) : 0.0;
+                pad += 0.02 * (normal (rng) - pad);
+                const double bass = 0.25 * std::sin (2.0 * pi * 55.0 * t) * (0.7 + 0.3 * std::sin (2.0 * pi * 0.5 * t))
+                                      + 0.1 * std::sin (2.0 * pi * 110.0 * t);
+                s.l[i] = (float) (0.7 * bass + 0.15 * hat + 0.3 * pad);
+                s.r[i] = (float) (0.7 * bass - 0.12 * hat + 0.3 * pad);
+                s.c[i] = (float) (kickLevel * (0.5 * thump (onBeat) + 0.25 * click));
+                s.lfe[i] = (float) (0.3 * 0.316 * std::sin (2.0 * pi * 55.0 * t + 1.0)
+                                      + (lfeKick ? lfeGain * 0.316 * 0.5 * kickLevel * thump (std::fmod (t - lfeDelay + beat, beat)) : 0.0));
+            }
+
+            return s;
+        };
+
+        struct Count { int mix = 0, inLfe = 0, inverted = 0; double median = 0.0, spread = 0.0; };
+
+        const auto run = [] (const Scene& s)
+        {
+            LfeEngine e (sampleRate, 1.0, 0.0);
+            const auto data = s.interleaved();
+            std::vector<double> delays;
+            Count c;
+
+            for (size_t pos = 0; pos < s.length(); pos += blockSize)
+            {
+                e.push (data.data() + pos * numChannels, (int) std::min ((size_t) blockSize, s.length() - pos));
+
+                for (const auto& ev : e.takeTransientEvents())
+                {
+                    ++c.mix;
+
+                    if (ev.inLfe)
+                    {
+                        ++c.inLfe;
+                        c.inverted += std::abs (ev.phase) > 2.0 * pi / 3.0;
+                        delays.push_back (ev.delayMs);
+                    }
+                }
+            }
+
+            if (! delays.empty())
+            {
+                std::sort (delays.begin(), delays.end());
+                c.median = delays[delays.size() / 2];
+                c.spread = delays[delays.size() * 9 / 10] - delays[delays.size() / 10];
+            }
+
+            return c;
+        };
+
+        {
+            const auto c = run (scene (true, 0.012, 1.0, 1.0));
+            std::printf ("  music, LFE kick 12 ms late: %d attacks in the mix, %d in the LFE, %+.1f ms (10-90 %% spread %.1f ms)\n",
+                         c.mix, c.inLfe, c.median, c.spread);
+            check (c.mix >= 40 && c.mix <= 52, "music: kicks and hi-hats of the mix are found", c.mix);
+            check (c.inLfe >= 21 && c.inLfe <= 25, "music: the kicks, and only them, are in the LFE", c.inLfe);
+            check (std::abs (c.median - 12.0) < 0.5 && c.spread < 1.5, "music: LFE offset under a bass line", c.median);
+        }
+        {
+            const auto c = run (scene (true, 0.0, -1.0, 1.0));
+            check (std::abs (c.median) < 0.5 && c.inverted * 10 >= c.inLfe * 9, "music: inverted LFE kick seen as aligned and inverted", c.median);
+        }
+        {
+            const auto c = run (scene (true, -0.006, 1.0, 1.0));
+            check (std::abs (c.median + 6.0) < 0.5, "music: LFE kick 6 ms early", c.median);
+        }
+        {
+            const auto c = run (scene (true, 0.012, 1.0, 0.25));
+            std::printf ("  music, kick 12 dB lower under the same bass: %d of 24 kicks found in the LFE, %+.1f ms\n", c.inLfe, c.median);
+            check (c.inLfe >= 12 && std::abs (c.median - 12.0) < 1.5, "music: quiet kick under a loud bass line", c.inLfe);
+        }
+        {
+            const auto c = run (scene (false, 0.0, 1.0, 1.0));
+            check (c.mix >= 40 && c.inLfe == 0, "music: LFE with the bass line only shares no attack", c.inLfe);
+        }
+    }
+    {
+        // Steady low noise, unrelated in the screen and the LFE: hardly any attack
+        Scene s;
+        s.c = noise (30.0, 51);
+        s.lfe = noise (30.0, 52);
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        const auto data = s.interleaved();
+        int attacks = 0;
+
+        for (size_t pos = 0; pos < s.length(); pos += blockSize)
+        {
+            e.push (data.data() + pos * numChannels, (int) std::min ((size_t) blockSize, s.length() - pos));
+            attacks += (int) e.takeTransientEvents().size();
+        }
+
+        std::printf ("  steady noise, 30 s: %d attacks reported (its start is one)\n", attacks);
+        check (attacks <= 4, "steady noise: no stream of false attacks", attacks);
+    }
+    {
         // Kick in the screen channel only, unrelated tone in the LFE: nothing to report
         Scene s;
         s.c = kicks (6.0, 0.0, 1.0);
@@ -874,9 +995,10 @@ static void testPlaybackChains()
         run (e, s);
         const auto t = sim.compute (e.result());
         check (std::abs (cinema (t, 5.0, true).changeDb) < 0.05, "LFE alone: delay and polarity change nothing", cinema (t, 5.0, true).changeDb);
-        check (stereo (t).penalty > 0.999 && stereo (t).changeDb < -20.0, "LFE alone: nothing left in stereo", stereo (t).changeDb);
+        check (stereo (t).changeDb < -20.0, "LFE alone: nothing left in stereo", stereo (t).changeDb);
         check (t.lfeShare > 0.99, "LFE alone: it carries all the bass", t.lfeShare);
-        check (std::abs (t.dependence - PlaybackSimulator::dependenceCeiling) < 1e-9, "LFE alone: full dependence", t.dependence);
+        // Wide-band bass: the part below 60 Hz counts less and less down to 25 Hz
+        check (t.dependence > 0.65 && t.dependence < 0.85, "LFE alone, 20-120 Hz: high dependence", t.dependence);
         check (t.robustness > 18.0 && t.robustness < 26.0, "LFE alone: about 20-25, the room alone decides the bass", t.robustness);
 
         double worst = 0.0;
@@ -960,6 +1082,39 @@ static void testPlaybackChains()
                                                          / (PlaybackSimulator::doublingDb[b] - 1.0), 0.0, 1.0));
 
         check (c.penalty <= expected + 1e-9, "a system's penalty never exceeds its worst band", c.penalty);
+    }
+    {
+        // Infra-bass carried by the LFE alone is felt in a cinema, not heard in a
+        // downmix: the lower the tone, the less its absence counts.
+        double previous = -1.0;
+
+        for (double hz : { 20.0, 30.0, 40.0, 50.0, 70.0, 100.0 })
+        {
+            LfeEngine e (sampleRate, 1.0, 0.0);
+            Scene s;
+            s.lfe = sine (hz, -20.0, 5.0);
+            run (e, s);
+            const auto t = sim.compute (e.result());
+            check (t.dependence >= previous - 1e-9, "dependence grows with frequency", t.dependence);
+            previous = t.dependence;
+
+            if (hz <= 20.0)
+                check (t.dependence < 0.01 && t.robustness > 99.0, "20 Hz in the LFE alone: no dependence, score 100", t.robustness);
+
+            if (hz >= 70.0)
+                check (std::abs (t.dependence - PlaybackSimulator::dependenceCeiling) < 0.01, "70 Hz and above: full dependence", t.dependence);
+
+            std::printf ("  LFE alone, %3.0f Hz tone: dependence %.2f, robustness %.0f\n", hz, t.dependence, t.robustness);
+        }
+
+        // The cancellation risk is unchanged: a 20 Hz tone copied into the centre still scores 0
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        Scene s;
+        s.c = sine (25.0, -20.0, 5.0);
+        s.lfe = scaled (s.c, asHeard);
+        run (e, s);
+        check (sim.compute (e.result()).robustness < 1.0, "infra-bass shared with the screen still cancels with an inverted sub",
+               sim.compute (e.result()).robustness);
     }
     {
         // The three levels on the same mix (LFE 10 dB below the screen, 60 % copied

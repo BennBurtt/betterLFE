@@ -48,8 +48,10 @@ Deux détecteurs indépendants, le LCR étant toujours la référence :
 - **Global** : corrélation LFE ↔ L/C/R par fréquence de 5 à 150 Hz, sur la
   durée. Un LFE décorrélé n'alerte pas, quelle que soit sa phase. L'alerte peut
   être limitée à la phase négative.
-- **Transitoires** : à chaque attaque d'un canal d'écran, mesure du décalage du
-  LFE (en avance / en retard, en ms, avec sa précision) et de sa polarité.
+- **Transitoires** : les attaques du mix sont détectées en pleine bande sur le
+  downmix L+C+R ; pour chacune, le moteur dit si elle est aussi dans le LFE et,
+  si oui, mesure le décalage du LFE (en avance / en retard, en ms, avec sa
+  précision) et sa polarité, même sous une ligne de basse tenue.
 
 Les deux fonctionnent de la même façon quel que soit le niveau, jusqu'à
 −120 dBFS.

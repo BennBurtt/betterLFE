@@ -62,6 +62,13 @@ namespace
         return { lr4AllPass (hz, chain.crossoverHz), lfe };
     }
 
+    // 0 at 25 Hz and below, 1 from 60 Hz up, linear in octaves between.
+    double stereoRelevance (double hz)
+    {
+        return std::clamp (std::log (hz / PlaybackSimulator::infraLoHz) / std::log (PlaybackSimulator::infraHiHz / PlaybackSimulator::infraLoHz),
+                           0.0, 1.0);
+    }
+
     int bandOf (double hz)
     {
         for (int b = 0; b < numBands; ++b)
@@ -143,6 +150,7 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level) const
     // is logarithmic, so each point stands for a width proportional to its
     // frequency.
     double reference[numBands] = {}, referenceTotal = 0.0, weightTotal = 0.0;
+    double audible[numBands] = {};      // reference bass weighted by how much a small system would render it
     double screenTotal = 0.0, lfeTotal = 0.0;
 
     for (size_t g = 0; g < n; ++g)
@@ -156,6 +164,7 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level) const
         const double lfe = lfeGain2 * m.pLfe[g];
         const double power = std::max (0.0, m.pF[g] + lfe + 2.0 * std::sqrt (lfeGain2) * cFL[g].real());
         reference[b] += hz * power;
+        audible[b] += hz * power * stereoRelevance (hz);
         referenceTotal += hz * power;
         weightTotal += hz;
         screenTotal += hz * m.pF[g];
@@ -221,7 +230,11 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level) const
                                            band[b] / (std::max (total, referenceTotal) + 1e-60));
             const double rated = std::clamp ((std::abs (chain.bandChangeDb[(size_t) b]) - tolerance)
                                                / (doublingDb[b] - tolerance), 0.0, 1.0);
-            chain.penalty += share * rated;
+            // In a stereo downmix, the very bottom of the spectrum does not
+            // count: it is felt in a cinema, not heard on the systems a
+            // downmix is played on.
+            const double relevance = chain.kind == ChainResult::Kind::stereo && reference[b] > 0.0 ? audible[b] / reference[b] : 1.0;
+            chain.penalty += share * rated * relevance;
         }
 
         chain.penalty = std::min (chain.penalty, 1.0);

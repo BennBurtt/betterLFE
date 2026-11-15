@@ -151,7 +151,7 @@ LfeEngine::LfeEngine (double sampleRate, double windowSeconds, double facadeTrim
     : decimator (sampleRate),
       fs (decimator.outputRate()),
       facadeGain (dbToGain (facadeTrimDb)),
-      transients (decimator.outputRate())
+      transients (sampleRate, decimator.factor())
 {
     transients.setGains ({ { facadeGain, facadeGain, facadeGain } }, 1.0);
 
@@ -331,6 +331,8 @@ void LfeEngine::push (const float* interleaved, int numFrames)
 
     for (int i = 0; i < numFrames; ++i)
     {
+        transients.processInput (interleaved + (size_t) i * numChannels);
+
         if (decimator.process (interleaved + (size_t) i * numChannels, frame))
         {
             for (int c = 0; c < numChannels; ++c)
@@ -338,7 +340,7 @@ void LfeEngine::push (const float* interleaved, int numFrames)
 
             ringPos = (ringPos + 1) % nWin;
             ++pending;
-            transients.process (frame);
+            transients.processDecimated (frame);
         }
     }
 }

@@ -55,35 +55,72 @@ Conséquence physique : il faut quelques cycles pour conclure. Un signal commun
 est reconnu en 0,5 s au-dessus de 50 Hz, 1,5 s au-dessus de 20 Hz, 3 s
 au-dessus de 8 Hz.
 
-## 2. Détecteur de transitoires
+## 2. Moteur de transitoires
 
-Répond à : *quand le LCR attaque, le LFE attaque-t-il en même temps ?*
+Répond à : *quand le mix attaque, le LFE attaque-t-il aussi, et au même
+instant ?* La référence est le **downmix des canaux d'écran** (Lo + Ro, soit
+L + R + 1,414·C), en pleine bande : ce que tout le monde entend, quel que soit
+le système. Un événement est produit pour chaque attaque du mix ; il dit si
+elle est aussi dans le LFE, et si oui comment le LFE se place.
 
-1. **Détection d'attaque** sur chaque canal d'écran, dans cinq bandes
-   (10–190, 10–30, 30–50, 50–80, 80–190 Hz), pour qu'un boom à 25 Hz soit vu
-   sous un fond plus fort à 100 Hz. Dans chaque bande, l'enveloppe d'énergie
-   en dB (lissée sur environ une période) est comparée à son niveau récent
-   (0,3 s) : c'est la différence relative d'enveloppe [5]. Le seuil s'adapte à
-   la bande [6] : au moins 6 dB, et au moins 3,5 fois la fluctuation habituelle
-   de cette bande, pour ne pas prendre les ondulations d'un grondement pour des
-   attaques.
-2. **Mesure du décalage** : corrélation croisée entre le segment du canal
-   d'écran (300 ms autour de l'attaque) et le LFE, pour tous les décalages de
-   −50 à +50 ms. C'est la corrélation croisée généralisée non pondérée [7]. On
+1. **Attaques du mix, pleine bande.** Trois vues du downmix, à la fréquence
+   d'échantillonnage d'entrée ; la première qui se déclenche l'emporte (80 ms
+   de garde).
+   - *Crêtes au-dessus de 8 kHz* et *crêtes au-dessus de 600 Hz* : la crête
+     est relevée par blocs de 1 ms, et une attaque est déclarée quand la crête
+     des 12 dernières ms dépasse d'au moins 6 dB (un doublement) la plus haute
+     crête des 36 ms précédentes, et d'au moins 4 fois la variation habituelle
+     du signal. C'est la détection par crêtes de sous-blocs des codeurs audio
+     (AC-3 [18]) et par énergie haute fréquence, comparées dans [21], et le
+     test « vallée → crête » d'AudioLib [22] (qui demande un rapport de 1,5 ;
+     AC-3 demande 2,5 à sa couche la plus large). Comparer à ce qui précède
+     immédiatement, et non à une moyenne longue, permet de voir un charleston
+     un quart de seconde après un kick. La vue au-dessus de 8 kHz isole un
+     clic ou un charleston de tout le reste.
+   - *Énergie des bandes graves* (10–40, 40–150, 150–600 Hz) : l'enveloppe
+     d'énergie en dB, lissée sur environ une période, est comparée à son
+     niveau récent (0,3 s) : différence relative d'enveloppe [5]. Le seuil
+     s'adapte à la bande [6] : au moins 6 dB et au moins 5,5 fois sa
+     fluctuation habituelle. Cette vue trouve un boom sans clic.
+2. **L'attaque est-elle dans le LFE ?** Le même détecteur d'énergie tourne sur
+   le LFE (10–190, 10–30, 30–50, 50–80, 80–190 Hz). L'attaque du mix compte
+   comme présente dans le LFE si le LFE a sa propre attaque entre 30 ms avant
+   et 120 ms après, ou si son énergie y monte d'au moins 1 dB avec une forme
+   qui ressemble à celle du mix (ressemblance ≥ 0,7).
+3. **Comment le LFE se place-t-il ?** Le mix et le LFE n'ont pas la même
+   largeur de bande, et une basse tenue peut sonner dans les deux. Avant de
+   les comparer :
+   - le mix est ramené à la bande du LFE (8–190 Hz) : on ne compare deux
+     observations d'un même événement qu'après leur avoir donné la même
+     réponse. C'est le principe de la soustraction d'images en astronomie et
+     de son extension aux sources qui se déplacent (« Translient ») [23][24],
+     transposé de la position au temps ;
+   - les deux signaux passent par **un seul et même filtre blanchisseur**,
+     ajusté par prédiction linéaire (ordre 8) sur les 300 ms qui précèdent
+     l'attaque : ce qui sonnait déjà (une note de basse) est retiré des deux.
+     Le filtre étant commun, il ne décale aucun des deux signaux par rapport à
+     l'autre. C'est le préfiltrage de la corrélation croisée généralisée [7] ;
+   - la même analyse est faite sur les 300 ms qui précèdent et **soustraite**
+     (nouveau moins référence, comme en soustraction d'images) : il ne reste
+     que ce que l'attaque a apporté.
+
+   Vient alors la corrélation croisée entre le segment du mix (300 ms autour
+   de l'attaque) et le LFE, pour tous les décalages de −50 à +50 ms [7]. On
    utilise sa version analytique : le maximum de son enveloppe situe le
    transitoire du LFE dans le temps, et la phase à ce maximum donne la polarité.
    Cela distingue un LFE *inversé* d'un LFE *en retard d'une demi-période*, que
    la corrélation simple confond sur un son grave.
-3. **Précision du décalage**, d'après la borne de Cramér-Rao de l'estimation de
+4. **Précision du décalage**, d'après la borne de Cramér-Rao de l'estimation de
    retard [8] :
 
    `σ_retard = √((1 − m²) / (m²·N)) / (2π·β)`
 
-   avec `m` la ressemblance des deux transitoires, `β` la largeur de bande
+   avec `m` la ressemblance telle qu'elle est dans le segment, avec tout ce
+   qui y sonne d'autre, `β` la largeur de bande
    efficace qu'ils partagent et `N = 2·B·T` le nombre d'échantillons
    indépendants du segment. Un coup à bande étroite ou noyé dans autre chose
    reçoit une grande incertitude.
-4. **Verdict**, seulement si la ressemblance des deux transitoires une fois
+5. **Verdict**, pour les attaques présentes dans le LFE, seulement si la ressemblance des deux transitoires une fois
    réalignés dépasse le seuil (en mode « Out of phase only » : seulement si la
    corrélation sans réalignement est négative au-delà du seuil) :
 
@@ -96,6 +133,10 @@ Répond à : *quand le LCR attaque, le LFE attaque-t-il en même temps ?*
    | aligné, entre les deux | aligné, déphasé |
 
    2,5 ms est un quart de période à 100 Hz.
+
+Le bandeau « Transients » affiche à gauche, sur les 10 dernières secondes,
+combien d'attaques du mix sont aussi dans le LFE (par exemple « 7 / 14 »), et à
+droite le verdict de la dernière attaque partagée.
 
 ## 3. Robustesse du grave : systèmes de lecture et score
 
@@ -187,10 +228,32 @@ il survit.
 | Cinéma, sub en avance (−5 et −2,5 ms) | 0,25 |
 | Bass management (les six cas) | 1 |
 
-**Dépendance** : `0,72 × pénalité de la stéréo sans LFE`, c'est-à-dire de ce que
-le grave perd partout où le LFE manque ou est mal réglé. Le plafond de 0,72
-exprime qu'un grave entièrement dans le LFE est grave (la salle seule en
-décide) sans valoir une annulation.
+**Dépendance** : `0,95 × pénalité de la stéréo sans LFE`, c'est-à-dire de ce que
+le grave perd partout où le LFE manque ou est mal réglé. Le plafond de 0,95
+place un grave large bande entièrement dans le LFE vers 22 : grave (la salle
+seule en décide) sans valoir une annulation.
+
+**L'infra-grave est mis à part.** Ce que la stéréo perd est pondéré par la
+fréquence : rien en dessous de 25 Hz, tout à partir de 60 Hz, et entre les
+deux un poids qui monte linéairement en octaves. Une sinusoïde de 20 Hz seule
+dans le LFE ne coûte donc rien : on ne la ressent qu'en salle, et l'enlever ne
+change rien au downmix stéréo.
+
+| Grave présent uniquement dans le LFE | Dépendance | Score |
+|---|---|---|
+| Sinusoïde à 20 Hz | 0,00 | 100 |
+| 30 Hz | 0,21 | 79 |
+| 40 Hz | 0,52 | 48 |
+| 50 Hz | 0,76 | 24 |
+| 70 Hz et plus | 0,95 | 5 |
+| Bruit large bande 20–120 Hz | — | 22 |
+
+Les bornes viennent de trois constats (voir 3.8 bis) : le seuil d'audition
+monte très vite vers le bas (78,5 dB SPL à 20 Hz, 68,7 dB à 25 Hz, 37,5 dB à
+63 Hz [14]) ; sous 20–25 Hz la sensation passe de l'écoute au ressenti
+corporel [25] ; et les appareils sur lesquels s'écoute un downmix ne
+descendent pas là : un téléviseur qui atteint 60 Hz est déjà un bon
+téléviseur, un petit haut-parleur coupe vers 150 Hz [26].
 
 Les chaînes sont calculées sur une moyenne de 0,2 s : le score réagit en 0,7 à
 0,8 s avec la fenêtre d'analyse de 1 s. Le chiffre affiché ne change que
@@ -226,11 +289,11 @@ Vérifiées par les tests, sur bruit large bande, au niveau Strong :
 | Façade seule, LFE muet | 100 |
 | LFE sans rapport avec la façade, 10 dB sous elle à l'écoute | 100 |
 | LFE 10 dB sous la façade, à 30 % copié sur elle | 95 |
-| LFE sans rapport, aussi fort que la façade | 62 |
-| LFE 10 dB sous la façade, à 60 % copié sur elle | 61 |
+| LFE sans rapport, aussi fort que la façade | 60 |
+| LFE 10 dB sous la façade, à 60 % copié sur elle | 60 |
 | LFE seul | 22 |
-| LFE sans rapport, 6 dB au-dessus de la façade | 24 |
-| LFE aussi fort que la façade, à 60 % copié sur elle | 18 |
+| LFE sans rapport, 6 dB au-dessus de la façade | 21 |
+| LFE aussi fort que la façade, à 60 % copié sur elle | 19 |
 | LFE 10 dB sous la façade, entièrement copié sur elle | 8 |
 | LFE identique à la façade | 0 |
 | LFE identique mais en retard de 5 ms | 0 |
@@ -248,7 +311,7 @@ grave de près de 6 dB entre un sub en polarité et un sub inversé.
 | Filtres de bass management (Linkwitz-Riley 24 dB/oct) | Modèle courant, variable selon les appareils |
 | Filtre d'encodeur (Butterworth 8ᵉ ordre à 120 Hz) | Modèle : le filtre LFE de Dolby Digital Plus n'est pas public |
 | Étendue des défauts de salle (±5 ms, polarité) | **Hypothèse.** Le rapport SMPTE constate de larges écarts mais ses chiffres ne sont pas publics |
-| Pertinences des systèmes, plafond de dépendance (0,72) | **Hypothèse** d'ingénierie, suivant la consigne (0 ms ×2, avance ×0,5 ; LFE seul vers 20–25). Aucune statistique publiée sur la fréquence de ces défauts |
+| Pertinences des systèmes, plafond de dépendance (0,95), bornes de l'infra-grave (25 et 60 Hz) | **Hypothèse** d'ingénierie, suivant la consigne (0 ms ×2, avance ×0,5 ; LFE seul vers 20–25). Aucune statistique publiée sur la fréquence de ces défauts |
 | Acoustique de la salle (modes, places) | Non simulée |
 
 ### 3.8 bis Dépendance au LFE : ce que dit la littérature
@@ -261,11 +324,15 @@ grave de près de 6 dB entre un sub en polarité et un sub inversé.
 | EBU Tech 3343 / UIT-R BS.1770 [19] | Le LFE est exclu de la mesure de sonie : un grave placé dans le LFE échappe au contrôle de loudness |
 | Netflix, spécifications de mixage [20] | Un stéréo fabriqué à la main peut inclure le LFE, replié entre −8 et −12 dB et filtré à 200 Hz ou moins |
 
-Toutes vont dans le même sens : ce qui n'existe que dans le LFE peut manquer.
+| ISO 226:2003 [14] | Seuil d'audition : 78,5 dB SPL à 20 Hz, 68,7 dB à 25 Hz, 37,5 dB à 63 Hz |
+| Møller & Pedersen 2004 [25] | Sous 20 Hz environ, le son perd son caractère tonal ; le ressenti corporel (vibration) apparaît 20 à 25 dB au-dessus du seuil d'audition |
+| Mesures de téléviseurs et de petites enceintes [26] | Extension dans le grave : 60 Hz est déjà une bonne valeur pour un téléviseur ; les petits haut-parleurs coupent vers 150 Hz |
+
+Les premières vont dans le même sens : ce qui n'existe que dans le LFE peut manquer.
 Mesurer la dépendance par ce que perd la stéréo sans LFE est donc la traduction
 directe de ces textes. Aucune ne donne de seuil chiffré (« à partir de quelle
 part le LFE porte trop »), ni de statistique sur la proportion de spectateurs
-écoutant sans caisson : le plafond de 0,72 reste un choix.
+écoutant sans caisson : le plafond de 0,95 reste un choix.
 
 Le repli manuel décrit par Netflix n'est pas simulé : à −10 dB, le LFE y arrive
 20 dB sous son niveau de salle, ce qui change peu le résultat.
@@ -312,29 +379,41 @@ comportement identique 100 dB plus bas, lecture jusqu'à 5 Hz, modes d'alerte,
 retards de transitoires retrouvés à 0,5 ms près, inversion de polarité, et
 cohérence entre l'erreur réelle et l'incertitude annoncée.
 
-Détection d'attaque, sur 79 coups espacés de 1,5 s, LFE = même coup retardé :
+Moteur de transitoires, sur une scène de type musique (ligne de basse à 55 Hz
+dans L, R et le LFE, kick au centre sur le temps, charleston à contretemps,
+40 s, 80 kicks et 80 charlestons) :
 
-| Cas | Coups trouvés |
+| Cas | Résultat |
 |---|---|
-| Kick seul, y compris à −90 dBFS | tous |
-| Kick sur un fond 20 ou 14 dB plus bas | tous |
-| Kick sur un fond seulement 8 dB plus bas | environ 4 sur 10 |
-| Boom 28 Hz seul, y compris à −90 dBFS | tous |
-| Boom 28 Hz sous un fond 60–190 Hz | tous |
-| Coup 45 Hz sous un fond 80–190 Hz plus fort | tous |
-| Coup à 12 Hz | tous |
-| Bruit tenu sans aucun coup | 1 à 5 fausses attaques par minute |
+| Attaques du mix trouvées | 79 kicks sur 80, 71 charlestons sur 80 |
+| LFE portant le kick 12 ms en retard | 79 attaques dans le LFE, aucun charleston ; décalage médian +12,0 ms (80 % entre +11,6 et +12,4) |
+| Kick du LFE à l'heure, ou inversé | 0,0 ms (±0,4) ; polarité inversée reconnue |
+| Kick du LFE 6 ms en avance | −6,0 ms (±0,4) |
+| Kick 12 dB plus faible sous la même basse | 63 kicks sur 80 reconnus dans le LFE, +12,1 ms (80 % entre +10,6 et +13,7) |
+| LFE ne portant que la basse | aucune attaque dans le LFE |
 
-Une fausse attaque sur un bruit tenu ne produit un verdict que si le LFE lui
-ressemble au-delà du seuil ; avec un LFE sans rapport, rien n'est affiché.
+Sur coups isolés : kick retrouvé à 0,5 ms près, y compris à −90 dBFS et avec
+un LFE 30 dB plus bas ; boom à 28 Hz sous un fond 60–190 Hz plus fort retrouvé
+à ±1,5 ms avec une incertitude annoncée de 4 ms.
+
+Fausses attaques sur un son tenu sans aucun coup, en 2 minutes (hors début
+du son) : bruit blanc ou rose, aucune ; grondement grave (sous 90 Hz), 1 à 3.
 
 ## Limites
 
 - L'analyse porte sur le signal du mix, pas sur l'acoustique d'une salle.
-- Les seuils (0,5 ; 2,5σ ; 6 dB ; 3,5× ; 2,5 ms) sont des choix de conception,
+- Les seuils (0,5 ; 2,5σ ; 6 dB ; 4× et 5,5× ; 2,5 ms) sont des choix de conception,
   pas des valeurs normalisées. Ils restent à ajuster sur de vrais mixes.
-- Un transitoire qui dépasse à peine le fond dans toutes les bandes à la fois
-  (moins de ~10 dB) peut ne pas être détecté comme attaque.
+- Un transitoire qui dépasse à peine le fond dans toutes les vues à la fois
+  (moins de 6 dB en crête, moins de ~10 dB dans les bandes graves) peut ne pas
+  être détecté comme attaque.
+- Une attaque du mix sans grave propre (clic seul à l'écran, corps du coup
+  uniquement dans le LFE) est bien comptée « dans le LFE », mais son décalage
+  ne peut pas être mesuré : il n'y a rien de commun à corréler.
+- Deux attaques semblables à moins de 370 ms l'une de l'autre : la seconde est
+  comparée à un passé qui contient la première, et sa mesure perd en précision.
+- Sur un grondement grave tenu, une fausse attaque par minute environ
+  subsiste. Elles ne donnent un verdict que si le LFE ressemble au mix.
 - Tout en bas (5–15 Hz), la résolution est limitée par la durée de la fenêtre :
   utiliser le mode « Ultra (2 s) » pour cette zone.
 - Les surrounds ne sont pas analysés, ni redirigés dans les chaînes simulées.
@@ -382,3 +461,17 @@ ressemble au-delà du seuil ; avec un LFE sans rapport, rien n'est affiché.
 19. EBU Tech 3343, *Guidelines for Production of Programmes in accordance with
     EBU R 128* ; UIT-R BS.1770.
 20. Netflix, *Sound Mix Specifications & Best Practices*.
+21. S. Fan, E. Kuo, S. Shah, M. Bosi, « Transient Detection Methods for Audio
+    Coding », AES 155th Convention, Express Paper 131, 2023.
+22. T. Darwen, *AudioLib — Transient Detection*,
+    github.com/tmdarwen/AudioLib (Documentation/TransientDetection.md).
+23. B. Zackay, E. O. Ofek, A. Gal-Yam, « Proper Image Subtraction — Optimal
+    Transient Detection, Photometry, and Hypothesis Testing », *Astrophys. J.*,
+    vol. 830, 2016.
+24. O. Springer, E. O. Ofek, B. Zackay et al., « Translient: Detecting
+    Transients Resulting from Point-source Motion or Astrometric Noise »,
+    *Astron. J.*, 2024 (arXiv:2403.09771) ; code : github.com/ofersp/translient.
+25. H. Møller, C. S. Pedersen, « Hearing at low and infrasonic frequencies »,
+    *Noise & Health*, vol. 6, 2004.
+26. RTINGS, méthodes de mesure « Low-Frequency Extension » des téléviseurs et
+    barres de son.

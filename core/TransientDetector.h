@@ -1,30 +1,48 @@
-// Transient detector: finds attacks in the screen channels (the reference) and
-// measures how the LFE lines up with each of them. Portable C++17.
+// Transient engine: finds the attacks of the mix and tells whether each one is
+// also in the LFE, and if so how the LFE lines up with it. Portable C++17.
 //
-// 1. Onset detection on each screen channel, in several frequency bands so
-//    that a 25 Hz boom is found under a louder 100 Hz bed. In each band the
-//    log-energy envelope is compared with its recent level (relative
-//    difference, Klapuri 1999), against a threshold that adapts to how much
-//    that band normally fluctuates (adaptive thresholding, Bello et al. 2005).
-//    Working on log energy makes the detection independent of level: a
-//    transient at -90 dBFS is found like one at -10 dBFS.
-// 2. For each onset, the cross-correlation between the screen channel and
-//    the LFE over +/- 50 ms (Knapp & Carter 1976, unweighted generalized
-//    cross-correlation). The peak of its envelope gives the time offset of
-//    the LFE; the value at the peak tells how alike the two transients are
-//    and with which polarity.
-// 3. The precision of that offset, from the Cramer-Rao bound for time-delay
-//    estimation (Carter 1987): it depends on the bandwidth the two signals
-//    share, on how alike they are and on the length of the segment. A
-//    narrow-band or poorly matched pair gets a large uncertainty, so that no
-//    offset is claimed when none can be measured.
+// The reference is the stereo downmix of the screen channels (Lo + Ro, i.e.
+// L + R + 1.414 C): what every listener hears, whatever the system.
 //
-// It runs on the decimated signal (~500 Hz), i.e. on the part of the screen
-// channels that actually shares a frequency range with the LFE.
+// 1. ATTACKS OF THE MIX, FULL BAND. The downmix is analysed at the input rate
+//    over its whole band. An attack is declared when the
+//    log-energy envelope of a low band (10-40, 40-150, 150-600 Hz) rises above its recent level (relative
+//    difference, Klapuri 1999) by more than a threshold that adapts to how
+//    much that band usually fluctuates (Bello et al. 2005): this catches a
+//    boom that has no click. Next to it, the peak level of the signal above
+//    600 Hz and above 8 kHz is followed in 1 ms blocks, and an attack is
+//    declared when the peak of the last 12 ms jumps above that of the 36 ms
+//    before: the sub-block peak and high-frequency energy methods of audio
+//    coders (ATSC A/52; Fan, Kuo, Shah & Bosi, AES 155, 2023) and the
+//    valley-to-peak test of T. Darwen's AudioLib. Comparing with what
+//    immediately precedes, not with a long average, is what finds a hi-hat
+//    a quarter of a second after a kick.
+//
+// 2. IS IT IN THE LFE TOO? The same detector runs on the LFE in its own
+//    range. An attack of the mix counts as present in the LFE when the LFE
+//    has an attack of its own close to it, or when its energy rises there
+//    while matching the mix.
+//
+// 3. HOW DOES THE LFE LINE UP? The two signals do not have the same
+//    bandwidth, so they are first brought to the same one: the downmix is
+//    taken through the very filter that limits the LFE analysis (below
+//    190 Hz). Comparing two observations of one event only after giving
+//    them the same response is the principle of proper image subtraction
+//    and of its extension to shifted sources (Zackay et al. 2016; Springer
+//    et al. 2024, "Translient"), transposed here from position to time.
+//    The same analysis is run on the stretch just before the attack and
+//    subtracted (new minus reference, as in image subtraction): what was
+//    already sounding, a held bass note for instance, cancels out, and what
+//    remains belongs to the attack alone.
+//    The cross-correlation (Knapp & Carter 1976) then gives the time
+//    offset from the peak of its envelope and the polarity from its phase,
+//    and the Cramer-Rao bound (Carter 1987) gives the precision of that
+//    offset, so that none is claimed when none can be measured.
 
 #pragma once
 
 #include <array>
+#include <deque>
 #include <vector>
 
 namespace subguard
@@ -32,8 +50,8 @@ namespace subguard
 
 struct TransientEvent
 {
-    int channel = 0;            // 0 L, 1 C, 2 R: the screen channel that had the attack
-    double delayMs = 0.0;       // offset of the LFE against that channel; positive: LFE late
+    bool inLfe = false;         // the attack of the mix is also in the LFE; the rest only means something then
+    double delayMs = 0.0;       // offset of the LFE against the mix; positive: LFE late
     double delayUncertaintyMs = 0.0;   // 1-sigma precision of delayMs (Cramer-Rao bound)
     bool delayAtLimit = false;  // the best match sits at the edge of the +/- 50 ms search
     double match = 0.0;         // 0..1, likeness of the two transients once re-aligned
@@ -41,75 +59,110 @@ struct TransientEvent
     double correlationNow = 0.0;    // -1..1, correlation as it is, without re-aligning; level independent
     double interactionBest = 0.0;   // 0..1, like match but weighted by the level balance of the pair
     double interactionNow = 0.0;    // -1..1, like correlationNow, level weighted (sum changes by 10 log10 (1 + s) dB)
-    double levelDb = -150.0;    // RMS level of the screen-channel transient, dBFS
+    double levelDb = -150.0;    // RMS level of the low part of the mix transient, dBFS
+};
+
+/** Multi-band attack detector on one signal. */
+class OnsetBank
+{
+public:
+    /** `hop`: the decision is taken every `hop` samples of the signal. */
+    void prepare (double sampleRate, int hop, const std::vector<std::array<double, 2>>& bandEdgesHz);
+    void reset();
+
+    /** Feeds one sample. Returns true when an attack has just been confirmed;
+        `samplesAgo` then tells how far back it started. */
+    bool process (double sample, int& samplesAgo);
+
+private:
+    struct Biquad { double b0, b1, b2, a1, a2; };
+
+    struct Band
+    {
+        Biquad hp {}, lp {};
+        double envelopeCoeff = 0.0;
+        double state[4] = {};
+        double envelope = 0.0, level = 0.0, roughness = 0.0;
+        std::array<double, 64> recent {};
+        bool primed = false;
+    };
+
+    static Biquad highPass (double hz, double sampleRate);
+    static Biquad lowPass (double hz, double sampleRate);
+
+    std::vector<Band> bands;
+    int hopSize = 1, hopCounter = 0, roughnessLag = 1, freezeHops = 0, refractoryHops = 0, confirmHops = 2;
+    double slowCoeff = 0.0, roughnessCoeff = 0.0;
+    long long evaluation = 0, lastOnset = -1000000;
+    int run = 0;
+    bool armed = true;
+};
+
+/** Attack detector on the peak level of a signal, in 1 ms blocks: the peak of
+    the last 12 ms against the peak of the 12 ms before. */
+class PeakOnset
+{
+public:
+    /** `highPassHz` 0: the signal as it is. Returns false when the sample rate is too low for that filter. */
+    bool prepare (double sampleRate, double highPassHz);
+    void reset();
+    bool process (double sample, int& samplesAgo);
+
+private:
+    static constexpr int span = 12, lookBack = 36;      // 1 ms blocks: the window, and what it is compared with
+    struct Biquad { double b0, b1, b2, a1, a2; } filter {};
+    bool filtered = false, enabled = false;
+    double state[4] = {};
+    std::array<double, 64> peaks {};
+    double blockPeak = 0.0, roughness = 0.0, roughnessCoeff = 0.0;
+    int blockSize = 48, blockCounter = 0, freezeBlocks = 0, refractoryBlocks = 0;
+    long long block = 0, lastOnset = -1000000;
+    bool armed = true;
 };
 
 class TransientDetector
 {
 public:
-    explicit TransientDetector (double sampleRate);
+    TransientDetector (double inputSampleRate, int decimationFactor);
 
     void reset();
 
     /** Linear gains applied before comparing levels; a gain of 0 mutes a screen channel. */
     void setGains (const std::array<double, 3>& screenGains, double lfeGain);
 
-    /** Feeds one frame (L, C, R, LFE) of the decimated signal. */
-    void process (const double* frame);
+    /** Feeds one frame (L, C, R, LFE) at the input rate: full-band attacks of the mix. */
+    void processInput (const float* frame);
 
-    /** Events found since the last call. */
+    /** Feeds one frame (L, C, R, LFE) of the decimated signal: LFE attacks and alignment. */
+    void processDecimated (const double* frame);
+
+    /** Events found since the last call, one per attack of the mix. */
     std::vector<TransientEvent> takeEvents();
 
     static constexpr double maxLagSeconds = 0.050;
 
 private:
-    void analyse (int channel, long long onsetIndex);
-    double history (int channel, long long index) const;
+    void analyse (long long onsetIndex);
+    double history (int which, long long index) const;
 
-    double fs;
-    int preSamples, segmentLength, maxLag, refractory, roughnessLag, freezeSamples;
-    double slowCoeff, roughnessCoeff;
+    double fs;              // decimated rate
+    int factor;
+    int preSamples, segmentLength, maxLag;
 
-    struct Biquad { double b0, b1, b2, a1, a2; };
-    static Biquad highPass (double hz, double sampleRate);
-    static Biquad lowPass (double hz, double sampleRate);
+    void mixAttack (long long inputSample);
 
-    Biquad inputHighPass {};
-    std::array<std::array<double, 2>, 4> filterState {};
+    OnsetBank mixOnsets, lfeOnsets;
+    PeakOnset mixPeaks, mixHighPeaks;
+    long long lastMixAttack = -1000000, mixRefractory = 0;
+    long long inputIndex = 0, sampleIndex = 0;      // input and decimated sample counters
+    std::deque<long long> pendingMix, recentLfe;    // decimated indices
+
+    struct HighPass { double b0, b1, b2, a1, a2; } inputHighPass {};
+    std::array<std::array<double, 2>, 2> filterState {};
 
     static constexpr int historySize = 1024;
-    std::array<std::vector<double>, 4> ring;
-    long long sampleIndex = 0;
+    std::array<std::vector<double>, 2> ring;        // 0: downmix, 1: LFE (decimated)
 
-    static constexpr int numBands = 5;
-    static constexpr int logHistory = 64;
-
-    struct Band
-    {
-        Biquad hp {}, lp {};
-        double envelopeCoeff = 0.0;
-    };
-
-    std::array<Band, numBands> bands;
-
-    struct BandState
-    {
-        std::array<double, 4> filter {};
-        double envelope = 0.0, level = 0.0, roughness = 0.0;
-        std::array<double, logHistory> recent {};
-        bool primed = false;
-    };
-
-    struct ChannelState
-    {
-        std::array<BandState, numBands> band;
-        bool armed = true;
-        int run = 0;
-        long long lastOnset = -1000000;
-        std::vector<long long> pending;
-    };
-
-    std::array<ChannelState, 3> channels;
     std::array<double, 3> screenGain { { 1.0, 1.0, 1.0 } };
     double lfeGainLinear = 1.0;
 
