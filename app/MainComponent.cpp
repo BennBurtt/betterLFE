@@ -645,6 +645,15 @@ void MainComponent::feedDemoSignal (int numFrames)
 }
 
 //==============================================================================
+void MainComponent::meterChannels (const float* interleaved, int numFrames)
+{
+    const int index[3] = { chL, chC, chR };
+
+    for (int i = 0; i < numFrames; ++i)
+        for (size_t c = 0; c < 3; ++c)
+            framePeak[c] = juce::jmax (framePeak[c], (double) std::abs (interleaved[i * frame + index[c]]));
+}
+
 void MainComponent::timerCallback()
 {
     const double nowSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
@@ -654,7 +663,9 @@ void MainComponent::timerCallback()
 
     if (options.demoSignal)
     {
-        feedDemoSignal ((int) std::lround (engineRate * dt));
+        const int numFrames = (int) std::lround (engineRate * dt);
+        feedDemoSignal (numFrames);
+        meterChannels (scratch.data(), numFrames);
         level = 0.6;
     }
     else if (input.isRunning())
@@ -674,7 +685,10 @@ void MainComponent::timerCallback()
         scratch.resize ((size_t) 4096 * frame);
 
         for (int n; (n = input.read (scratch.data(), 4096)) > 0;)
+        {
             engine->push (scratch.data(), n);
+            meterChannels (scratch.data(), n);
+        }
 
         level = juce::jlimit (0.0, 1.0, (juce::Decibels::gainToDecibels ((double) input.level(), -200.0) + 60.0) / 60.0);
     }
@@ -686,6 +700,20 @@ void MainComponent::timerCallback()
     }
 
     header.setLevel (level);
+    header.advance (dt);
+
+    {
+        SpeakerIndicator* cones[] = { &header.left, &header.centre, &header.right };
+
+        for (size_t c = 0; c < 3; ++c)
+        {
+            recentPeak[c] = juce::jmax (framePeak[c], recentPeak[c] * std::exp (-dt / 3.0));
+            const double target = recentPeak[c] > 1e-6 ? framePeak[c] / recentPeak[c] : 0.0;     // under -120 dBFS: still
+            coneDrive[c] += (target > coneDrive[c] ? 1.0 - std::exp (-dt / 0.015) : 1.0 - std::exp (-dt / 0.12)) * (target - coneDrive[c]);
+            cones[c]->setDrive (coneDrive[c]);
+            framePeak[c] = 0.0;
+        }
+    }
 
     engineSettings.lfeGainDb = lfeGainToggle.getToggleState() ? lfeInBandGainDb : 0.0;
     engineSettings.tauSpectrum = 0.010 * std::pow (60.0, inertia.value() / 100.0);    // 10 ms .. 600 ms

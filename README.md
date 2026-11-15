@@ -27,7 +27,7 @@ chemin de `SubGuard.app`. Pour l'essayer sans carte son :
 build/SubGuard_artefacts/Release/SubGuard.app/Contents/MacOS/SubGuard --demo
 ```
 
-Logo et icône sont optionnels : voir `assets/README.md`.
+Le logo et l'icône sont dans `assets/`.
 
 Le script crée aussi 18 fichiers de test 5.1 dans `test-files/`, avec ce que
 l'app doit afficher pour chacun : voir [`docs/FICHIERS_TEST.md`](docs/FICHIERS_TEST.md).

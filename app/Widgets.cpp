@@ -77,6 +77,17 @@ void SpeakerIndicator::setLevel (double newLevel)
     }
 }
 
+void SpeakerIndicator::setDrive (double newDrive)
+{
+    newDrive = juce::jlimit (0.0, 1.0, newDrive);
+
+    if (std::abs (newDrive - drive) > 0.01)
+    {
+        drive = newDrive;
+        repaint();
+    }
+}
+
 void SpeakerIndicator::setActive (bool shouldBeActive)
 {
     active = shouldBeActive;
@@ -108,63 +119,71 @@ void SpeakerIndicator::paint (juce::Graphics& g)
 
     const juce::Rectangle<float> r ((wAvail - drawW) / 2.0f, (hAvail - drawH) / 2.0f, drawW, drawH);
 
-    const float cabH = r.getHeight() * 0.60f, cabW = cabH * 0.55f;
-    const float cx = r.getCentreX();
-    const float cabX = cx - cabW / 2.0f, cabY = r.getY() + r.getHeight() * 0.05f;
     const double shown = active ? level : 0.0;
+    const float push = active ? (float) drive : 0.0f;      // the channel playing: the cabinet swells a little, the cone more
 
-    const juce::Colour edge (200, 200, 200);
+    const float cx = r.getCentreX();
+    const float cabH = r.getHeight() * 0.60f * (1.0f + 0.035f * push), cabW = cabH * 0.55f;
+    const float cabX = cx - cabW / 2.0f, cabY = r.getY() + r.getHeight() * 0.05f - r.getHeight() * 0.012f * push;
+
+    const juce::Colour edge (205, 205, 205);
+    const float line = juce::jmax (1.2f, drawW * 0.022f);
 
     // Cabinet
     const juce::Rectangle<float> cabinet (cabX, cabY, cabW, cabH);
-    g.setColour (juce::Colour (20, 20, 20));
-    g.fillRoundedRectangle (cabinet, drawW * 0.08f);
+    g.setColour (juce::Colour (16, 16, 16));
+    g.fillRoundedRectangle (cabinet, drawW * 0.07f);
     g.setColour (edge);
-    g.drawRoundedRectangle (cabinet, drawW * 0.08f, juce::jmax (1.5f, drawW * 0.04f));
+    g.drawRoundedRectangle (cabinet, drawW * 0.07f, line);
 
     // Tweeter and woofer
-    const auto driver = [&] (float centreY, float radius, juce::Colour fill, float stroke)
+    const auto driver = [&] (float centreY, float radius, juce::Colour fill)
     {
         const juce::Rectangle<float> c (cx - radius, centreY - radius, 2.0f * radius, 2.0f * radius);
         g.setColour (fill);
         g.fillEllipse (c);
         g.setColour (edge);
-        g.drawEllipse (c, stroke);
+        g.drawEllipse (c, line * 0.85f);
     };
 
-    driver (cabY + cabH * 0.25f, cabW * 0.18f, juce::Colour (10, 10, 10), juce::jmax (1.0f, drawW * 0.02f));
-    driver (cabY + cabH * 0.68f, cabW * 0.30f, juce::Colour (18, 18, 18), juce::jmax (1.2f, drawW * 0.03f));
+    driver (cabY + cabH * 0.25f, cabW * 0.17f * (1.0f + 0.06f * push), juce::Colour (10, 10, 10));
+    driver (cabY + cabH * 0.68f, cabW * 0.29f * (1.0f + 0.16f * push), juce::Colour (18, 18, 18));
 
-    // Alert arc under the cabinet
-    const float arcW = cabW * 2.5f, arcH = r.getHeight() * 0.25f;
-    const juce::Rectangle<float> arcRect (cx - arcW / 2.0f, cabY + cabH + r.getHeight() * 0.02f, arcW, arcH);
+    // Dust cap: a dot that grows as the cone moves
+    {
+        const float cap = cabW * (0.05f + 0.07f * push);
+        g.setColour (edge.withAlpha (0.35f + 0.45f * push));
+        g.fillEllipse (cx - cap, cabY + cabH * 0.68f - cap, 2.0f * cap, 2.0f * cap);
+    }
+
+    // Alert arc under the cabinet: a thin line that takes colour
+    const float arcW = cabW * 2.1f, arcH = r.getHeight() * 0.22f;
+    const juce::Rectangle<float> arcRect (cx - arcW / 2.0f, r.getY() + r.getHeight() * 0.69f, arcW, arcH);
 
     juce::Path arc;
     arc.addArc (arcRect.getX(), arcRect.getY(), arcRect.getWidth(), arcRect.getHeight(),
                 juce::MathConstants<float>::pi * 2.0f / 3.0f, juce::MathConstants<float>::pi * 4.0f / 3.0f, true);
 
-    const float baseThick = juce::jmax (2.0f, r.getHeight() * 0.025f);
-    const float thick = baseThick + r.getHeight() * 0.09f * (float) shown;
+    const float baseThick = juce::jmax (1.2f, r.getHeight() * 0.012f);
     const auto rounded = [] (float t) { return juce::PathStrokeType (t, juce::PathStrokeType::curved, juce::PathStrokeType::rounded); };
 
-    g.setColour (juce::Colour (120, 120, 120).withAlpha (0.31f));
+    g.setColour (juce::Colour (130, 130, 130).withAlpha (0.35f));
     g.strokePath (arc, rounded (baseThick));
 
     if (shown > 0.01)
     {
         const auto alert = juce::Colour ((juce::uint8) 255, (juce::uint8) std::lround (255.0 * (1.0 - shown)), (juce::uint8) 0,
-                                         (juce::uint8) std::lround (60.0 + 195.0 * shown));
-        g.setColour (alert.withMultipliedAlpha (0.5f));
-        g.strokePath (arc, rounded (thick * 1.9f));
+                                         (juce::uint8) std::lround (90.0 + 165.0 * shown));
+        g.setColour (alert.withMultipliedAlpha (0.22f));
+        g.strokePath (arc, rounded (baseThick * (2.6f + 1.6f * (float) shown)));     // faint glow
         g.setColour (alert);
-        g.strokePath (arc, rounded (thick));
+        g.strokePath (arc, rounded (baseThick * (1.3f + 0.9f * (float) shown)));
     }
 
     // Label
     g.setColour (juce::Colour (235, 235, 235));
-    g.setFont (uiFont (juce::jmax (11.0f, cabW * 0.6f), true));
-    const float labelTop = cabY + cabH - r.getHeight() * 0.02f;
-    g.drawText (label, juce::Rectangle<float> (cx - arcW / 2.0f, labelTop, arcW, r.getHeight() * 0.32f),
+    g.setFont (uiFont (juce::jmax (11.0f, r.getHeight() * 0.19f), true));
+    g.drawText (label, juce::Rectangle<float> (cx - arcW / 2.0f, r.getY() + r.getHeight() * 0.66f, arcW, r.getHeight() * 0.30f),
                 juce::Justification::centred, false);
 
     g.endTransparencyLayer();
@@ -181,24 +200,22 @@ HeaderBar::HeaderBar()
 void HeaderBar::setAnimationEnabled (bool shouldAnimate)
 {
     animated = shouldAnimate;
-
-    if (! animated)
-    {
-        level = 0.0;
-        repaint();
-    }
+    repaint();
 }
 
 void HeaderBar::setLevel (double target)
 {
+    level += (target > level ? 0.2 : 0.05) * (target - level);
+}
+
+void HeaderBar::advance (double seconds)
+{
     if (! animated)
         return;
 
-    const double previous = level;
-    level += (target > level ? 0.2 : 0.05) * (target - level);
-
-    if (std::abs (level - previous) > 5e-4)
-        repaint();
+    // Always moving; a little faster when something plays
+    phase += seconds * (1.0 + 0.6 * level);
+    repaint();
 }
 
 void HeaderBar::resized()
@@ -216,25 +233,65 @@ void HeaderBar::paint (juce::Graphics& g)
     const auto bounds = getLocalBounds().toFloat();
     const float w = bounds.getWidth(), h = bounds.getHeight();
 
-    g.setGradientFill (juce::ColourGradient (juce::Colour (10, 10, 10), 0.0f, 0.0f,
+    g.setGradientFill (juce::ColourGradient (juce::Colour (9, 11, 12), 0.0f, 0.0f,
                                              juce::Colour (4, 4, 4), 0.0f, h, false));
     g.fillRect (bounds);
 
-    // "Black hole": a wide radial glow that breathes with the input level
-    const double t = animated ? level : 0.0;
-    const auto mix = [t] (juce::Colour a, juce::Colour b) { return a.interpolatedWith (b, (float) t).withMultipliedAlpha (0.9f); };
+    // Drifting glows in the colours of the app: deep blue, teal, green, olive.
+    // Each one wanders on its own path and breathes at its own pace, so the
+    // background moves at any level; the input level only brightens it.
+    struct Glow { juce::Colour colour; double x, y, sx, sy, px, py, size, breathe; };
 
-    juce::ColourGradient glow (mix (juce::Colour (5, 12, 18), juce::Colour (10, 20, 25)), 0.0f, 0.0f,
-                               juce::Colour (8, 8, 8).withAlpha (0.0f), 0.5f, 0.0f, true);
-    glow.addColour (0.35, mix (juce::Colour (9, 34, 48), juce::Colour (15, 50, 55)));
-    glow.addColour (0.60, mix (juce::Colour (15, 40, 45), juce::Colour (30, 70, 40)));
-    glow.addColour (0.85, mix (juce::Colour (20, 25, 20), juce::Colour (60, 65, 20)));
+    static const Glow glows[] = { { juce::Colour (12, 60, 82),  0.22, 0.55, 0.20, 0.35, 0.21, 0.33, 0.55, 0.37 },
+                                  { juce::Colour (18, 84, 88),  0.50, 0.70, 0.30, 0.30, 0.16, 0.27, 0.62, 0.29 },
+                                  { juce::Colour (38, 96, 52),  0.74, 0.50, 0.22, 0.40, 0.25, 0.19, 0.50, 0.43 },
+                                  { juce::Colour (84, 88, 26),  0.90, 0.75, 0.16, 0.30, 0.13, 0.31, 0.38, 0.23 },
+                                  { juce::Colour (10, 40, 70),  0.08, 0.30, 0.12, 0.40, 0.18, 0.24, 0.42, 0.34 } };
 
-    const float scale = 3.0f + (float) t * 0.15f;
-    juce::FillType fill (glow);
-    fill.transform = juce::AffineTransform::scale (w * scale, h * scale).translated (w * 0.5f, h * 0.75f);
-    g.setFillType (fill);
-    g.fillRect (bounds);
+    const double t = animated ? phase : 0.0;
+    const float brightness = 0.55f + 0.30f * (float) level;
+    const double twoPi = juce::MathConstants<double>::twoPi;
+    int index = 0;
+
+    for (const auto& glow : glows)
+    {
+        const double offset = 1.7 * index++;
+        const float cx = w * (float) (glow.x + glow.sx * std::sin (twoPi * glow.px * 0.35 * t + offset));
+        const float cy = h * (float) (glow.y + glow.sy * std::cos (twoPi * glow.py * 0.35 * t + 2.0 * offset));
+        const float radius = w * (float) (glow.size * (0.55 + 0.20 * std::sin (twoPi * glow.breathe * 0.4 * t + offset)));
+
+        juce::ColourGradient gradient (glow.colour.withAlpha (brightness), cx, cy,
+                                       glow.colour.withAlpha (0.0f), cx + radius, cy, true);
+        gradient.addColour (0.45, glow.colour.withAlpha (brightness * 0.45f));
+        g.setGradientFill (gradient);
+        g.fillRect (bounds);
+    }
+
+    // Two slow waves across the banner, like the one in the logo
+    for (int k = 0; k < 2; ++k)
+    {
+        juce::Path wave;
+        const double speed = (k == 0 ? 0.55 : -0.38), length = (k == 0 ? 2.2 : 3.4);
+        const float base = h * (k == 0 ? 0.62f : 0.48f), swing = h * (0.13f + 0.05f * (float) level);
+
+        for (int step = 0; step * 6.0f <= w + 6.0f; ++step)
+        {
+            const float x = step * 6.0f;
+            const double u = x / w;
+            const float y = base + swing * (float) (std::sin (twoPi * (length * u + speed * 0.5 * t))
+                                                      * (0.6 + 0.4 * std::sin (twoPi * (0.7 * u - 0.11 * t) + k)));
+
+            if (step == 0)  wave.startNewSubPath (x, y);
+            else            wave.lineTo (x, y);
+        }
+
+        g.setColour ((k == 0 ? juce::Colour (70, 190, 190) : juce::Colour (150, 190, 90)).withAlpha (0.10f + 0.08f * (float) level));
+        g.strokePath (wave, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
+
+    // A hairline closes the banner
+    g.setColour (juce::Colours::white.withAlpha (0.06f));
+    g.fillRect (0.0f, h - 1.0f, w, 1.0f);
 
     // Logo, or the name when no logo image was built in
     const auto logoArea = getLocalBounds().reduced (20).removeFromLeft ((getWidth() - 40) / 4).toFloat();
@@ -242,7 +299,7 @@ void HeaderBar::paint (juce::Graphics& g)
     if (logo.isValid())
     {
         g.setOpacity (1.0f);
-        g.drawImage (logo, logoArea, juce::RectanglePlacement::centred);
+        g.drawImage (logo, logoArea.reduced (logoArea.getWidth() * 0.12f, logoArea.getHeight() * 0.04f), juce::RectanglePlacement::centred);
     }
     else
     {
@@ -963,7 +1020,7 @@ void ChainsView::paint (juce::Graphics& g)
 
         // In the "Worst" view, a small mark tells which level error it is
         const double step = PlaybackSimulator::gainSteps[v];
-        const bool marked = worstView && chain->kind != ChainResult::Kind::stereo && step != 0.0;
+        const bool marked = worstView && chain->kind != ChainResult::Kind::stereo && v != (size_t) ChainResult::numGains / 2;
         g.drawText (value + " dB", marked ? box.withTrimmedRight (30.0f) : box, juce::Justification::centred);
 
         if (marked)
@@ -1037,7 +1094,7 @@ void ChainsView::paint (juce::Graphics& g)
         const auto& c = t.chains[(size_t) t.worstChain];
         const auto v = (size_t) c.worstGain;
         const double step = PlaybackSimulator::gainSteps[v];
-        worst = "     worst: " + juce::String (c.name) + (step != 0.0 ? ", sub " + juce::String (step > 0.0 ? "+" : "") + juce::String ((int) step) + " dB" : juce::String())
+        worst = "     worst: " + juce::String (c.name) + (v != (size_t) ChainResult::numGains / 2 ? ", sub " + juce::String (step > 0.0 ? "+" : "") + juce::String ((int) step) + " dB" : juce::String())
                   + " (" + (c.gainChangeDb[v] >= 0.0 ? "+" : "") + juce::String (c.gainChangeDb[v], 1) + " dB)";
     }
 

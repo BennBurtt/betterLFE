@@ -127,6 +127,11 @@ private:
     std::array<std::vector<Inertia>, 3> curveInertia;   // correlation curves
     HistoryStrip::Sample historySample;
     std::array<double, 3> transientFlash { { 0.0, 0.0, 0.0 } };
+
+    // How hard each screen channel plays, for the cones: this frame's peak
+    // against the loudest of the last few seconds, so that it shows at any level
+    void meterChannels (const float* interleaved, int numFrames);
+    std::array<double, 3> framePeak { { 0.0, 0.0, 0.0 } }, recentPeak { { 0.0, 0.0, 0.0 } }, coneDrive { { 0.0, 0.0, 0.0 } };
     int inputGeneration = -1, framesShown = 0;
     bool restoring = false;
     std::vector<float> scratch;

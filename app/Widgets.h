@@ -37,6 +37,9 @@ public:
     explicit SpeakerIndicator (juce::String labelText);
 
     void setLevel (double newLevel);
+
+    /** 0..1, how hard the channel is playing right now: the cone moves with it. */
+    void setDrive (double newDrive);
     bool isActive() const   { return active; }
     void setActive (bool shouldBeActive);
 
@@ -47,7 +50,7 @@ public:
 
 private:
     juce::String label;
-    double level = 0.0;
+    double level = 0.0, drive = 0.0;
     bool active = true;
 };
 
@@ -60,6 +63,9 @@ public:
 
     void setLevel (double target);
     void setAnimationEnabled (bool);
+
+    /** Moves the background on; call once per frame. */
+    void advance (double seconds);
     void setLogo (const juce::Image& image)   { logo = image; }
 
     SpeakerIndicator left { "L" }, centre { "C" }, right { "R" };
@@ -69,7 +75,7 @@ public:
 
 private:
     juce::Image logo;
-    double level = 0.0;
+    double level = 0.0, phase = 0.0;
     bool animated = true;
 };
 
