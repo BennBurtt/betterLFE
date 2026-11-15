@@ -71,6 +71,7 @@ private:
     const ChannelFormat& format() const;
     int channelsNeeded() const      { return (int) format().channels.size(); }
     AlertTracker::Options alertOptions() const;
+    PlaybackSimulator::Level currentLevel() const;
 
     LaunchOptions options;
     juce::ApplicationProperties properties;
@@ -97,8 +98,8 @@ private:
     juce::Label formatLabel { {}, "Channel Format:" }, deviceLabel { {}, "Input Device:" },
                 fpsLabel { {}, "Refresh Rate:" }, windowLabel { {}, "Time / Frequency:" },
                 rangeLabel { {}, "Level range:" }, statusLabel;
-    juce::ComboBox formatBox, deviceBox, fpsBox, windowBox, rangeBox, alertModeBox, sensitivityBox;
-    juce::Label sensitivityLabel { {}, "Phase alert sensitivity:" };
+    juce::ComboBox formatBox, deviceBox, fpsBox, windowBox, rangeBox, alertModeBox;
+    std::array<juce::TextButton, 3> levelButtons;       // Soft, Medium, Strong
     juce::ToggleButton lfeGainToggle { "LFE +10 dB (theatre level)" }, animationToggle { "Background animation" },
                        peakHoldToggle { "Peak hold" }, tiltToggle { "Bass tilt (old display)" },
                        levelWeightToggle { "Weigh by level balance" };

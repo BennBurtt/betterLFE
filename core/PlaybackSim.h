@@ -30,10 +30,11 @@
 //   80 phon: 5.0 dB at 25 Hz, 5.5 dB at 40 Hz, 6.4 dB at 70 Hz, 6.9 dB at 100 Hz
 //   (10 dB at 1 kHz). Each band is then rated
 //
-//     penalty = clamp ((|difference| - 1 dB) / (doubling - 1 dB), 0, 1)
+//     penalty = clamp ((|difference| - T) / (doubling - T), 0, 1)
 //
-//   0 up to 1 dB (about the just-noticeable level difference), 1 when the band
-//   is heard twice as loud or half as loud. Bands are combined by their share
+//   0 up to the tolerance T, 1 when the band is heard twice as loud or half as
+//   loud. T follows the chosen level: 2 dB (Soft), 0.5 dB (Medium, around the
+//   smallest audible level difference), 0.1 dB (Strong). Bands are combined by their share
 //   of the bass.
 //
 // SCORE
@@ -118,7 +119,22 @@ class PlaybackSimulator
 public:
     static constexpr double lfeInBandGainDb = 10.0;     // SMPTE RP 200
     static constexpr double changeLimitDb = 24.0;       // larger differences all count the same
-    static constexpr double justNoticeableDb = 1.0;     // level difference that starts to count
+    // How strict the rating is: the level difference a band may show before it
+    // starts to count. Soft lets audible but moderate changes pass (2 dB);
+    // Medium starts at half a dB, around the smallest audible change; Strong
+    // counts almost everything (0.1 dB), so a perfect score is exceptional.
+    enum class Level { soft, medium, strong };
+
+    static constexpr double toleranceDb (Level level)
+    {
+        return level == Level::soft ? 2.0 : (level == Level::medium ? 0.5 : 0.1);
+    }
+
+    // Correlation from which the phase alert fires, for the same three levels
+    static constexpr double alertThreshold (Level level)
+    {
+        return level == Level::soft ? 0.90 : (level == Level::medium ? 0.75 : 0.50);
+    }
     static constexpr double overlapWindowDb = 10.0;     // levels further apart than this do not overlap
     static constexpr double balanceWarningDb = 6.0;     // LFE this far above the screen: the bass then follows each room's subwoofer level
 
@@ -140,7 +156,7 @@ public:
     // room alone then decides the bass, but not as bad as a cancellation.
     static constexpr double dependenceCeiling = 0.72;
 
-    Translation compute (const Analysis&) const;
+    Translation compute (const Analysis&, Level level = Level::medium) const;
 };
 
 } // namespace subguard

@@ -962,6 +962,34 @@ static void testPlaybackChains()
         check (c.penalty <= expected + 1e-9, "a system's penalty never exceeds its worst band", c.penalty);
     }
     {
+        // The three levels on the same mix (LFE 10 dB below the screen, 45 % copied
+        // from it): Soft is the most lenient, Strong the strictest; the anchors hold.
+        const auto other = noise (10.0, 76);
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        Scene s;
+        s.l = n;
+        s.lfe = scaled (sum (scaled (n, 0.45), scaled (other, std::sqrt (1.0 - 0.45 * 0.45))), 0.316 * asHeard);
+        run (e, s);
+        using Level = PlaybackSimulator::Level;
+        const double soft = sim.compute (e.result(), Level::soft).robustness;
+        const double medium = sim.compute (e.result(), Level::medium).robustness;
+        const double strong = sim.compute (e.result(), Level::strong).robustness;
+        check (soft >= medium && medium >= strong, "Soft >= Medium >= Strong", soft - strong);
+        check (soft > 97.0, "Soft: a lightly shared LFE scores about 100", soft);
+        check (strong < medium - 2.0, "Strong is clearly stricter than Medium", medium - strong);
+        std::printf ("  LFE 10 dB below, 45 %% shared: Soft %.0f, Medium %.0f, Strong %.0f\n", soft, medium, strong);
+
+        LfeEngine same (sampleRate, 1.0, 0.0);
+        Scene copy;
+        copy.l = n;
+        copy.lfe = scaled (n, asHeard);
+        run (same, copy);
+        check (sim.compute (same.result(), Level::soft).robustness < 1.0, "identical LFE scores 0 even at Soft",
+               sim.compute (same.result(), Level::soft).robustness);
+        check (PlaybackSimulator::alertThreshold (Level::soft) == 0.90 && PlaybackSimulator::alertThreshold (Level::medium) == 0.75
+                 && PlaybackSimulator::alertThreshold (Level::strong) == 0.50, "alert thresholds 0.90 / 0.75 / 0.50", 0.0);
+    }
+    {
         // Between the anchors: an LFE that only partly copies the screen, 10 dB
         // below it when heard (so that dependence stays out of the way)
         const auto other = noise (10.0, 74);

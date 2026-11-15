@@ -42,8 +42,9 @@ Répond à : *sur la durée, le LFE est-il lié au canal d'écran, et dans quel 
    la portion de la fenêtre d'analyse réellement occupée par le signal.
    L'écart-type de `c` sous l'hypothèse « signaux sans rapport » est
    `σ = 1/√(2K)`.
-4. Alerte quand `|c|` dépasse le seuil choisi **et** `2,5σ`. Trois réglages :
-   Soft (0,90), Medium (0,75), Strong (0,50, par défaut). En mode « Out of
+4. Alerte quand `|c|` dépasse le seuil choisi **et** `2,5σ`. Trois niveaux, par
+   le sélecteur au-dessus du spectre : Soft (0,90), Medium (0,75), Strong
+   (0,50, par défaut). En mode « Out of
    phase only », seules les valeurs négatives alertent.
 5. Quand le LFE est absent (moins de −100 dBFS RMS pendant 0,5 s), tout ce qui
    a été mesuré face à lui est effacé : la courbe et les alertes repartent de
@@ -160,10 +161,10 @@ en interaction.
 Pour chaque système et chaque bande (20–30, 30–60, 60–90, 90–120 Hz) :
 
 1. `écart = niveau du système − niveau de la référence`, en dB, borné à ±24 dB.
-2. `pénalité de bande = borne((|écart| − 1 dB) / (D − 1 dB), 0, 1)`, avec `D` le
-   nombre de dB qui double la sonie dans cette bande : 5,0 ; 5,5 ; 6,4 ; 6,9.
-   Zéro jusqu'à 1 dB, 1 quand la bande est entendue deux fois plus forte ou
-   deux fois plus faible.
+2. `pénalité de bande = borne((|écart| − T) / (D − T), 0, 1)`, avec `D` le
+   nombre de dB qui double la sonie dans cette bande (5,0 ; 5,5 ; 6,4 ; 6,9) et
+   `T` la tolérance du niveau choisi (voir 3.6). Zéro jusqu'à `T`, 1 quand la
+   bande est entendue deux fois plus forte ou deux fois plus faible.
 3. `pénalité du système = Σ part de la bande × pénalité de bande`, la part étant
    celle de la bande dans le grave de la référence. Juger par bande évite
    qu'une annulation à 40 Hz soit masquée par du niveau à 100 Hz.
@@ -195,6 +196,18 @@ Les chaînes sont calculées sur une moyenne de 0,2 s : le score réagit en 0,7 
 0,8 s avec la fenêtre d'analyse de 1 s. Le chiffre affiché ne change que
 lorsqu'il a bougé d'au moins 1,5 point.
 
+**Niveau de sévérité.** Le sélecteur au-dessus du spectre règle à la fois le
+seuil de l'alerte de phase et la tolérance `T` du score :
+
+| Niveau | Alerte de phase à partir de | Tolérance du score | Effet |
+|---|---|---|---|
+| Soft | corrélation 0,90 | 2 dB | Un mix sain reste à 100 |
+| Medium | 0,75 | 0,5 dB, vers le plus petit écart audible | 100 possible, rarement longtemps |
+| Strong | 0,50 | 0,1 dB | 100 exceptionnel |
+
+Les repères ne dépendent pas du niveau : LFE identique à la façade 0, LFE seul
+vers 22.
+
 ### 3.7 Lecture du score et valeurs de référence
 
 | Score | Sens |
@@ -204,19 +217,19 @@ lorsqu'il a bougé d'au moins 1,5 point.
 | 20–25 | Tout le grave est dans le LFE : la salle seule en décide |
 | 0 | Un système plausible annule le grave, ou le rend deux fois plus fort |
 
-Vérifiées par les tests, sur bruit large bande :
+Vérifiées par les tests, sur bruit large bande, au niveau Medium :
 
 | Mix | Robustesse |
 |---|---|
 | Façade seule, LFE muet | 100 |
-| LFE sans rapport avec la façade, 10 dB sous elle à l'écoute | 100 |
-| LFE 10 dB sous la façade, à 30 % copié sur elle | 95 |
-| LFE sans rapport, aussi fort que la façade | 62 |
-| LFE 10 dB sous la façade, à 60 % copié sur elle | 61 |
-| LFE seul | 22 |
-| LFE sans rapport, 6 dB au-dessus de la façade | 24 |
-| LFE aussi fort que la façade, à 60 % copié sur elle | 18 |
-| LFE 10 dB sous la façade, entièrement copié sur elle | 8 |
+| LFE sans rapport avec la façade, 10 dB sous elle à l'écoute | 99 |
+| LFE 10 dB sous la façade, à 30 % copié sur elle | 91 |
+| LFE sans rapport, aussi fort que la façade | 56 |
+| LFE 10 dB sous la façade, à 60 % copié sur elle | 53 |
+| LFE seul | 21 |
+| LFE sans rapport, 6 dB au-dessus de la façade | 23 |
+| LFE aussi fort que la façade, à 60 % copié sur elle | 16 |
+| LFE 10 dB sous la façade, entièrement copié sur elle | 7 |
 | LFE identique à la façade | 0 |
 | LFE identique mais en retard de 5 ms | 0 |
 
@@ -229,7 +242,7 @@ grave de près de 6 dB entre un sub en polarité et un sub inversé.
 |---|---|
 | LFE à +10 dB, omission du LFE en downmix, rôle d'appoint du LFE | Normes [9][12][13] |
 | Conversion dB → sensation (5,0 à 6,9 dB par doublement) | Calculé depuis ISO 226:2003 [14] |
-| Seuil de 1 dB | Ordre de grandeur admis [16] ; plus fin à fort niveau |
+| Tolérances des trois niveaux (2 ; 0,5 ; 0,1 dB) | Choix ; 0,5 à 1 dB est l'ordre de grandeur admis du plus petit écart audible [16] |
 | Filtres de bass management (Linkwitz-Riley 24 dB/oct) | Modèle courant, variable selon les appareils |
 | Filtre d'encodeur (Butterworth 8ᵉ ordre à 120 Hz) | Modèle : le filtre LFE de Dolby Digital Plus n'est pas public |
 | Étendue des défauts de salle (±5 ms, polarité) | **Hypothèse.** Le rapport SMPTE constate de larges écarts mais ses chiffres ne sont pas publics |

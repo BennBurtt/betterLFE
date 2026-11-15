@@ -208,14 +208,26 @@ void MainComponent::buildCards()
 
     inertia.format = [] (double v) { return juce::String ((int) v) + "%"; };
     integration.format = [] (double v) { return juce::String (v, 1) + " s"; };
-    // Phase alert sensitivity: how close to a full copy the LFE must be
-    sensitivityBox.addItem ("Soft (-0.90)", 1);
-    sensitivityBox.addItem ("Medium (-0.75)", 2);
-    sensitivityBox.addItem ("Strong (-0.50)", 3);
-    sensitivityBox.setSelectedId (3, juce::dontSendNotification);
-    sensitivityBox.setTooltip ("Correlation between the LFE and a screen channel from which the phase alert fires.\n"
-                               "Soft: only near-copies. Strong: from half-correlated content.");
-    sensitivityLabel.setFont (uiFont (13.0f));
+    // Level selector, above the spectrum on the right: one choice sets both
+    // the phase alert threshold and how strict the robustness score is.
+    const char* levelNames[] = { "Soft", "Medium", "Strong" };
+    const char* levelTips[] = {
+        "Soft: phase alert from a correlation of 0.90; the score tolerates 2 dB of change before counting it.",
+        "Medium: phase alert from 0.75; the score tolerates 0.5 dB, around the smallest audible change.",
+        "Strong: phase alert from 0.50; the score counts changes from 0.1 dB."
+    };
+
+    for (int i = 0; i < 3; ++i)
+    {
+        auto& button = levelButtons[(size_t) i];
+        button.setButtonText (levelNames[i]);
+        button.setTooltip (levelTips[i]);
+        button.setClickingTogglesState (true);
+        button.setRadioGroupId (41);
+        button.setConnectedEdges ((i > 0 ? juce::Button::ConnectedOnLeft : 0) | (i < 2 ? juce::Button::ConnectedOnRight : 0));
+        button.setToggleState (i == 2, juce::dontSendNotification);
+        addAndMakeVisible (button);
+    }
     decay.format = [] (double v) { return juce::String (v, 2) + " s"; };
 
     for (auto* slider : { &inertia, &integration, &decay })
@@ -286,12 +298,9 @@ void MainComponent::buildCards()
                   integration.setBounds (r.removeFromTop (46));
               });
 
-    populate (alertCard, 320, 206, { &sensitivityLabel, &sensitivityBox, &decay, &alertModeBox, &levelWeightToggle },
+    populate (alertCard, 320, 156, { &decay, &alertModeBox, &levelWeightToggle },
               [this] (juce::Rectangle<int> r)
               {
-                  sensitivityLabel.setBounds (r.removeFromTop (20));
-                  sensitivityBox.setBounds (r.removeFromTop (26));
-                  r.removeFromTop (6);
                   decay.setBounds (r.removeFromTop (46));
                   r.removeFromTop (8);
                   alertModeBox.setBounds (r.removeFromTop (26));
@@ -371,6 +380,13 @@ void MainComponent::resized()
     correlation.setBounds (area.removeFromBottom (juce::jmax (150, area.getHeight() * 2 / 7)));
     transientStrip.setBounds (area.removeFromBottom (68));
     spectrum.setBounds (area);
+
+    // Level selector over the title row of the spectrum, on the right
+    auto levels = juce::Rectangle<int> (area.getRight() - 22 - 3 * 66, area.getY() + 4, 3 * 66, 22);
+
+    for (auto& button : levelButtons)
+        button.setBounds (levels.removeFromLeft (66));
+
     positionCards();
 }
 
@@ -468,11 +484,17 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster*)
     updateStatus();
 }
 
+PlaybackSimulator::Level MainComponent::currentLevel() const
+{
+    if (levelButtons[0].getToggleState())   return PlaybackSimulator::Level::soft;
+    if (levelButtons[1].getToggleState())   return PlaybackSimulator::Level::medium;
+    return PlaybackSimulator::Level::strong;
+}
+
 AlertTracker::Options MainComponent::alertOptions() const
 {
     AlertTracker::Options o;
-    const double thresholds[] = { 0.90, 0.75, 0.50 };
-    o.threshold = thresholds[juce::jlimit (0, 2, sensitivityBox.getSelectedId() - 1)];
+    o.threshold = PlaybackSimulator::alertThreshold (currentLevel());
     o.decaySeconds = decay.value();
     o.outOfPhaseOnly = alertModeBox.getSelectedId() == 2;
     o.levelWeighted = levelWeightToggle.getToggleState();
@@ -614,7 +636,7 @@ void MainComponent::timerCallback()
 
         // Playback chains, robustness, LFE dependence, overlap
         ChainsInfo info;
-        info.translation = simulator.compute (engine->result());
+        info.translation = simulator.compute (engine->result(), currentLevel());
         info.sessionCorrelation = { { engine->globalCorrelation (0), engine->globalCorrelation (1), engine->globalCorrelation (2) } };
         info.sessionSeconds = engine->globalSeconds();
         auto& t = info.translation;
@@ -740,7 +762,7 @@ void MainComponent::loadState()
     header.setAnimationEnabled (animationToggle.getToggleState());
     inertia.setValue (settings->getDoubleValue ("inertia", 70.0));
     integration.setValue (settings->getDoubleValue ("integration", 2.0));
-    sensitivityBox.setSelectedId (settings->getIntValue ("alertSensitivity", 3), juce::dontSendNotification);
+    levelButtons[(size_t) juce::jlimit (0, 2, settings->getIntValue ("alertSensitivity", 3) - 1)].setToggleState (true, juce::dontSendNotification);
     decay.setValue (settings->getDoubleValue ("decay", 1.0));
     rangeBox.setSelectedId (settings->getIntValue ("levelRange", 96), juce::dontSendNotification);
     alertModeBox.setSelectedId (settings->getIntValue ("alertMode", 1), juce::dontSendNotification);
@@ -767,7 +789,7 @@ void MainComponent::saveState()
     settings->setValue ("animation", animationToggle.getToggleState());
     settings->setValue ("inertia", inertia.value());
     settings->setValue ("integration", integration.value());
-    settings->setValue ("alertSensitivity", sensitivityBox.getSelectedId());
+    settings->setValue ("alertSensitivity", (int) currentLevel() + 1);
     settings->setValue ("decay", decay.value());
     settings->setValue ("levelRange", rangeBox.getSelectedId());
     settings->setValue ("alertMode", alertModeBox.getSelectedId());

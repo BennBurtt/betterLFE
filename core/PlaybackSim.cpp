@@ -78,9 +78,10 @@ namespace
     }
 }
 
-Translation PlaybackSimulator::compute (const Analysis& a) const
+Translation PlaybackSimulator::compute (const Analysis& a, Level level) const
 {
     Translation t;
+    const double tolerance = toleranceDb (level);
 
     const auto& m = a.matrix;
     const auto n = a.grid.size();
@@ -218,8 +219,8 @@ Translation PlaybackSimulator::compute (const Analysis& a) const
             // had almost none.
             const double share = std::max (reference[b] / (referenceTotal + 1e-60),
                                            band[b] / (std::max (total, referenceTotal) + 1e-60));
-            const double rated = std::clamp ((std::abs (chain.bandChangeDb[(size_t) b]) - justNoticeableDb)
-                                               / (doublingDb[b] - justNoticeableDb), 0.0, 1.0);
+            const double rated = std::clamp ((std::abs (chain.bandChangeDb[(size_t) b]) - tolerance)
+                                               / (doublingDb[b] - tolerance), 0.0, 1.0);
             chain.penalty += share * rated;
         }
 
