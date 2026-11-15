@@ -41,7 +41,9 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <deque>
 #include <vector>
 
@@ -68,10 +70,21 @@ struct TransientEvent
 /** What the user can tune. */
 struct TransientSettings
 {
+    bool enabled = true;            // off: nothing is analysed and no event comes out
     double searchMs = 250.0;        // the LFE is looked for up to this far before or after the attack of the mix (5..500)
-    double attackDb = 6.0;          // mix: the peak must jump by this much to count as an attack (clicks, snares, hats)
-    double lowAttackDb = 6.0;       // mix and LFE: the same for the energy of the low bands (booms without a click)
-    double noiseRejection = 1.0;    // 0..2: how far an attack must stand out of the usual movement of the signal; 0 turns this off
+
+    // Detection profile, the four controls of a transient shaper, in percent.
+    double attack = 40.0;           // how fast a rise must be: the peak is watched over 3 ms (0 %) to 100 ms (100 %); 40 %: 12 ms
+    double hold = 25.0;             // after an attack, no new one for 30 ms (0 %) to 510 ms (100 %); 25 %: 150 ms
+    double release = 50.0;          // the tail of a hit hides what follows: time constant 20 ms (0 %) to 2 s (100 %); 50 %: 200 ms
+    double sensitivity = 70.0;      // how small a rise counts: 70 % asks for 6 dB, 100 % for 2.6 dB, 40 % for 14 dB
+
+    static double attackMs (double percent)     { return 3.0 * std::pow (100.0 / 3.0, std::clamp (percent, 0.0, 100.0) / 100.0); }
+    static double holdMs (double percent)       { return 30.0 + 4.8 * std::clamp (percent, 0.0, 100.0); }
+    static double releaseMs (double percent)    { return 20.0 * std::pow (100.0, std::clamp (percent, 0.0, 100.0) / 100.0); }
+    static double riseDb (double percent)       { return 6.0 * std::pow (2.0, (70.0 - std::clamp (percent, 0.0, 100.0)) / 25.0); }
+    static double roughnessScale (double percent)   { return std::pow (2.0, (70.0 - std::clamp (percent, 0.0, 100.0)) / 35.0); }
+
     double minMatch = 0.3;          // 0..1: likeness under which the LFE is said to carry something else than the mix
 };
 
@@ -83,6 +96,7 @@ public:
     void prepare (double sampleRate, int hop, const std::vector<std::array<double, 2>>& bandEdgesHz);
     void reset();
     void setThreshold (double riseDb, double roughnessFactor)   { minimumRise = riseDb; factor = roughnessFactor; }
+    void setTiming (double holdSeconds, double releaseSeconds);
 
     /** Feeds one sample. Returns true when an attack has just been confirmed;
         `samplesAgo` then tells how far back it started. */
@@ -96,7 +110,7 @@ private:
         Biquad hp {}, lp {};
         double envelopeCoeff = 0.0;
         double state[4] = {};
-        double envelope = 0.0, level = 0.0, roughness = 0.0;
+        double envelope = 0.0, level = 0.0, roughness = 0.0, held = -300.0;
         std::array<double, 64> recent {};
         bool primed = false;
     };
@@ -107,6 +121,8 @@ private:
     std::vector<Band> bands;
     int hopSize = 1, hopCounter = 0, roughnessLag = 1, freezeHops = 0, refractoryHops = 0, confirmHops = 2;
     double slowCoeff = 0.0, roughnessCoeff = 0.0, minimumRise = 6.0, factor = 5.5;
+    double decisionRate = 1000.0, dropPerHop = 0.05;
+    int heldRiseHops = 60;
     long long evaluation = 0, lastOnset = -1000000;
     int run = 0;
     bool armed = true;
@@ -122,14 +138,17 @@ public:
     void reset();
     bool process (double sample, int& samplesAgo);
     void setThreshold (double riseDb, double roughnessFactor)   { minimumRise = riseDb; factor = roughnessFactor; }
+    void setTiming (double windowSeconds, double holdSeconds, double releaseSeconds);
 
 private:
     double minimumRise = 6.0, factor = 5.0;
-    static constexpr int span = 12, lookBack = 36;      // 1 ms blocks: the window, and what it is compared with
+    int span = 12;                                      // 1 ms blocks: the window that is watched...
+    static constexpr int lookBack = 36, ringSize = 256; // ...and what it is compared with
+    double heldPeak = 0.0, heldDecay = 0.995, blockRate = 1000.0;
     struct Biquad { double b0, b1, b2, a1, a2; } filter {};
     bool filtered = false, enabled = false;
     double state[4] = {};
-    std::array<double, 64> peaks {};
+    std::array<double, ringSize> peaks {};
     double blockPeak = 0.0, roughness = 0.0, roughnessCoeff = 0.0;
     int blockSize = 48, blockCounter = 0, freezeBlocks = 0, refractoryBlocks = 0;
     long long block = 0, lastOnset = -1000000;

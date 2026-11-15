@@ -477,7 +477,7 @@ int main (int argc, char** argv)
     };
 
     music ("19_music_kick_in_lfe_12ms_late", "Bass line, kick and hi-hat; the LFE carries the bass and the kick, 12 ms late",
-           "Transients strip: about four attacks of the mix per second, half of them (the kicks) in the LFE: 'LFE late' around 12 ms. The hi-hats are not in the LFE.",
+           "Transients strip: 'LFE late' around 12 ms on every kick. With Release lowered to about 10 %, the hi-hats are found too: 'nothing in the LFE'.",
            true, 0.012, 1.0);
     music ("20_music_kick_in_lfe_inverted", "Same music; the LFE kick is on time with flipped polarity",
            "Transients strip: the kicks are in the LFE: 'Aligned, polarity inverted'.", true, 0.0, -1.0);
@@ -510,7 +510,7 @@ int main (int argc, char** argv)
     std::fprintf (readme, "SubGUARD test files\n===================\n\n"
                           "48 kHz, 24-bit, 5.1 in the order L R C LFE Ls Rs: choose the format \"5.1 ITU\" in the app.\n"
                           "Each file starts with one second of silence. Loop a file for a steadier read-out.\n"
-                          "Default settings assumed: level Strong, both polarities, LFE +10 dB box unchecked.\n"
+                          "Default settings assumed: transient check switched on (Transients panel), level Strong, both polarities, LFE +10 dB box unchecked.\n"
                           "\"Measured\" is what the analysis engine itself reads at the end of the file.\n\n");
 
     std::printf ("%-36s %6s %6s %6s %7s   %-17s %s\n", "file", "score", "inter", "depen", "LFE dB", "corr L / C / R", "transients");

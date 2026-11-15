@@ -49,7 +49,7 @@ void LabelledSlider::resized()
 {
     auto area = getLocalBounds();
     auto top = area.removeFromTop (20);
-    valueLabel.setBounds (top.removeFromRight (60));
+    valueLabel.setBounds (top.removeFromRight (120));
     caption.setBounds (top);
     slider.setBounds (area);
 }
@@ -233,37 +233,58 @@ void MainComponent::buildCards()
     for (auto* slider : { &inertia, &integration, &decay })
         slider->refresh();
 
+    const auto percentAnd = [] (double percent, double ms)
+    {
+        return juce::String ((int) percent) + " %  (" + (ms >= 1000.0 ? juce::String (ms / 1000.0, 1) + " s" : juce::String ((int) std::lround (ms)) + " ms") + ")";
+    };
+
+    tAttack.format = [percentAnd] (double v)        { return percentAnd (v, TransientSettings::attackMs (v)); };
+    tHoldProfile.format = [percentAnd] (double v)   { return percentAnd (v, TransientSettings::holdMs (v)); };
+    tRelease.format = [percentAnd] (double v)       { return percentAnd (v, TransientSettings::releaseMs (v)); };
+    tSensitivity.format = [] (double v)             { return juce::String ((int) v) + " %  (" + juce::String (TransientSettings::riseDb (v), 1) + " dB)"; };
     tSearch.format = [] (double v)      { return juce::String::fromUTF8 ("\xc2\xb1") + juce::String ((int) v) + " ms"; };
-    tAttack.format = [] (double v)      { return juce::String (v, 1) + " dB"; };
-    tLowAttack.format = [] (double v)   { return juce::String (v, 1) + " dB"; };
-    tNoise.format = [] (double v)       { return v <= 0.0 ? juce::String ("off") : juce::String (v, 2) + " x"; };
     tMatch.format = [] (double v)       { return juce::String (v, 2); };
     tHold.format = [] (double v)        { return juce::String (v, 1) + " s"; };
+
+    transientToggle.setTooltip ("Off by default. Solo in your DAW what you want to check (a kick and its LFE send, for instance), then switch this on.");
+    tAttack.setTooltip ("How fast a rise must be to count as a transient: the time over which the peak is watched. "
+                        "Low: only sharp hits. High: slower swells count too.");
+    tHoldProfile.setTooltip ("After a transient, no new one for this long: a kick, its click and its cymbal stay one hit.");
+    tRelease.setTooltip ("How long the tail of a hit hides what follows. Higher: a ringing tail is not taken for new transients. "
+                         "Lower: quieter hits soon after a loud one are found.");
+    tSensitivity.setTooltip ("How small a rise counts as a transient. Higher: more transients found, and more false ones.");
     tSearch.setTooltip ("The LFE is looked for this far before and after each attack of the mix. Wider finds a very late LFE; "
                         "narrower is more precise on dense music and on weak hits.");
-    tAttack.setTooltip ("How much the peak of the mix must jump in 12 ms to count as an attack. Lower: more attacks found.");
-    tLowAttack.setTooltip ("How much the energy of a low band must rise to count as an attack, in the mix and in the LFE. Lower: more attacks found.");
-    tNoise.setTooltip ("How far an attack must stand out of the usual movement of the signal. Lower: more attacks found, more false ones on rumble. 0: off.");
     tMatch.setTooltip ("Above this likeness between mix and LFE, the delay and polarity come from the correlation (precise). "
                        "Below, the two attacks are timed against each other (coarse, no phase).");
     tHold.setTooltip ("How long a verdict stays on screen.");
 
-    for (auto* slider : { &tSearch, &tAttack, &tLowAttack, &tNoise, &tMatch, &tHold })
+    for (auto* slider : { &tAttack, &tHoldProfile, &tRelease, &tSensitivity, &tSearch, &tMatch, &tHold })
     {
         slider->refresh();
         slider->onChange = [this] { applyTransientSettings(); };
     }
 
+    transientToggle.onClick = [this] { applyTransientSettings(); };
+
+    // The built-in demo has a late kick to show: start with the check on
+    if (options.demoSignal)
+        transientToggle.setToggleState (true, juce::dontSendNotification);
+
+    applyTransientSettings();
+
     transientDefaultsButton.onClick = [this]
     {
         const TransientSettings d;
+        tAttack.setValue (d.attack);
+        tHoldProfile.setValue (d.hold);
+        tRelease.setValue (d.release);
+        tSensitivity.setValue (d.sensitivity);
         tSearch.setValue (d.searchMs);
-        tAttack.setValue (d.attackDb);
-        tLowAttack.setValue (d.lowAttackDb);
-        tNoise.setValue (d.noiseRejection);
         tMatch.setValue (d.minMatch);
         tHold.setValue (4.0);
     };
+
 
 
     resetSessionButton.onClick = [this]
@@ -340,10 +361,14 @@ void MainComponent::buildCards()
                   levelWeightToggle.setBounds (r.removeFromTop (24));
               });
 
-    populate (transientsCard, 380, 374, { &tSearch, &tAttack, &tLowAttack, &tNoise, &tMatch, &tHold, &transientDefaultsButton },
+    populate (transientsCard, 380, 452, { &transientToggle, &tAttack, &tHoldProfile, &tRelease, &tSensitivity, &tSearch, &tMatch, &tHold,
+                                          &transientDefaultsButton },
               [this] (juce::Rectangle<int> r)
               {
-                  for (auto* slider : { &tSearch, &tAttack, &tLowAttack, &tNoise, &tMatch, &tHold })
+                  transientToggle.setBounds (r.removeFromTop (26));
+                  r.removeFromTop (6);
+
+                  for (auto* slider : { &tAttack, &tHoldProfile, &tRelease, &tSensitivity, &tSearch, &tMatch, &tHold })
                   {
                       slider->setBounds (r.removeFromTop (46));
                       r.removeFromTop (4);
@@ -352,7 +377,7 @@ void MainComponent::buildCards()
                   transientDefaultsButton.setBounds (r.removeFromTop (24).removeFromRight (90));
               });
 
-    populate (chainsCard, 600, 322, { &chainsView, &resetSessionButton },
+    populate (chainsCard, 600, 352, { &chainsView, &resetSessionButton },
               [this] (juce::Rectangle<int> r)
               {
                   resetSessionButton.setBounds (r.removeFromBottom (24).removeFromRight (110));
@@ -548,15 +573,18 @@ AlertTracker::Options MainComponent::alertOptions() const
 void MainComponent::applyTransientSettings()
 {
     TransientSettings t;
+    t.enabled = transientToggle.getToggleState();
+    t.attack = tAttack.value();
+    t.hold = tHoldProfile.value();
+    t.release = tRelease.value();
+    t.sensitivity = tSensitivity.value();
     t.searchMs = tSearch.value();
-    t.attackDb = tAttack.value();
-    t.lowAttackDb = tLowAttack.value();
-    t.noiseRejection = tNoise.value();
     t.minMatch = tMatch.value();
 
     if (engine != nullptr)
         engine->setTransientSettings (t);
 
+    transientStrip.setActive (t.enabled);
     transientStrip.setMinMatch (t.minMatch);
     transientStrip.setHoldSeconds (tHold.value());
 }
@@ -717,12 +745,21 @@ void MainComponent::timerCallback()
             t.dependence = readoutInertia[2].update (t.dependence, dt);
             t.lfeBalanceDb = readoutInertia[3].update (t.lfeBalanceDb, dt);
             t.lfeShare = readoutInertia[4].update (t.lfeShare, dt);
-            chainInertia.resize (t.chains.size() * 2);
+            const size_t perChain = 2 * ChainResult::numGains;
+            chainInertia.resize (t.chains.size() * perChain);
 
             for (size_t k = 0; k < t.chains.size(); ++k)
             {
-                t.chains[k].changeDb = chainInertia[k * 2].update (t.chains[k].changeDb, dt);
-                t.chains[k].penalty = chainInertia[k * 2 + 1].update (t.chains[k].penalty, dt);
+                auto& chain = t.chains[k];
+
+                for (size_t v = 0; v < (size_t) ChainResult::numGains; ++v)
+                {
+                    chain.gainChangeDb[v] = chainInertia[k * perChain + 2 * v].update (chain.gainChangeDb[v], dt);
+                    chain.gainPenalty[v] = chainInertia[k * perChain + 2 * v + 1].update (chain.gainPenalty[v], dt);
+                }
+
+                chain.changeDb = chain.gainChangeDb[(size_t) ChainResult::numGains / 2];
+                chain.penalty = chain.gainPenalty[(size_t) ChainResult::numGains / 2];
             }
 
             // The number on screen only changes once it has really moved
@@ -824,12 +861,15 @@ void MainComponent::loadState()
     integration.setValue (settings->getDoubleValue ("integration", 2.0));
     levelButtons[(size_t) juce::jlimit (0, 2, settings->getIntValue ("alertSensitivity", 3) - 1)].setToggleState (true, juce::dontSendNotification);
     decay.setValue (settings->getDoubleValue ("decay", 1.0));
+    transientToggle.setToggleState (settings->getBoolValue ("transientCheck", false), juce::dontSendNotification);
+    tAttack.setValue (settings->getDoubleValue ("transientAttack", 40.0));
+    tHoldProfile.setValue (settings->getDoubleValue ("transientHoldProfile", 25.0));
+    tRelease.setValue (settings->getDoubleValue ("transientRelease", 50.0));
+    tSensitivity.setValue (settings->getDoubleValue ("transientSensitivity", 70.0));
     tSearch.setValue (settings->getDoubleValue ("transientSearchMs", 250.0));
-    tAttack.setValue (settings->getDoubleValue ("transientAttackDb", 6.0));
-    tLowAttack.setValue (settings->getDoubleValue ("transientLowAttackDb", 6.0));
-    tNoise.setValue (settings->getDoubleValue ("transientNoiseRejection", 1.0));
     tMatch.setValue (settings->getDoubleValue ("transientMinMatch", 0.3));
     tHold.setValue (settings->getDoubleValue ("transientHold", 4.0));
+    applyTransientSettings();
     rangeBox.setSelectedId (settings->getIntValue ("levelRange", 96), juce::dontSendNotification);
     alertModeBox.setSelectedId (settings->getIntValue ("alertMode", 1), juce::dontSendNotification);
     peakHoldToggle.setToggleState (settings->getBoolValue ("peakHold", true), juce::dontSendNotification);
@@ -857,10 +897,12 @@ void MainComponent::saveState()
     settings->setValue ("integration", integration.value());
     settings->setValue ("alertSensitivity", (int) currentLevel() + 1);
     settings->setValue ("decay", decay.value());
+    settings->setValue ("transientCheck", transientToggle.getToggleState());
+    settings->setValue ("transientAttack", tAttack.value());
+    settings->setValue ("transientHoldProfile", tHoldProfile.value());
+    settings->setValue ("transientRelease", tRelease.value());
+    settings->setValue ("transientSensitivity", tSensitivity.value());
     settings->setValue ("transientSearchMs", tSearch.value());
-    settings->setValue ("transientAttackDb", tAttack.value());
-    settings->setValue ("transientLowAttackDb", tLowAttack.value());
-    settings->setValue ("transientNoiseRejection", tNoise.value());
     settings->setValue ("transientMinMatch", tMatch.value());
     settings->setValue ("transientHold", tHold.value());
     settings->setValue ("levelRange", rangeBox.getSelectedId());

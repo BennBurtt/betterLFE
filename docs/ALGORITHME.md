@@ -64,8 +64,9 @@ le système. Un événement est produit pour chaque attaque du mix ; il dit si
 elle est aussi dans le LFE, et si oui comment le LFE se place.
 
 1. **Attaques du mix, pleine bande.** Trois vues du downmix, à la fréquence
-   d'échantillonnage d'entrée ; la première qui se déclenche l'emporte (150 ms
-   de garde : un kick, son clic et sa cymbale ne font qu'une attaque).
+   d'échantillonnage d'entrée ; la première qui se déclenche l'emporte (garde réglée par
+   « Hold », 150 ms par défaut : un kick, son clic et sa cymbale ne font
+   qu'une attaque).
    - *Crêtes au-dessus de 8 kHz* et *crêtes au-dessus de 600 Hz* : la crête
      est relevée par blocs de 1 ms, et une attaque est déclarée quand la crête
      des 12 dernières ms dépasse d'au moins 6 dB (un doublement) la plus haute
@@ -151,16 +152,29 @@ Le bandeau « Transients » affiche le verdict de la dernière attaque du mix :
 verdict fin si la ressemblance suffit ; sinon retard d'attaque à attaque ;
 sinon « nothing in the LFE within ±x ms ».
 
-**Réglages** (panneau « Transients ») :
+**Activation.** Le contrôle des transitoires est éteint par défaut (case
+« Transient check on » du panneau « Transients »). Aucun détecteur n'est
+parfait sur un mix complet : l'usage prévu est de mettre en solo dans le DAW
+les éléments à vérifier (un kick et son envoi LFE), puis d'allumer le contrôle.
+
+**Réglages** (panneau « Transients »). Les quatre premiers sont ceux d'un
+modeleur de transitoires, en pourcentage ; la valeur réelle est affichée à côté.
 
 | Réglage | Défaut | Effet |
 |---|---|---|
+| Attack | 40 % (12 ms) ; 3 ms à 100 ms | Vitesse de montée exigée : durée sur laquelle la crête est observée. Bas : seulement les coups secs. Haut : les montées lentes comptent aussi |
+| Hold | 25 % (150 ms) ; 30 à 510 ms | Après un transitoire, aucun nouveau pendant ce temps |
+| Release | 50 % (200 ms) ; 20 ms à 2 s | Durée pendant laquelle la queue d'un coup masque ce qui suit : rien n'est un nouveau transitoire s'il ne dépasse pas cette queue, qui décroît à cette constante de temps. Haut : une queue qui résonne n'est pas prise pour des attaques. Bas : on retrouve les coups faibles qui suivent de près un coup fort |
+| Sensitivity | 70 % (6 dB) ; 100 % = 2,6 dB, 40 % = 14 dB | Montée minimale qui compte comme transitoire, pour les crêtes et pour les bandes graves ; règle aussi l'exigence « dépasser la variation habituelle du signal » |
 | Search range | ±250 ms (5 à 500) | Jusqu'où le LFE est cherché avant et après l'attaque. Large : trouve un LFE très en retard. Étroit : plus précis sur une musique dense et sur les coups faibles |
-| Attack threshold, clicks / snares / hats | 6 dB | Saut de crête exigé au-dessus de 600 Hz et de 8 kHz. Plus bas : plus d'attaques |
-| Attack threshold, low booms | 6 dB | Montée d'énergie exigée dans les bandes graves, pour le mix et pour le LFE |
-| Noise rejection | 1 (0 à 2) | Multiplie l'exigence « dépasser la variation habituelle du signal ». 0 : désactivé |
 | Likeness needed for a phase reading | 0,3 | Ressemblance à partir de laquelle le retard fin et la polarité sont affichés |
-| Hold on screen | 4 s | Durée d'affichage d'un verdict |
+| Display time | 4 s | Durée d'affichage d'un verdict |
+
+**Attribution.** Une attaque du LFE revient à l'attaque du mix la plus proche,
+et une attaque du mix qui *suit* le LFE compte comme quatre fois plus loin : un
+envoi arrive après sa source bien plus souvent qu'avant. Sans cela, ce qui est
+détecté dans la queue d'un coup s'attribuait le LFE de ce coup et le lisait
+« en avance ».
 
 ## 3. Robustesse du grave : systèmes de lecture et score
 
@@ -221,6 +235,12 @@ en interaction.
 | Bass management | canaux d'écran croisés vers le sub (Linkwitz-Riley 4ᵉ ordre) à 60, 80, 100 Hz, LFE passe-bas 120 Hz ; avec et sans passe-bas raide à 120 Hz tenant lieu de filtre d'encodeur | 6 |
 | Stéréo | `Lo = L + 0,707·C`, `Ro = R + 0,707·C`, sans LFE | 1 |
 
+**Niveau du sub.** Chacun des 16 systèmes cinéma et bass management est
+recalculé avec son sub réglé à −3, −2, −1, 0, +1, +2 et +3 dB, soit 112 cas
+plus la stéréo. Dans le panneau « Playback chains », la ligne « Subwoofer
+level » choisit le niveau affiché ; « Worst » montre pour chaque système le
+niveau le plus pénalisant, avec une petite marque (« sub +3 »).
+
 ### 3.5 Note d'un système
 
 Pour chaque système et chaque bande (20–30, 30–60, 60–90, 90–120 Hz) :
@@ -252,6 +272,19 @@ il survit.
 | Cinéma, sub en avance (−5 et −2,5 ms) | 0,25 |
 | Bass management (les six cas) | 1 |
 
+La pertinence d'un système est multipliée par celle de son erreur de niveau :
+
+| Niveau du sub | Pertinence |
+|---|---|
+| Réglé (0 dB) | 1 |
+| ±1 dB | 0,75 |
+| ±2 dB | 0,5 |
+| ±3 dB | 0,25 |
+
+Ces poids sont une hypothèse, comme les précédents. Ils sont choisis pour
+qu'un grave entièrement dans le LFE reste vers 20 : un sub décalé de 3 dB y
+déplace tout le grave de 3 dB.
+
 **Dépendance** : `0,95 × pénalité de la stéréo sans LFE`, c'est-à-dire de ce que
 le grave perd partout où le LFE manque ou est mal réglé. Le plafond de 0,95
 place un grave large bande entièrement dans le LFE vers 22 : grave (la salle
@@ -260,17 +293,18 @@ seule en décide) sans valoir une annulation.
 **L'infra-grave est mis à part.** Ce que la stéréo perd est pondéré par la
 fréquence : rien en dessous de 25 Hz, tout à partir de 60 Hz, et entre les
 deux un poids qui monte linéairement en octaves. Une sinusoïde de 20 Hz seule
-dans le LFE ne coûte donc rien : on ne la ressent qu'en salle, et l'enlever ne
-change rien au downmix stéréo.
+dans le LFE n'a donc aucune dépendance : on ne la ressent qu'en salle, et
+l'enlever ne change rien au downmix stéréo. Son score n'est pas 100 pour une
+autre raison : un sub mal réglé de 3 dB la déplace de 3 dB (interaction).
 
 | Grave présent uniquement dans le LFE | Dépendance | Score |
 |---|---|---|
-| Sinusoïde à 20 Hz | 0,00 | 100 |
-| 30 Hz | 0,21 | 79 |
-| 40 Hz | 0,52 | 48 |
-| 50 Hz | 0,76 | 24 |
-| 70 Hz et plus | 0,95 | 5 |
-| Bruit large bande 20–120 Hz | — | 22 |
+| Sinusoïde à 20 Hz | 0,00 | 87 |
+| 30 Hz | 0,21 | 69 |
+| 40 Hz | 0,52 | 42 |
+| 50 Hz | 0,76 | 20 |
+| 70 Hz et plus | 0,95 | 4 |
+| Bruit large bande 20–120 Hz | — | 20 |
 
 Les bornes viennent de trois constats (voir 3.8 bis) : le seuil d'audition
 monte très vite vers le bas (78,5 dB SPL à 20 Hz, 68,7 dB à 25 Hz, 37,5 dB à
@@ -315,8 +349,8 @@ Vérifiées par les tests, sur bruit large bande, au niveau Strong :
 | LFE 10 dB sous la façade, à 30 % copié sur elle | 95 |
 | LFE sans rapport, aussi fort que la façade | 60 |
 | LFE 10 dB sous la façade, à 60 % copié sur elle | 60 |
-| LFE seul | 22 |
-| LFE sans rapport, 6 dB au-dessus de la façade | 21 |
+| LFE seul | 20 |
+| LFE sans rapport, 6 dB au-dessus de la façade | 20 |
 | LFE aussi fort que la façade, à 60 % copié sur elle | 19 |
 | LFE 10 dB sous la façade, entièrement copié sur elle | 8 |
 | LFE identique à la façade | 0 |
@@ -409,13 +443,18 @@ dans L, R et le LFE, kick au centre sur le temps, charleston à contretemps,
 
 | Cas | Résultat |
 |---|---|
-| Attaques du mix trouvées | 79 kicks sur 80, 71 charlestons sur 80 |
+| Attaques du mix trouvées, Release à 10 % | les kicks et la plupart des charlestons ; à 50 % (défaut), les kicks seuls |
 | LFE portant le kick 12 ms en retard | 79 attaques dans le LFE, aucun charleston ; décalage médian +12,0 ms (80 % entre +11,6 et +12,4) |
 | Kick du LFE à l'heure, ou inversé | 0,0 ms (±0,4) ; polarité inversée reconnue |
 | Kick du LFE 6 ms en avance | −6,0 ms (±0,4) |
 | Kick 12 dB plus faible sous la même basse, plage ±50 ms | 20 kicks sur 24 reconnus dans le LFE, +12,0 ms |
 | Le même, plage ±250 ms | 4 sur 24 : une plage large coûte les coups faibles |
 | LFE ne portant que la basse | aucune attaque dans le LFE |
+
+Kick suivi d'une cymbale qui résonne en ondulant de 6 dB, LFE 200 ms en
+retard, quatre coups : 4 attaques trouvées, 4 lues « en retard », aucune « en
+avance ». Scène musique : 24 attaques (les kicks) avec Release à 50 %, 46
+(kicks et charlestons) avec Release à 10 %.
 
 Envoi LFE qui ne ressemble pas à sa source (kick au-dessus de 60 Hz au centre,
 coup à 30 Hz dans le LFE 200 ms plus tard) : 4 attaques sur 4 datées, erreur

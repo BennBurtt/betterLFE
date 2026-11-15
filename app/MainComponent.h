@@ -107,12 +107,12 @@ private:
                        levelWeightToggle { "Weigh by level balance" };
     LabelledSlider inertia { "Inertia:", 0, 100, 1, 70 }, integration { "Integration:", 0.5, 5.0, 0.1, 2.0 },
                    decay { "Decay:", 0.1, 4.0, 0.05, 1.0 };
-    LabelledSlider tSearch { "Search range (how far off the LFE may be):", 5, 500, 5, 250 },
-                   tAttack { "Attack threshold, clicks / snares / hats:", 2, 18, 0.5, 6 },
-                   tLowAttack { "Attack threshold, low booms (mix and LFE):", 2, 18, 0.5, 6 },
-                   tNoise { "Noise rejection:", 0, 2, 0.05, 1 },
+    juce::ToggleButton transientToggle { "Transient check on" };
+    LabelledSlider tAttack { "Attack:", 0, 100, 1, 40 }, tHoldProfile { "Hold:", 0, 100, 1, 25 },
+                   tRelease { "Release:", 0, 100, 1, 50 }, tSensitivity { "Sensitivity:", 0, 100, 1, 70 },
+                   tSearch { "Search range (how far off the LFE may be):", 5, 500, 5, 250 },
                    tMatch { "Likeness needed for a phase reading:", 0, 1, 0.05, 0.3 },
-                   tHold { "Hold on screen:", 1, 20, 0.5, 4 };
+                   tHold { "Display time:", 1, 20, 0.5, 4 };
     juce::TextButton transientDefaultsButton { "Defaults" };
     ChainsView chainsView;
     juce::TextButton resetSessionButton { "Reset session" };

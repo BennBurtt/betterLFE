@@ -628,6 +628,15 @@ void TransientStrip::paint (juce::Graphics& g)
     g.fillRect (scale.getX(), y, scale.getWidth(), 1.0f);
     g.fillRect (mid, y - 5.0f, 1.0f, 10.0f);
 
+    if (! active)
+    {
+        g.setColour (juce::Colour (0xff777777));
+        g.setFont (uiFont (12.0f));
+        g.drawText ("Transient check off. Solo in your DAW what you want to check, then switch it on in the Transients panel.",
+                    inner, juce::Justification::centredLeft);
+        return;
+    }
+
     const float alpha = (float) juce::jlimit (0.0, 1.0, 1.0 - (age - holdSeconds) / fadeSeconds);
 
     if (alpha <= 0.0f)
@@ -855,11 +864,47 @@ void ChainsView::update (const ChainsInfo& newInfo)
     repaint();
 }
 
+juce::Rectangle<float> ChainsView::gainButton (int index) const
+{
+    const float left = 150.0f, width = (index == ChainResult::numGains ? 64.0f : 44.0f);
+    return { left + 46.0f * (float) index, 0.0f, width, 20.0f };
+}
+
+void ChainsView::mouseDown (const juce::MouseEvent& e)
+{
+    for (int i = 0; i <= ChainResult::numGains; ++i)
+        if (gainButton (i).contains (e.position))
+            setGainView (i);
+}
+
 void ChainsView::paint (juce::Graphics& g)
 {
     const auto& t = info.translation;
     auto area = getLocalBounds().toFloat();
     const float rowHeight = 22.0f, labelWidth = 150.0f;
+
+    // Which subwoofer level the table shows
+    {
+        g.setColour (theme::dimText);
+        g.setFont (uiFont (12.0f, true));
+        g.drawText ("Subwoofer level", 0, 0, 150, 20, juce::Justification::centredLeft);
+
+        for (int i = 0; i <= ChainResult::numGains; ++i)
+        {
+            const auto box = gainButton (i).reduced (1.0f);
+            const bool on = i == gainView;
+            g.setColour (on ? juce::Colour (0xff3a6ea5) : juce::Colour (0xff2a2a2a));
+            g.fillRoundedRectangle (box, 3.0f);
+            g.setColour (on ? juce::Colours::white : theme::dimText);
+            g.setFont (uiFont (11.5f, on));
+            const double step = i < ChainResult::numGains ? PlaybackSimulator::gainSteps[i] : 0.0;
+            g.drawText (i == ChainResult::numGains ? juce::String ("Worst")
+                                                   : (step > 0.0 ? "+" : "") + juce::String ((int) step) + " dB",
+                        box, juce::Justification::centred);
+        }
+
+        area.removeFromTop (28.0f);
+    }
 
     const auto cinema = [&t] (double delayMs, bool inverted) -> const ChainResult*
     {
@@ -905,15 +950,28 @@ void ChainsView::paint (juce::Graphics& g)
             return;
         }
 
-        const double db = chain->changeDb;
-        g.setColour (colourFor (chain->penalty));
+        const bool worstView = gainView >= ChainResult::numGains;
+        const auto v = (size_t) (worstView ? chain->worstGain : gainView);
+        const double db = chain->gainChangeDb[v];
+        g.setColour (colourFor (chain->gainPenalty[v]));
         g.fillRoundedRectangle (box, 3.0f);
         g.setColour (juce::Colours::white);
         g.setFont (uiFont (12.5f, true));
         const auto value = db <= -PlaybackSimulator::changeLimitDb + 0.05
                              ? juce::String::fromUTF8 ("\xe2\x89\xa4-") + juce::String ((int) PlaybackSimulator::changeLimitDb)
                              : (db >= 0.0 ? "+" : "") + juce::String (db, 1);
-        g.drawText (value + " dB", box, juce::Justification::centred);
+
+        // In the "Worst" view, a small mark tells which level error it is
+        const double step = PlaybackSimulator::gainSteps[v];
+        const bool marked = worstView && chain->kind != ChainResult::Kind::stereo && step != 0.0;
+        g.drawText (value + " dB", marked ? box.withTrimmedRight (30.0f) : box, juce::Justification::centred);
+
+        if (marked)
+        {
+            g.setFont (uiFont (9.5f));
+            g.setColour (juce::Colours::white.withAlpha (0.75f));
+            g.drawText ((step > 0.0 ? "sub +" : "sub ") + juce::String ((int) step), box.removeFromRight (36.0f), juce::Justification::centred);
+        }
     };
 
     const auto table = [&] (const juce::StringArray& columns, const juce::StringArray& rows,
@@ -977,7 +1035,10 @@ void ChainsView::paint (juce::Graphics& g)
     if (t.hasBass && t.worstChain >= 0 && t.interaction > 0.02)
     {
         const auto& c = t.chains[(size_t) t.worstChain];
-        worst = "     worst system: " + juce::String (c.name) + " (" + (c.changeDb >= 0.0 ? "+" : "") + juce::String (c.changeDb, 1) + " dB)";
+        const auto v = (size_t) c.worstGain;
+        const double step = PlaybackSimulator::gainSteps[v];
+        worst = "     worst: " + juce::String (c.name) + (step != 0.0 ? ", sub " + juce::String (step > 0.0 ? "+" : "") + juce::String ((int) step) + " dB" : juce::String())
+                  + " (" + (c.gainChangeDb[v] >= 0.0 ? "+" : "") + juce::String (c.gainChangeDb[v], 1) + " dB)";
     }
 
     line ("Robustness", t.hasBass ? juce::String (juce::roundToInt (t.robustness)) + " / 100     interaction x LFE dependence" : none,

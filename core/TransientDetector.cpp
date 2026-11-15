@@ -29,7 +29,7 @@ namespace
 
     // An attack of the mix is in the LFE when the LFE has one of its own
     // between 30 ms before and 120 ms after it (a low attack builds slowly)...
-    constexpr double lfeNearBeforeSeconds = 0.030, lfeNearAfterSeconds = 0.120;
+    constexpr double lfeNearBeforeSeconds = 0.030;
 
     // ...or when the LFE rises by 6 dB there while matching the mix
     constexpr double lfeRiseRatio = 1.25, lfeRiseMatch = 0.7;
@@ -43,7 +43,6 @@ namespace
     constexpr double peakRoughnessFactor = 5.0;
     constexpr double peakFloor = 5e-4;          // -66 dBFS: below this the peak detector stays silent
     constexpr double midViewHz = 600.0, highViewHz = 8000.0;
-    constexpr double mixRefractorySeconds = 0.150;   // a kick, its click and its cymbal are one attack
 
     // Full-band analysis of the mix, and LFE analysis in its own range
     const std::vector<std::array<double, 2>> mixBands = { { { 10.0, 40.0 } }, { { 40.0, 150.0 } }, { { 150.0, 600.0 } } };
@@ -111,7 +110,7 @@ OnsetBank::Biquad OnsetBank::lowPass (double hz, double sampleRate)
 void OnsetBank::prepare (double sampleRate, int hop, const std::vector<std::array<double, 2>>& bandEdgesHz)
 {
     hopSize = std::max (1, hop);
-    const double decisionRate = sampleRate / hopSize;
+    decisionRate = sampleRate / hopSize;
 
     slowCoeff = 1.0 - std::exp (-1.0 / (decisionRate * slowSeconds));
     roughnessCoeff = 1.0 - std::exp (-1.0 / (decisionRate * roughnessSeconds));
@@ -142,12 +141,20 @@ void OnsetBank::prepare (double sampleRate, int hop, const std::vector<std::arra
     reset();
 }
 
+void OnsetBank::setTiming (double holdSeconds, double releaseSeconds)
+{
+    refractoryHops = (int) std::lround (holdSeconds * decisionRate);
+    dropPerHop = 8.686 / std::max (1.0, releaseSeconds * decisionRate);     // one time constant: 8.7 dB
+    heldRiseHops = (int) std::lround (0.060 * decisionRate);
+}
+
 void OnsetBank::reset()
 {
     for (auto& band : bands)
     {
         std::fill (std::begin (band.state), std::end (band.state), 0.0);
         band.envelope = band.level = band.roughness = 0.0;
+        band.held = -300.0;
         band.primed = false;
     }
 
@@ -181,7 +188,7 @@ bool OnsetBank::process (double sample, int& samplesAgo)
     const auto slot = (size_t) (evaluation % 64);
     const auto lagged = (size_t) ((evaluation + 64 - roughnessLag) % 64);
     const bool frozen = evaluation - lastOnset <= freezeHops;
-    double score = 0.0;
+    double score = 0.0, plain = 0.0;    // with and without the tail of the last hit
 
     for (auto& band : bands)
     {
@@ -197,7 +204,16 @@ bool OnsetBank::process (double sample, int& samplesAgo)
         // Rise above the recent level, measured against what this band
         // usually does: a noisy band needs a bigger jump than a steady one.
         const double threshold = std::max (minimumRise, factor * band.roughness);
-        score = std::max (score, (logEnergy - band.level) / threshold);
+
+        // Release: the tail of the last hit, falling at a set rate, hides
+        // whatever does not rise above it
+        band.held -= dropPerHop;
+
+        if (evaluation - lastOnset <= heldRiseHops)
+            band.held = std::max (band.held, logEnergy);
+
+        score = std::max (score, (logEnergy - std::max (band.level, band.held)) / threshold);
+        plain = std::max (plain, (logEnergy - band.level) / threshold);
 
         if (! frozen)
             band.roughness += roughnessCoeff * (std::min (std::abs (logEnergy - band.recent[lagged]), threshold) - band.roughness);
@@ -206,7 +222,8 @@ bool OnsetBank::process (double sample, int& samplesAgo)
         band.recent[slot] = logEnergy;
     }
 
-    if (score < 0.5)
+    // Ready for a new attack only once the level has settled, whatever the tail hides
+    if (plain < 0.5)
         armed = true;
 
     run = score > 1.0 ? run + 1 : 0;
@@ -228,7 +245,7 @@ bool OnsetBank::process (double sample, int& samplesAgo)
 bool PeakOnset::prepare (double sampleRate, double highPassHz)
 {
     blockSize = std::max (1, (int) std::lround (sampleRate / 1000.0));
-    const double blockRate = sampleRate / blockSize;
+    blockRate = sampleRate / blockSize;
     roughnessCoeff = 1.0 - std::exp (-1.0 / (blockRate * roughnessSeconds));
     freezeBlocks = (int) std::lround (freezeSeconds * blockRate);
     refractoryBlocks = (int) std::lround (refractorySeconds * blockRate);
@@ -246,11 +263,18 @@ bool PeakOnset::prepare (double sampleRate, double highPassHz)
     return enabled;
 }
 
+void PeakOnset::setTiming (double windowSeconds, double holdSeconds, double releaseSeconds)
+{
+    span = std::clamp ((int) std::lround (windowSeconds * blockRate), 2, ringSize - lookBack - 1);
+    refractoryBlocks = (int) std::lround (holdSeconds * blockRate);
+    heldDecay = std::exp (-1.0 / std::max (1.0, releaseSeconds * blockRate));
+}
+
 void PeakOnset::reset()
 {
     std::fill (std::begin (state), std::end (state), 0.0);
     peaks.fill (0.0);
-    blockPeak = roughness = 0.0;
+    blockPeak = roughness = heldPeak = 0.0;
     blockCounter = 0;
     block = 0;
     lastOnset = -1000000;
@@ -278,16 +302,16 @@ bool PeakOnset::process (double x, int& samplesAgo)
         return false;
 
     blockCounter = 0;
-    peaks[(size_t) (block & 63)] = blockPeak;
+    peaks[(size_t) (block & (ringSize - 1))] = blockPeak;
     blockPeak = 0.0;
 
     double current = 0.0, previous = 0.0;
 
     for (int i = 0; i < span; ++i)
-        current = std::max (current, peaks[(size_t) ((block - i) & 63)]);
+        current = std::max (current, peaks[(size_t) ((block - i) & (ringSize - 1))]);
 
     for (int i = span; i < span + lookBack; ++i)
-        previous = std::max (previous, peaks[(size_t) ((block - i) & 63)]);
+        previous = std::max (previous, peaks[(size_t) ((block - i) & (ringSize - 1))]);
 
     const double rise = 20.0 * std::log10 ((current + 0.1 * peakFloor) / (previous + 0.1 * peakFloor));
     const double threshold = std::max (minimumRise, factor * roughness);
@@ -302,7 +326,16 @@ bool PeakOnset::process (double x, int& samplesAgo)
 
     bool found = false;
 
-    if (armed && rise > threshold && current > peakFloor && block - lastOnset > refractoryBlocks)
+    // Release: the tail of the last hit, decaying at a set rate, hides
+    // whatever does not rise above it
+    heldPeak *= heldDecay;
+
+    if (block - lastOnset <= span)
+        heldPeak = std::max (heldPeak, current);
+
+    const double overTail = 20.0 * std::log10 ((current + 0.1 * peakFloor) / (std::max (previous, heldPeak) + 0.1 * peakFloor));
+
+    if (armed && rise > threshold && overTail > 0.0 && current > peakFloor && block - lastOnset > refractoryBlocks)
     {
         // The windows slide by 1 ms, so the block that has just come in is
         // the one that made the peak jump: the attack starts in it.
@@ -329,7 +362,6 @@ TransientDetector::TransientDetector (double inputSampleRate, int decimationFact
     lfeOnsets.prepare (fs, 1, lfeBands);
     mixPeaks.prepare (inputSampleRate, midViewHz);
     mixHighPeaks.prepare (inputSampleRate, highViewHz);
-    mixRefractory = (long long) std::lround (mixRefractorySeconds * inputSampleRate);
 
     // Second-order Butterworth high-pass for the stored signals
     const double w0 = 2.0 * pi * inputHighPassHz / fs;
@@ -352,15 +384,33 @@ TransientDetector::TransientDetector (double inputSampleRate, int decimationFact
 
 void TransientDetector::setSettings (const TransientSettings& t)
 {
+    if (settings.enabled && ! t.enabled)
+    {
+        pendingMix.clear();     // switched off: nothing half-done may come out later
+        events.clear();
+    }
+
     settings = t;
     settings.searchMs = std::clamp (t.searchMs, minSearchMs, maxSearchMs);
-    settings.noiseRejection = std::clamp (t.noiseRejection, 0.0, 2.0);
     maxLag = std::max (1, (int) std::lround (settings.searchMs * 0.001 * fs));
 
-    mixPeaks.setThreshold (settings.attackDb, peakRoughnessFactor * settings.noiseRejection);
-    mixHighPeaks.setThreshold (settings.attackDb, peakRoughnessFactor * settings.noiseRejection);
-    mixOnsets.setThreshold (settings.lowAttackDb, roughnessFactor * settings.noiseRejection);
-    lfeOnsets.setThreshold (settings.lowAttackDb, roughnessFactor * settings.noiseRejection);
+    const double rise = TransientSettings::riseDb (t.sensitivity), scale = TransientSettings::roughnessScale (t.sensitivity);
+    const double window = 0.001 * TransientSettings::attackMs (t.attack), hold = 0.001 * TransientSettings::holdMs (t.hold),
+                 release = 0.001 * TransientSettings::releaseMs (t.release);
+
+    for (auto* peaks : { &mixPeaks, &mixHighPeaks })
+    {
+        peaks->setThreshold (rise, peakRoughnessFactor * scale);
+        peaks->setTiming (window, hold, release);
+    }
+
+    for (auto* bank : { &mixOnsets, &lfeOnsets })
+    {
+        bank->setThreshold (rise, roughnessFactor * scale);
+        bank->setTiming (hold, release);
+    }
+
+    mixRefractory = (long long) std::lround (hold * fs * factor);
 }
 
 void TransientDetector::reset()
@@ -418,6 +468,12 @@ void TransientDetector::mixAttack (long long inputSample)
 
 void TransientDetector::processInput (const float* frame)
 {
+    if (! settings.enabled)
+    {
+        ++inputIndex;
+        return;
+    }
+
     // Stereo downmix summed to mono: Lo + Ro = L + R + 1.414 C
     double mix = screenGain[0] * frame[0] + std::sqrt (2.0) * screenGain[1] * frame[1] + screenGain[2] * frame[2];
 
@@ -735,20 +791,29 @@ void TransientDetector::analyse (long long onsetIndex)
     // Is this attack of the mix in the LFE as well? Either the LFE has an
     // attack of its own next to it, or its energy rises there (by 1 dB at
     // least) with a shape that matches the mix.
-    // An attack of the LFE belongs to the attack of the mix closest to it
+    // An attack of the LFE belongs to the attack of the mix closest to it,
+    // and a send comes after its source far more often than before: an
+    // attack of the mix that follows the LFE counts as four times as far.
+    // Without this, anything detected in the tail of a hit takes the LFE
+    // attack of that hit for itself and reads it as "early".
     const auto closest = [this, onsetIndex] (long long lfeIndex)
     {
-        const auto own = std::abs (lfeIndex - onsetIndex);
+        const auto distance = [lfeIndex] (long long mixIndex)
+        {
+            return lfeIndex >= mixIndex ? lfeIndex - mixIndex : 4 * (mixIndex - lfeIndex);
+        };
+
+        const auto own = distance (onsetIndex);
 
         for (const auto other : recentMix)
-            if (other != onsetIndex && std::abs (lfeIndex - other) < own - 2)
+            if (other != onsetIndex && distance (other) < own - 2)
                 return false;
 
         return true;
     };
 
     bool near = false;
-    const auto before = (long long) std::lround (lfeNearBeforeSeconds * fs) + maxLag, after = (long long) std::lround (lfeNearAfterSeconds * fs) + maxLag;
+    const auto before = (long long) std::lround (lfeNearBeforeSeconds * fs) + maxLag, after = (long long) std::lround (0.030 * fs) + maxLag;
 
     for (const auto index : recentLfe)
         near = near || (index >= onsetIndex - before && index <= onsetIndex + after && closest (index));

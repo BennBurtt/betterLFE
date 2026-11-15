@@ -141,6 +141,9 @@ public:
     void setMinMatch (double m)         { minMatch = m; repaint(); }
     void setHoldSeconds (double s)      { holdSeconds = s; }
 
+    /** Off: the strip says so and shows nothing else. */
+    void setActive (bool on)            { if (active != on) { active = on; age = 1e9; repaint(); } }
+
     /** True when the event shows a fault worth lighting the speakers for. */
     bool isFault (const TransientEvent&) const;
 
@@ -149,6 +152,7 @@ private:
 
     TransientEvent event;
     double age = 1e9, minMatch = 0.3, holdSeconds = 4.0;
+    bool active = false;
 };
 
 /** Signed LFE / screen-channel interaction per frequency, -1 .. +1. */
@@ -202,11 +206,18 @@ public:
 
     void update (const ChainsInfo&);
     void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
 
     static juce::Colour colourFor (double penalty);
 
+    /** Which subwoofer level the table shows: 0..6 for -3..+3 dB, 7 for the worst of them in each cell. */
+    void setGainView (int index)    { gainView = juce::jlimit (0, ChainResult::numGains, index); repaint(); }
+
 private:
+    juce::Rectangle<float> gainButton (int index) const;
+
     ChainsInfo info;
+    int gainView = ChainResult::numGains;
 };
 
 /** Scrolling record of the last minutes: one thin lane per indicator. */

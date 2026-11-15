@@ -21,6 +21,8 @@
 //                  (4th-order Linkwitz-Riley at 60, 80 or 100 Hz), LFE low-passed
 //                  at 120 Hz; with and without a steep 120 Hz low-pass standing
 //                  in for an encoder's LFE filter (a model, not Dolby's filter).
+//   Level          each of the above again with the subwoofer 1, 2 and 3 dB
+//                  too loud or too quiet (7 levels x 16 systems).
 //   Stereo         two-channel downmix of L, C, R; the LFE is left out, as in
 //                  the Dolby and ITU-R BS.775 downmixes.
 //
@@ -41,7 +43,7 @@
 //   Two risks, multiplied:
 //
 //     interaction = the highest (relevance x penalty) among the cinema and
-//                   bass-managed systems. The worst case, not an average: a
+//                   bass-managed systems, at every subwoofer level. The worst case, not an average: a
 //                   mix that cancels on one plausible system is not made safe
 //                   by the systems where it survives.
 //     dependence  = 0.95 x the penalty of the stereo downmix without LFE, i.e.
@@ -86,6 +88,12 @@ struct ChainResult
     std::array<double, numBands> bandChangeDb {};   // same per band (20-30, 30-60, 60-90, 90-120 Hz)
     double penalty = 0.0;                           // 0..1, perceptual, see the header comment
     double weight = 0.0;                            // relevance, 0..1: how much this system counts
+
+    // The same system with its subwoofer set -3 .. +3 dB off (index 3: as calibrated,
+    // the values above). The stereo downmix has no subwoofer: all seven are alike.
+    static constexpr int numGains = 7;
+    std::array<double, numGains> gainChangeDb {}, gainPenalty {};
+    int worstGain = 3;                              // the level at which relevance x penalty is highest
 };
 
 struct Translation
@@ -98,7 +106,8 @@ struct Translation
     double robustness = 100.0;          // 0..100
     double interaction = 0.0;           // 0..1, worst relevance x penalty among cinema and bass-managed systems
     double dependence = 0.0;            // 0..1, how much the bass rests on the LFE
-    int worstChain = -1;                // the system behind `interaction`
+    int worstChain = -1;                // the system behind `interaction`...
+    double worstGainDb = 0.0;           // ...and its subwoofer level error
 
     // LFE as heard (+10 dB) against the screen channels, 20-120 Hz
     double lfeBalanceDb = 0.0;          // positive: the LFE is the louder of the two
@@ -161,6 +170,13 @@ public:
     static constexpr double delaySteps[5] = { -5.0, -2.5, 0.0, 2.5, 5.0 };
     static constexpr double delayRelevance[5] = { 0.25, 0.25, 1.0, 0.5, 0.5 };
     static constexpr double homeRelevance = 1.0;
+
+    // Every system is also rated with its subwoofer 1, 2 and 3 dB too loud or
+    // too quiet. The further off, the less it counts: full weight as
+    // calibrated, then 0.75, 0.5 and 0.25. Like the weights above, these are
+    // assumptions; they keep a mix whose bass is all in the LFE near 20.
+    static constexpr double gainSteps[ChainResult::numGains] = { -3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0 };
+    static constexpr double gainRelevance[ChainResult::numGains] = { 0.25, 0.5, 0.75, 1.0, 0.75, 0.5, 0.25 };
 
     // With all the bass in the LFE, spread over 20-120 Hz, the score stops at
     // about 22: bad, since the room alone then decides the bass, but not as bad

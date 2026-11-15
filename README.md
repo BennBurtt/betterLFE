@@ -58,7 +58,7 @@ Les deux fonctionnent de la même façon quel que soit le niveau, jusqu'à
 
 S'y ajoute un score de robustesse de 0 à 100 : le grave du mix est recalculé
 sur 17 systèmes de lecture (cinéma avec sub décalé ou inversé ; bass
-management ; stéréo sans LFE) et chaque écart est converti en
+management ; stéréo sans LFE), chacun avec un sub réglé de −3 à +3 dB, et chaque écart est converti en
 sensation d'après ISO 226. S'y ajoutent le niveau du LFE face à la façade, leur
 recouvrement et la polarité cumulée de la séance.
 

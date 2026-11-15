@@ -830,11 +830,12 @@ static void testTransients()
 
         struct Count { int mix = 0, inLfe = 0, inverted = 0; double median = 0.0, spread = 0.0; };
 
-        const auto run = [] (const Scene& s, double searchMs = 250.0)
+        const auto run = [] (const Scene& s, double searchMs = 250.0, double release = 50.0)
         {
             LfeEngine e (sampleRate, 1.0, 0.0);
             TransientSettings tuning;
             tuning.searchMs = searchMs;
+            tuning.release = release;
             e.setTransientSettings (tuning);
             const auto data = s.interleaved();
             std::vector<double> delays;
@@ -871,7 +872,14 @@ static void testTransients()
             const auto c = run (scene (true, 0.012, 1.0, 1.0));
             std::printf ("  music, LFE kick 12 ms late: %d attacks in the mix, %d in the LFE, %+.1f ms (10-90 %% spread %.1f ms)\n",
                          c.mix, c.inLfe, c.median, c.spread);
-            check (c.mix >= 40 && c.mix <= 52, "music: kicks and hi-hats of the mix are found", c.mix);
+            check (c.mix >= 23 && c.mix <= 52, "music: the kicks of the mix are found", c.mix);
+
+            // The hi-hats sit 20 dB under the click of the kick, a quarter of a second
+            // after it: hidden by its tail at the default release, found with a short one
+            const auto shortRelease = run (scene (true, 0.012, 1.0, 1.0), 250.0, 10.0);
+            std::printf ("  music: %d attacks with release 50 %%, %d with release 10 %%\n", c.mix, shortRelease.mix);
+            check (shortRelease.mix >= 40 && shortRelease.inLfe >= 21 && shortRelease.inLfe <= 25,
+                   "music: a short release also finds the hi-hats, still not in the LFE", shortRelease.mix);
             check (c.inLfe >= 21 && c.inLfe <= 25, "music: the kicks, and only them, are in the LFE", c.inLfe);
             check (std::abs (c.median - 12.0) < 0.5 && c.spread < 1.5, "music: LFE offset under a bass line", c.median);
         }
@@ -893,8 +901,60 @@ static void testTransients()
         }
         {
             const auto c = run (scene (false, 0.0, 1.0, 1.0));
-            check (c.mix >= 40 && c.inLfe <= 1, "music: LFE with the bass line only shares no attack but its start", c.inLfe);
+            check (c.mix >= 23 && c.inLfe <= 1, "music: LFE with the bass line only shares no attack but its start", c.inLfe);
         }
+    }
+    {
+        // A hit with a long, uneven tail (a kick with a cymbal), the LFE 200 ms
+        // late: one attack, read as late. Nothing in the tail may be taken for
+        // a new attack to which the same LFE hit would then look "early".
+        const auto n = (size_t) (9.0 * sampleRate);
+        Scene s;
+        s.c.assign (n, 0.0f);
+        s.lfe.assign (n, 0.0f);
+        std::mt19937 rng (3);
+        std::normal_distribution<double> normal (0.0, 1.0);
+
+        for (size_t i = 0; i < n; ++i)
+        {
+            const double t = (double) i / sampleRate, white = normal (rng);
+
+            for (double t0 = 1.0; t0 < 8.0; t0 += 2.0)
+            {
+                const double u = t - t0, v = u - 0.200;
+
+                if (u >= 0.0)
+                {
+                    // thump, then a cymbal whose level wobbles by 6 dB as it rings out
+                    const double wobble = 1.0 + 0.5 * std::sin (2.0 * pi * 7.0 * u);
+                    s.c[i] += (float) (0.4 * std::sin (2.0 * pi * 90.0 * u) * std::exp (-u / 0.08)
+                                         + 0.12 * white * wobble * std::exp (-u / 0.5));
+                }
+
+                if (v >= 0.0)
+                    s.lfe[i] += (float) (0.3 * std::sin (2.0 * pi * 35.0 * v) * std::exp (-v / 0.25) * (1.0 - std::exp (-v / 0.01)));
+            }
+        }
+
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        const auto data = s.interleaved();
+        int total = 0, late = 0, early = 0;
+
+        for (size_t pos = 0; pos < s.length(); pos += blockSize)
+        {
+            e.push (data.data() + pos * numChannels, (int) std::min ((size_t) blockSize, s.length() - pos));
+
+            for (const auto& ev : e.takeTransientEvents())
+            {
+                ++total;
+                late += ev.inLfe && ev.lfeAttack && std::abs (ev.attackDelayMs - 200.0) < 12.0;
+                early += ev.inLfe && ((ev.lfeAttack && ev.attackDelayMs < -10.0) || (ev.match >= 0.3 && ev.delayMs < -10.0));
+            }
+        }
+
+        std::printf ("  kick with a ringing cymbal, LFE 200 ms late: %d attacks, %d read as late, %d as early\n", total, late, early);
+        check (late == 4 && early == 0, "ringing tail: the LFE is late, never early", early);
+        check (total <= 5, "ringing tail: not taken for new attacks", total);
     }
     {
         // A send that does not look like its source: kick above 60 Hz in the
@@ -1072,9 +1132,18 @@ static void testPlaybackChains()
 
         for (const auto& c : t.chains)
             if (c.kind != ChainResult::Kind::stereo)
-                worst = std::max (worst, c.weight * c.penalty);
+                for (int v = 0; v < ChainResult::numGains; ++v)
+                    worst = std::max (worst, c.weight * PlaybackSimulator::gainRelevance[v] * c.gainPenalty[(size_t) v]);
 
-        check (std::abs (t.interaction - worst) < 1e-12, "interaction = worst relevance x penalty", t.interaction);
+        check (std::abs (t.interaction - worst) < 1e-12, "interaction = worst relevance x penalty, over the subwoofer levels", t.interaction);
+
+        // All the bass in the LFE: a subwoofer 3 dB off moves it by 3 dB, on time or not
+        const auto& onTime = cinema (t, 0.0, false);
+        check (std::abs (onTime.gainChangeDb[6] - 3.0) < 0.05 && std::abs (onTime.gainChangeDb[0] + 3.0) < 0.05
+                 && std::abs (onTime.gainChangeDb[3]) < 0.05, "LFE alone: sub +/-3 dB moves the bass by +/-3 dB", onTime.gainChangeDb[6]);
+        check (std::abs (onTime.gainChangeDb[3] - onTime.changeDb) < 1e-12 && std::abs (onTime.gainPenalty[3] - onTime.penalty) < 1e-12,
+               "the calibrated level is the middle of the seven", onTime.changeDb);
+        check (std::abs (t.worstGainDb) > 1.5, "LFE alone: the worst case is a subwoofer level error", t.worstGainDb);
         check (std::abs (t.robustness - 100.0 * (1.0 - t.interaction) * (1.0 - t.dependence)) < 1e-9,
                "robustness = 100 (1 - interaction) (1 - dependence)", t.robustness);
         std::printf ("  LFE alone: robustness %.0f\n", t.robustness);
@@ -1166,7 +1235,8 @@ static void testPlaybackChains()
             previous = t.dependence;
 
             if (hz <= 20.0)
-                check (t.dependence < 0.01 && t.robustness > 99.0, "20 Hz in the LFE alone: no dependence, score 100", t.robustness);
+                check (t.dependence < 0.01 && t.robustness > 85.0 && t.robustness < 90.0,
+                       "20 Hz in the LFE alone: no dependence; only a subwoofer level error costs", t.robustness);
 
             if (hz >= 70.0)
                 check (std::abs (t.dependence - PlaybackSimulator::dependenceCeiling) < 0.01, "70 Hz and above: full dependence", t.dependence);
