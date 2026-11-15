@@ -33,8 +33,8 @@
 //     penalty = clamp ((|difference| - T) / (doubling - T), 0, 1)
 //
 //   0 up to the tolerance T, 1 when the band is heard twice as loud or half as
-//   loud. T follows the chosen level: 2 dB (Soft), 0.5 dB (Medium, around the
-//   smallest audible level difference), 0.1 dB (Strong). Bands are combined by their share
+//   loud. T follows the chosen level: 3 dB (Soft), 2 dB (Medium), 1 dB (Strong,
+//   about the smallest audible level difference). Bands are combined by their share
 //   of the bass.
 //
 // SCORE
@@ -120,14 +120,14 @@ public:
     static constexpr double lfeInBandGainDb = 10.0;     // SMPTE RP 200
     static constexpr double changeLimitDb = 24.0;       // larger differences all count the same
     // How strict the rating is: the level difference a band may show before it
-    // starts to count. Soft lets audible but moderate changes pass (2 dB);
-    // Medium starts at half a dB, around the smallest audible change; Strong
-    // counts almost everything (0.1 dB), so a perfect score is exceptional.
+    // starts to count. Strong starts at 1 dB, about the smallest audible
+    // change, so a perfect score is exceptional on real material. Medium
+    // (2 dB) and Soft (3 dB) let moderate changes pass.
     enum class Level { soft, medium, strong };
 
     static constexpr double toleranceDb (Level level)
     {
-        return level == Level::soft ? 2.0 : (level == Level::medium ? 0.5 : 0.1);
+        return level == Level::soft ? 3.0 : (level == Level::medium ? 2.0 : 1.0);
     }
 
     // Correlation from which the phase alert fires, for the same three levels
@@ -156,7 +156,7 @@ public:
     // room alone then decides the bass, but not as bad as a cancellation.
     static constexpr double dependenceCeiling = 0.72;
 
-    Translation compute (const Analysis&, Level level = Level::medium) const;
+    Translation compute (const Analysis&, Level level = Level::strong) const;
 };
 
 } // namespace subguard

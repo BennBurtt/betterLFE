@@ -201,9 +201,11 @@ seuil de l'alerte de phase et la tolérance `T` du score :
 
 | Niveau | Alerte de phase à partir de | Tolérance du score | Effet |
 |---|---|---|---|
-| Soft | corrélation 0,90 | 2 dB | Un mix sain reste à 100 |
-| Medium | 0,75 | 0,5 dB, vers le plus petit écart audible | 100 possible, rarement longtemps |
-| Strong | 0,50 | 0,1 dB | 100 exceptionnel |
+| Soft | corrélation 0,90 | 3 dB | Le plus indulgent : un mix sain reste à 100 |
+| Medium | 0,75 | 2 dB | 100 possible, rarement longtemps |
+| Strong | 0,50 | 1 dB, vers le plus petit écart audible | Le plus sévère : 100 exceptionnel sur du contenu réel |
+
+Strong est le réglage d'origine de l'app, et le niveau par défaut.
 
 Les repères ne dépendent pas du niveau : LFE identique à la façade 0, LFE seul
 vers 22.
@@ -217,19 +219,19 @@ vers 22.
 | 20–25 | Tout le grave est dans le LFE : la salle seule en décide |
 | 0 | Un système plausible annule le grave, ou le rend deux fois plus fort |
 
-Vérifiées par les tests, sur bruit large bande, au niveau Medium :
+Vérifiées par les tests, sur bruit large bande, au niveau Strong :
 
 | Mix | Robustesse |
 |---|---|
 | Façade seule, LFE muet | 100 |
-| LFE sans rapport avec la façade, 10 dB sous elle à l'écoute | 99 |
-| LFE 10 dB sous la façade, à 30 % copié sur elle | 91 |
-| LFE sans rapport, aussi fort que la façade | 56 |
-| LFE 10 dB sous la façade, à 60 % copié sur elle | 53 |
-| LFE seul | 21 |
-| LFE sans rapport, 6 dB au-dessus de la façade | 23 |
-| LFE aussi fort que la façade, à 60 % copié sur elle | 16 |
-| LFE 10 dB sous la façade, entièrement copié sur elle | 7 |
+| LFE sans rapport avec la façade, 10 dB sous elle à l'écoute | 100 |
+| LFE 10 dB sous la façade, à 30 % copié sur elle | 95 |
+| LFE sans rapport, aussi fort que la façade | 62 |
+| LFE 10 dB sous la façade, à 60 % copié sur elle | 61 |
+| LFE seul | 22 |
+| LFE sans rapport, 6 dB au-dessus de la façade | 24 |
+| LFE aussi fort que la façade, à 60 % copié sur elle | 18 |
+| LFE 10 dB sous la façade, entièrement copié sur elle | 8 |
 | LFE identique à la façade | 0 |
 | LFE identique mais en retard de 5 ms | 0 |
 
@@ -242,7 +244,7 @@ grave de près de 6 dB entre un sub en polarité et un sub inversé.
 |---|---|
 | LFE à +10 dB, omission du LFE en downmix, rôle d'appoint du LFE | Normes [9][12][13] |
 | Conversion dB → sensation (5,0 à 6,9 dB par doublement) | Calculé depuis ISO 226:2003 [14] |
-| Tolérances des trois niveaux (2 ; 0,5 ; 0,1 dB) | Choix ; 0,5 à 1 dB est l'ordre de grandeur admis du plus petit écart audible [16] |
+| Tolérances des trois niveaux (3 ; 2 ; 1 dB) | Choix ; 1 dB est l'ordre de grandeur admis du plus petit écart audible [16] |
 | Filtres de bass management (Linkwitz-Riley 24 dB/oct) | Modèle courant, variable selon les appareils |
 | Filtre d'encodeur (Butterworth 8ᵉ ordre à 120 Hz) | Modèle : le filtre LFE de Dolby Digital Plus n'est pas public |
 | Étendue des défauts de salle (±5 ms, polarité) | **Hypothèse.** Le rapport SMPTE constate de larges écarts mais ses chiffres ne sont pas publics |

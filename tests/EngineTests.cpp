@@ -962,22 +962,22 @@ static void testPlaybackChains()
         check (c.penalty <= expected + 1e-9, "a system's penalty never exceeds its worst band", c.penalty);
     }
     {
-        // The three levels on the same mix (LFE 10 dB below the screen, 45 % copied
+        // The three levels on the same mix (LFE 10 dB below the screen, 60 % copied
         // from it): Soft is the most lenient, Strong the strictest; the anchors hold.
         const auto other = noise (10.0, 76);
         LfeEngine e (sampleRate, 1.0, 0.0);
         Scene s;
         s.l = n;
-        s.lfe = scaled (sum (scaled (n, 0.45), scaled (other, std::sqrt (1.0 - 0.45 * 0.45))), 0.316 * asHeard);
+        s.lfe = scaled (sum (scaled (n, 0.6), scaled (other, 0.8)), 0.316 * asHeard);
         run (e, s);
         using Level = PlaybackSimulator::Level;
         const double soft = sim.compute (e.result(), Level::soft).robustness;
         const double medium = sim.compute (e.result(), Level::medium).robustness;
         const double strong = sim.compute (e.result(), Level::strong).robustness;
         check (soft >= medium && medium >= strong, "Soft >= Medium >= Strong", soft - strong);
-        check (soft > 97.0, "Soft: a lightly shared LFE scores about 100", soft);
+        check (soft > 90.0, "Soft: a moderately shared, quiet LFE keeps a high score", soft);
         check (strong < medium - 2.0, "Strong is clearly stricter than Medium", medium - strong);
-        std::printf ("  LFE 10 dB below, 45 %% shared: Soft %.0f, Medium %.0f, Strong %.0f\n", soft, medium, strong);
+        std::printf ("  LFE 10 dB below, 60 %% shared: Soft %.0f, Medium %.0f, Strong %.0f\n", soft, medium, strong);
 
         LfeEngine same (sampleRate, 1.0, 0.0);
         Scene copy;

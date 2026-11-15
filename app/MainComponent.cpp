@@ -212,9 +212,9 @@ void MainComponent::buildCards()
     // the phase alert threshold and how strict the robustness score is.
     const char* levelNames[] = { "Soft", "Medium", "Strong" };
     const char* levelTips[] = {
-        "Soft: phase alert from a correlation of 0.90; the score tolerates 2 dB of change before counting it.",
-        "Medium: phase alert from 0.75; the score tolerates 0.5 dB, around the smallest audible change.",
-        "Strong: phase alert from 0.50; the score counts changes from 0.1 dB."
+        "Soft: phase alert from a correlation of 0.90; the score tolerates 3 dB of change before counting it.",
+        "Medium: phase alert from 0.75; the score tolerates 2 dB.",
+        "Strong: phase alert from 0.50; the score counts changes from 1 dB, about the smallest audible one."
     };
 
     for (int i = 0; i < 3; ++i)
