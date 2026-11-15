@@ -64,8 +64,8 @@ le système. Un événement est produit pour chaque attaque du mix ; il dit si
 elle est aussi dans le LFE, et si oui comment le LFE se place.
 
 1. **Attaques du mix, pleine bande.** Trois vues du downmix, à la fréquence
-   d'échantillonnage d'entrée ; la première qui se déclenche l'emporte (80 ms
-   de garde).
+   d'échantillonnage d'entrée ; la première qui se déclenche l'emporte (150 ms
+   de garde : un kick, son clic et sa cymbale ne font qu'une attaque).
    - *Crêtes au-dessus de 8 kHz* et *crêtes au-dessus de 600 Hz* : la crête
      est relevée par blocs de 1 ms, et une attaque est déclarée quand la crête
      des 12 dernières ms dépasse d'au moins 6 dB (un doublement) la plus haute
@@ -84,10 +84,21 @@ elle est aussi dans le LFE, et si oui comment le LFE se place.
      fluctuation habituelle. Cette vue trouve un boom sans clic.
 2. **L'attaque est-elle dans le LFE ?** Le même détecteur d'énergie tourne sur
    le LFE (10–190, 10–30, 30–50, 50–80, 80–190 Hz). L'attaque du mix compte
-   comme présente dans le LFE si le LFE a sa propre attaque entre 30 ms avant
-   et 120 ms après, ou si son énergie y monte d'au moins 1 dB avec une forme
+   comme présente dans le LFE si le LFE a sa propre attaque dans la plage de
+   recherche (±250 ms par défaut, réglable), ou si son énergie y monte d'au moins 1 dB avec une forme
    qui ressemble à celle du mix (ressemblance ≥ 0,7).
-3. **Comment le LFE se place-t-il ?** Le mix et le LFE n'ont pas la même
+   Une attaque du LFE est attribuée à l'attaque du mix la plus proche d'elle :
+   un charleston placé entre deux kicks ne « prend » pas le LFE du kick voisin.
+3. **Retard d'attaque à attaque.** Le début de chaque attaque est l'instant où
+   le signal franchit un cinquième du chemin entre ce qui précédait et sa
+   crête. La différence entre le début de l'attaque du LFE et celui de
+   l'attaque du mix donne un retard grossier (quelques ms), qui **ne demande
+   aucune ressemblance** entre les deux sons. C'est lui qui est affiché quand
+   le LFE ne porte pas le même son que le mix (envoi très filtré, générateur
+   de sous-harmoniques) : « LFE attack late ≈ 196 ms ».
+4. **Retard fin et polarité, par corrélation.** Utilisé quand la ressemblance
+   dépasse le réglage « Likeness needed for a phase reading » (0,3 par
+   défaut). Le mix et le LFE n'ont pas la même
    largeur de bande, et une basse tenue peut sonner dans les deux. Avant de
    les comparer :
    - le mix est ramené à la bande du LFE (8–190 Hz) : on ne compare deux
@@ -105,12 +116,14 @@ elle est aussi dans le LFE, et si oui comment le LFE se place.
      que ce que l'attaque a apporté.
 
    Vient alors la corrélation croisée entre le segment du mix (300 ms autour
-   de l'attaque) et le LFE, pour tous les décalages de −50 à +50 ms [7]. On
+   de l'attaque) et le LFE, pour tous les décalages de la plage de recherche [7]. On
    utilise sa version analytique : le maximum de son enveloppe situe le
    transitoire du LFE dans le temps, et la phase à ce maximum donne la polarité.
    Cela distingue un LFE *inversé* d'un LFE *en retard d'une demi-période*, que
-   la corrélation simple confond sur un son grave.
-4. **Précision du décalage**, d'après la borne de Cramér-Rao de l'estimation de
+   la corrélation simple confond sur un son grave. Parmi les décalages qui
+   correspondent presque aussi bien que le meilleur (à 5 % près), le plus petit
+   est retenu : un coup à bande étroite donne un maximum large et ondulé.
+5. **Précision du décalage**, d'après la borne de Cramér-Rao de l'estimation de
    retard [8] :
 
    `σ_retard = √((1 − m²) / (m²·N)) / (2π·β)`
@@ -120,7 +133,7 @@ elle est aussi dans le LFE, et si oui comment le LFE se place.
    efficace qu'ils partagent et `N = 2·B·T` le nombre d'échantillons
    indépendants du segment. Un coup à bande étroite ou noyé dans autre chose
    reçoit une grande incertitude.
-5. **Verdict**, pour les attaques présentes dans le LFE, seulement si la ressemblance des deux transitoires une fois
+6. **Verdict fin**, pour les attaques présentes dans le LFE, seulement si la ressemblance des deux transitoires une fois
    réalignés dépasse le seuil (en mode « Out of phase only » : seulement si la
    corrélation sans réalignement est négative au-delà du seuil) :
 
@@ -134,9 +147,20 @@ elle est aussi dans le LFE, et si oui comment le LFE se place.
 
    2,5 ms est un quart de période à 100 Hz.
 
-Le bandeau « Transients » affiche à gauche, sur les 10 dernières secondes,
-combien d'attaques du mix sont aussi dans le LFE (par exemple « 7 / 14 »), et à
-droite le verdict de la dernière attaque partagée.
+Le bandeau « Transients » affiche le verdict de la dernière attaque du mix :
+verdict fin si la ressemblance suffit ; sinon retard d'attaque à attaque ;
+sinon « nothing in the LFE within ±x ms ».
+
+**Réglages** (panneau « Transients ») :
+
+| Réglage | Défaut | Effet |
+|---|---|---|
+| Search range | ±250 ms (5 à 500) | Jusqu'où le LFE est cherché avant et après l'attaque. Large : trouve un LFE très en retard. Étroit : plus précis sur une musique dense et sur les coups faibles |
+| Attack threshold, clicks / snares / hats | 6 dB | Saut de crête exigé au-dessus de 600 Hz et de 8 kHz. Plus bas : plus d'attaques |
+| Attack threshold, low booms | 6 dB | Montée d'énergie exigée dans les bandes graves, pour le mix et pour le LFE |
+| Noise rejection | 1 (0 à 2) | Multiplie l'exigence « dépasser la variation habituelle du signal ». 0 : désactivé |
+| Likeness needed for a phase reading | 0,3 | Ressemblance à partir de laquelle le retard fin et la polarité sont affichés |
+| Hold on screen | 4 s | Durée d'affichage d'un verdict |
 
 ## 3. Robustesse du grave : systèmes de lecture et score
 
@@ -389,8 +413,14 @@ dans L, R et le LFE, kick au centre sur le temps, charleston à contretemps,
 | LFE portant le kick 12 ms en retard | 79 attaques dans le LFE, aucun charleston ; décalage médian +12,0 ms (80 % entre +11,6 et +12,4) |
 | Kick du LFE à l'heure, ou inversé | 0,0 ms (±0,4) ; polarité inversée reconnue |
 | Kick du LFE 6 ms en avance | −6,0 ms (±0,4) |
-| Kick 12 dB plus faible sous la même basse | 63 kicks sur 80 reconnus dans le LFE, +12,1 ms (80 % entre +10,6 et +13,7) |
+| Kick 12 dB plus faible sous la même basse, plage ±50 ms | 20 kicks sur 24 reconnus dans le LFE, +12,0 ms |
+| Le même, plage ±250 ms | 4 sur 24 : une plage large coûte les coups faibles |
 | LFE ne portant que la basse | aucune attaque dans le LFE |
+
+Envoi LFE qui ne ressemble pas à sa source (kick au-dessus de 60 Hz au centre,
+coup à 30 Hz dans le LFE 200 ms plus tard) : 4 attaques sur 4 datées, erreur
+maximale 2 ms, ressemblance 0,22. Avec une plage de ±50 ms, rien n'est
+apparié.
 
 Sur coups isolés : kick retrouvé à 0,5 ms près, y compris à −90 dBFS et avec
 un LFE 30 dB plus bas ; boom à 28 Hz sous un fond 60–190 Hz plus fort retrouvé
@@ -410,6 +440,11 @@ du son) : bruit blanc ou rose, aucune ; grondement grave (sous 90 Hz), 1 à 3.
 - Une attaque du mix sans grave propre (clic seul à l'écran, corps du coup
   uniquement dans le LFE) est bien comptée « dans le LFE », mais son décalage
   ne peut pas être mesuré : il n'y a rien de commun à corréler.
+- Une plage de recherche large (défaut ±250 ms) trouve un LFE très en retard,
+  mais perd les coups faibles noyés dans une basse et devient ambiguë quand
+  les coups se suivent à moins de la plage. Sur une musique dense, la réduire.
+- Le retard d'attaque à attaque est grossier (quelques ms, 2 ms de pas) et ne
+  dit rien de la polarité.
 - Deux attaques semblables à moins de 370 ms l'une de l'autre : la seconde est
   comparée à un passé qui contient la première, et sa mesure perd en précision.
 - Sur un grondement grave tenu, une fausse attaque par minute environ

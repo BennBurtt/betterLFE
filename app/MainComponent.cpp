@@ -119,7 +119,7 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
 
     setSize (1200, 1000);
 
-    const juce::StringArray cardNames { "source", "analysis", "spectrum", "response", "alert", "chains" };
+    const juce::StringArray cardNames { "source", "analysis", "spectrum", "response", "alert", "transients", "chains" };
     showCard (cardNames.indexOf (options.openCard));
 
     lastTick = juce::Time::getMillisecondCounterHiRes() * 0.001;
@@ -233,6 +233,38 @@ void MainComponent::buildCards()
     for (auto* slider : { &inertia, &integration, &decay })
         slider->refresh();
 
+    tSearch.format = [] (double v)      { return juce::String::fromUTF8 ("\xc2\xb1") + juce::String ((int) v) + " ms"; };
+    tAttack.format = [] (double v)      { return juce::String (v, 1) + " dB"; };
+    tLowAttack.format = [] (double v)   { return juce::String (v, 1) + " dB"; };
+    tNoise.format = [] (double v)       { return v <= 0.0 ? juce::String ("off") : juce::String (v, 2) + " x"; };
+    tMatch.format = [] (double v)       { return juce::String (v, 2); };
+    tHold.format = [] (double v)        { return juce::String (v, 1) + " s"; };
+    tSearch.setTooltip ("The LFE is looked for this far before and after each attack of the mix. Wider finds a very late LFE; "
+                        "narrower is more precise on dense music and on weak hits.");
+    tAttack.setTooltip ("How much the peak of the mix must jump in 12 ms to count as an attack. Lower: more attacks found.");
+    tLowAttack.setTooltip ("How much the energy of a low band must rise to count as an attack, in the mix and in the LFE. Lower: more attacks found.");
+    tNoise.setTooltip ("How far an attack must stand out of the usual movement of the signal. Lower: more attacks found, more false ones on rumble. 0: off.");
+    tMatch.setTooltip ("Above this likeness between mix and LFE, the delay and polarity come from the correlation (precise). "
+                       "Below, the two attacks are timed against each other (coarse, no phase).");
+    tHold.setTooltip ("How long a verdict stays on screen.");
+
+    for (auto* slider : { &tSearch, &tAttack, &tLowAttack, &tNoise, &tMatch, &tHold })
+    {
+        slider->refresh();
+        slider->onChange = [this] { applyTransientSettings(); };
+    }
+
+    transientDefaultsButton.onClick = [this]
+    {
+        const TransientSettings d;
+        tSearch.setValue (d.searchMs);
+        tAttack.setValue (d.attackDb);
+        tLowAttack.setValue (d.lowAttackDb);
+        tNoise.setValue (d.noiseRejection);
+        tMatch.setValue (d.minMatch);
+        tHold.setValue (4.0);
+    };
+
 
     resetSessionButton.onClick = [this]
     {
@@ -308,6 +340,18 @@ void MainComponent::buildCards()
                   levelWeightToggle.setBounds (r.removeFromTop (24));
               });
 
+    populate (transientsCard, 380, 374, { &tSearch, &tAttack, &tLowAttack, &tNoise, &tMatch, &tHold, &transientDefaultsButton },
+              [this] (juce::Rectangle<int> r)
+              {
+                  for (auto* slider : { &tSearch, &tAttack, &tLowAttack, &tNoise, &tMatch, &tHold })
+                  {
+                      slider->setBounds (r.removeFromTop (46));
+                      r.removeFromTop (4);
+                  }
+
+                  transientDefaultsButton.setBounds (r.removeFromTop (24).removeFromRight (90));
+              });
+
     populate (chainsCard, 600, 322, { &chainsView, &resetSessionButton },
               [this] (juce::Rectangle<int> r)
               {
@@ -316,7 +360,7 @@ void MainComponent::buildCards()
                   resetSessionButton.toFront (false);
               });
 
-    const char* names[] = { "Source", "Analysis", "Spectrum", "Response", "Alert", "Playback chains" };
+    const char* names[] = { "Source", "Analysis", "Spectrum", "Response", "Alert", "Transients", "Playback chains" };
 
     for (int i = 0; i < numCards; ++i)
     {
@@ -365,7 +409,7 @@ void MainComponent::resized()
     header.setBounds (area.removeFromTop (juce::jmax (110, juce::jmin (headerHeight, getHeight() / 6))));
 
     auto bar = area.removeFromTop (barHeight).reduced (10, 6);
-    const int widths[] = { 90, 90, 90, 90, 80, 140 };
+    const int widths[numCards] = { 90, 90, 90, 90, 80, 100, 140 };
 
     for (int i = 0; i < numCards; ++i)
     {
@@ -501,11 +545,28 @@ AlertTracker::Options MainComponent::alertOptions() const
     return o;
 }
 
+void MainComponent::applyTransientSettings()
+{
+    TransientSettings t;
+    t.searchMs = tSearch.value();
+    t.attackDb = tAttack.value();
+    t.lowAttackDb = tLowAttack.value();
+    t.noiseRejection = tNoise.value();
+    t.minMatch = tMatch.value();
+
+    if (engine != nullptr)
+        engine->setTransientSettings (t);
+
+    transientStrip.setMinMatch (t.minMatch);
+    transientStrip.setHoldSeconds (tHold.value());
+}
+
 void MainComponent::rebuildEngine (double sampleRate)
 {
     const double windows[] = { 0.5, 1.0, 2.0 };
     engineRate = sampleRate;
     engine = std::make_unique<LfeEngine> (sampleRate, windows[juce::jlimit (0, 2, windowBox.getSelectedId() - 1)]);
+    applyTransientSettings();
     alerts.reset (engine->result().grid.size());
 }
 
@@ -711,16 +772,15 @@ void MainComponent::timerCallback()
         historySample = {};
     }
 
-    // Transient engine: one event per attack of the mix; those the LFE shares get a verdict
+    // Transient engine: one event per attack of the mix
     for (const auto& event : engine->takeTransientEvents())
     {
-        const double severity = event.inLfe ? AlertTracker::severity (AlertTracker::transientMeasure (event, alerting), alerting.threshold) : 0.0;
-        transientStrip.show (event, severity);
+        transientStrip.show (event);
 
-        // The reference is the downmix: every screen channel that is not muted lights up
-        if (severity > 0.0)
+        // The reference is the downmix: every screen channel lights up on a fault
+        if (transientStrip.isFault (event))
             for (auto& flash : transientFlash)
-                flash = juce::jmax (flash, severity);
+                flash = 1.0;
     }
 
     transientStrip.advance (dt);
@@ -764,6 +824,12 @@ void MainComponent::loadState()
     integration.setValue (settings->getDoubleValue ("integration", 2.0));
     levelButtons[(size_t) juce::jlimit (0, 2, settings->getIntValue ("alertSensitivity", 3) - 1)].setToggleState (true, juce::dontSendNotification);
     decay.setValue (settings->getDoubleValue ("decay", 1.0));
+    tSearch.setValue (settings->getDoubleValue ("transientSearchMs", 250.0));
+    tAttack.setValue (settings->getDoubleValue ("transientAttackDb", 6.0));
+    tLowAttack.setValue (settings->getDoubleValue ("transientLowAttackDb", 6.0));
+    tNoise.setValue (settings->getDoubleValue ("transientNoiseRejection", 1.0));
+    tMatch.setValue (settings->getDoubleValue ("transientMinMatch", 0.3));
+    tHold.setValue (settings->getDoubleValue ("transientHold", 4.0));
     rangeBox.setSelectedId (settings->getIntValue ("levelRange", 96), juce::dontSendNotification);
     alertModeBox.setSelectedId (settings->getIntValue ("alertMode", 1), juce::dontSendNotification);
     peakHoldToggle.setToggleState (settings->getBoolValue ("peakHold", true), juce::dontSendNotification);
@@ -791,6 +857,12 @@ void MainComponent::saveState()
     settings->setValue ("integration", integration.value());
     settings->setValue ("alertSensitivity", (int) currentLevel() + 1);
     settings->setValue ("decay", decay.value());
+    settings->setValue ("transientSearchMs", tSearch.value());
+    settings->setValue ("transientAttackDb", tAttack.value());
+    settings->setValue ("transientLowAttackDb", tLowAttack.value());
+    settings->setValue ("transientNoiseRejection", tNoise.value());
+    settings->setValue ("transientMinMatch", tMatch.value());
+    settings->setValue ("transientHold", tHold.value());
     settings->setValue ("levelRange", rangeBox.getSelectedId());
     settings->setValue ("alertMode", alertModeBox.getSelectedId());
     settings->setValue ("peakHold", peakHoldToggle.getToggleState());

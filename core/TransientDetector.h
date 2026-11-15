@@ -51,15 +51,28 @@ namespace subguard
 struct TransientEvent
 {
     bool inLfe = false;         // the attack of the mix is also in the LFE; the rest only means something then
+    double searchMs = 0.0;      // the search range this event was measured with
     double delayMs = 0.0;       // offset of the LFE against the mix; positive: LFE late
     double delayUncertaintyMs = 0.0;   // 1-sigma precision of delayMs (Cramer-Rao bound)
-    bool delayAtLimit = false;  // the best match sits at the edge of the +/- 50 ms search
+    bool delayAtLimit = false;  // the best match sits at the edge of the search range
+    bool lfeAttack = false;     // the LFE has an attack of its own in the search range: attackDelayMs is valid
+    double attackDelayMs = 0.0; // start of the LFE attack against the start of the mix attack; coarse (a few ms), needs no likeness
     double match = 0.0;         // 0..1, likeness of the two transients once re-aligned
     double phase = 0.0;         // radians at the best alignment; 0 same polarity, pi inverted
     double correlationNow = 0.0;    // -1..1, correlation as it is, without re-aligning; level independent
     double interactionBest = 0.0;   // 0..1, like match but weighted by the level balance of the pair
     double interactionNow = 0.0;    // -1..1, like correlationNow, level weighted (sum changes by 10 log10 (1 + s) dB)
     double levelDb = -150.0;    // RMS level of the low part of the mix transient, dBFS
+};
+
+/** What the user can tune. */
+struct TransientSettings
+{
+    double searchMs = 250.0;        // the LFE is looked for up to this far before or after the attack of the mix (5..500)
+    double attackDb = 6.0;          // mix: the peak must jump by this much to count as an attack (clicks, snares, hats)
+    double lowAttackDb = 6.0;       // mix and LFE: the same for the energy of the low bands (booms without a click)
+    double noiseRejection = 1.0;    // 0..2: how far an attack must stand out of the usual movement of the signal; 0 turns this off
+    double minMatch = 0.3;          // 0..1: likeness under which the LFE is said to carry something else than the mix
 };
 
 /** Multi-band attack detector on one signal. */
@@ -69,6 +82,7 @@ public:
     /** `hop`: the decision is taken every `hop` samples of the signal. */
     void prepare (double sampleRate, int hop, const std::vector<std::array<double, 2>>& bandEdgesHz);
     void reset();
+    void setThreshold (double riseDb, double roughnessFactor)   { minimumRise = riseDb; factor = roughnessFactor; }
 
     /** Feeds one sample. Returns true when an attack has just been confirmed;
         `samplesAgo` then tells how far back it started. */
@@ -92,7 +106,7 @@ private:
 
     std::vector<Band> bands;
     int hopSize = 1, hopCounter = 0, roughnessLag = 1, freezeHops = 0, refractoryHops = 0, confirmHops = 2;
-    double slowCoeff = 0.0, roughnessCoeff = 0.0;
+    double slowCoeff = 0.0, roughnessCoeff = 0.0, minimumRise = 6.0, factor = 5.5;
     long long evaluation = 0, lastOnset = -1000000;
     int run = 0;
     bool armed = true;
@@ -107,8 +121,10 @@ public:
     bool prepare (double sampleRate, double highPassHz);
     void reset();
     bool process (double sample, int& samplesAgo);
+    void setThreshold (double riseDb, double roughnessFactor)   { minimumRise = riseDb; factor = roughnessFactor; }
 
 private:
+    double minimumRise = 6.0, factor = 5.0;
     static constexpr int span = 12, lookBack = 36;      // 1 ms blocks: the window, and what it is compared with
     struct Biquad { double b0, b1, b2, a1, a2; } filter {};
     bool filtered = false, enabled = false;
@@ -139,12 +155,14 @@ public:
     /** Events found since the last call, one per attack of the mix. */
     std::vector<TransientEvent> takeEvents();
 
-    static constexpr double maxLagSeconds = 0.050;
+    void setSettings (const TransientSettings&);
+    const TransientSettings& getSettings() const    { return settings; }
 
 private:
     void analyse (long long onsetIndex);
     double history (int which, long long index) const;
 
+    TransientSettings settings;
     double fs;              // decimated rate
     int factor;
     int preSamples, segmentLength, maxLag;
@@ -155,12 +173,12 @@ private:
     PeakOnset mixPeaks, mixHighPeaks;
     long long lastMixAttack = -1000000, mixRefractory = 0;
     long long inputIndex = 0, sampleIndex = 0;      // input and decimated sample counters
-    std::deque<long long> pendingMix, recentLfe;    // decimated indices
+    std::deque<long long> pendingMix, recentMix, recentLfe;    // decimated indices
 
     struct HighPass { double b0, b1, b2, a1, a2; } inputHighPass {};
     std::array<std::array<double, 2>, 2> filterState {};
 
-    static constexpr int historySize = 1024;
+    static constexpr int historySize = 1024;       // 2 s at the decimated rate
     std::array<std::vector<double>, 2> ring;        // 0: downmix, 1: LFE (decimated)
 
     std::array<double, 3> screenGain { { 1.0, 1.0, 1.0 } };

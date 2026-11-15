@@ -176,7 +176,7 @@ namespace
 
         const size_t frames = interleaved6.size() / 6, block = 800;
         std::vector<float> four (block * 4);
-        std::vector<double> delays;
+        std::vector<double> delays, attackDelays;
         int mixAttacks = 0, inLfe = 0, inverted = 0;
         double scoreSum = 0, interactionSum = 0, dependenceSum = 0, balanceSum = 0;
         std::array<double, 3> correlationSum {}, alertSum {};
@@ -216,6 +216,8 @@ namespace
                     delays.push_back (e.delayMs);
                     inverted += std::abs (e.phase) > 2.0 * pi / 3.0;
                 }
+                else if (e.lfeAttack)
+                    attackDelays.push_back (e.attackDelayMs);
             }
 
             // read-outs averaged over the last four seconds of the file
@@ -270,7 +272,12 @@ namespace
             char buffer[160];
             std::sort (delays.begin(), delays.end());
 
-            if (delays.empty())
+            std::sort (attackDelays.begin(), attackDelays.end());
+
+            if (delays.empty() && ! attackDelays.empty())
+                std::snprintf (buffer, sizeof (buffer), "%d attacks in the mix, %d of them in the LFE: LFE attack about %+.0f ms (unlike sound)",
+                               mixAttacks, inLfe, attackDelays[attackDelays.size() / 2]);
+            else if (delays.empty())
                 std::snprintf (buffer, sizeof (buffer), "%d attacks in the mix, %d of them in the LFE", mixAttacks, inLfe);
             else
                 std::snprintf (buffer, sizeof (buffer), "%d attacks in the mix, %d of them in the LFE: LFE %+.1f ms%s", mixAttacks, inLfe,
@@ -476,6 +483,19 @@ int main (int argc, char** argv)
            "Transients strip: the kicks are in the LFE: 'Aligned, polarity inverted'.", true, 0.0, -1.0);
     music ("21_music_kick_not_in_lfe", "Same music; the LFE only carries the bass line, no kick",
            "Transients strip: attacks of the mix are counted, none of them in the LFE.", false, 0.0, 1.0);
+
+    add ("22_unlike_lfe_send_200ms_late", "Kick above 60 Hz in the centre; the LFE answers with a 30 Hz thud, 200 ms late",
+         "Transients strip: 'LFE attack late' around 200 ms, timed attack against attack. With the search range under 200 ms: 'nothing in the LFE'.",
+         20.0, []
+         {
+             return [] (double t)
+             {
+                 const double u = sinceHit (t, 1.5), v = sinceHit (t - 0.2, 1.5);
+                 const double c = u < 0.0 ? 0.0 : 0.4 * std::sin (2.0 * pi * 95.0 * u) * std::exp (-u / 0.06) * (1.0 - std::exp (-u / 0.001));
+                 const double lfe = v < 0.0 ? 0.0 : 0.3 * std::sin (2.0 * pi * 30.0 * v) * std::exp (-v / 0.2) * (1.0 - std::exp (-v / 0.01));
+                 return Frame { 0, 0, c, lfe };
+             };
+         });
 
     //==========================================================================
     const std::string notes = folder + "/README.txt";

@@ -128,25 +128,27 @@ class TransientStrip : public juce::Component
 {
 public:
     static constexpr double alignedToleranceMs = 2.5;   // quarter period at 100 Hz
+    static constexpr double attackToleranceMs = 10.0;   // what timing attack against attack can tell apart
     static constexpr double unmeasurableMs = 8.0;       // precision too poor to say anything about timing
-    static constexpr double holdSeconds = 4.0, fadeSeconds = 1.5;
+    static constexpr double fadeSeconds = 1.5;
 
-    static constexpr double countSeconds = 10.0;        // the counters cover this long
-
-    /** Every attack found in the mix goes through here. `severity` > 0 shows it as the current verdict. */
-    void show (const TransientEvent&, double severity);
+    /** Every attack found in the mix goes through here. */
+    void show (const TransientEvent&);
     void advance (double seconds);
     void paint (juce::Graphics&) override;
 
-private:
-    struct Cell
-    {
-        TransientEvent event;
-        double severity = 0.0, age = 1e9;
-    };
+    /** Likeness from which the correlation reading (fine delay, polarity) is trusted. */
+    void setMinMatch (double m)         { minMatch = m; repaint(); }
+    void setHoldSeconds (double s)      { holdSeconds = s; }
 
-    Cell cell;
-    std::deque<std::pair<double, bool>> recent;         // age, in the LFE
+    /** True when the event shows a fault worth lighting the speakers for. */
+    bool isFault (const TransientEvent&) const;
+
+private:
+    bool fine (const TransientEvent&) const;
+
+    TransientEvent event;
+    double age = 1e9, minMatch = 0.3, holdSeconds = 4.0;
 };
 
 /** Signed LFE / screen-channel interaction per frequency, -1 .. +1. */

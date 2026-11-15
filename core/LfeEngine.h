@@ -128,6 +128,7 @@ public:
     /** Attacks found in the screen channels since the last call, each with the
         way the LFE lines up with it. Independent of analyze(). */
     std::vector<TransientEvent> takeTransientEvents()   { return transients.takeEvents(); }
+    void setTransientSettings (const TransientSettings& t)  { transients.setSettings (t); }
 
     /** Energy-weighted correlation of a pair (L, C, R, facade) with the LFE over
         20-120 Hz, accumulated since the last resetGlobal(). */

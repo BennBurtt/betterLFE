@@ -12,7 +12,8 @@ namespace subguard
 {
 
 /** A horizontal slider with its caption and current value above it. */
-class LabelledSlider : public juce::Component
+class LabelledSlider : public juce::Component,
+                       public juce::SettableTooltipClient
 {
 public:
     LabelledSlider (const juce::String& caption, double min, double max, double step, double initial);
@@ -50,7 +51,7 @@ public:
     void resized() override;
 
 private:
-    enum CardId { sourceCard, analysisCard, spectrumCard, responseCard, alertCard, chainsCard, numCards };
+    enum CardId { sourceCard, analysisCard, spectrumCard, responseCard, alertCard, transientsCard, chainsCard, numCards };
 
     void timerCallback() override;
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
@@ -71,6 +72,7 @@ private:
     const ChannelFormat& format() const;
     int channelsNeeded() const      { return (int) format().channels.size(); }
     AlertTracker::Options alertOptions() const;
+    void applyTransientSettings();
     PlaybackSimulator::Level currentLevel() const;
 
     LaunchOptions options;
@@ -92,7 +94,7 @@ private:
     // One button per panel; a panel opens over the analyzer, one at a time
     std::array<juce::TextButton, numCards> cardButtons;
     std::array<Card, numCards> cards { { Card ("Source & Format"), Card ("Analysis"), Card ("Spectrum"),
-                                         Card ("Responsiveness"), Card ("Alert"), Card ("Playback chains") } };
+                                         Card ("Responsiveness"), Card ("Alert"), Card ("Transients"), Card ("Playback chains") } };
     int openCard = -1;
 
     juce::Label formatLabel { {}, "Channel Format:" }, deviceLabel { {}, "Input Device:" },
@@ -105,6 +107,13 @@ private:
                        levelWeightToggle { "Weigh by level balance" };
     LabelledSlider inertia { "Inertia:", 0, 100, 1, 70 }, integration { "Integration:", 0.5, 5.0, 0.1, 2.0 },
                    decay { "Decay:", 0.1, 4.0, 0.05, 1.0 };
+    LabelledSlider tSearch { "Search range (how far off the LFE may be):", 5, 500, 5, 250 },
+                   tAttack { "Attack threshold, clicks / snares / hats:", 2, 18, 0.5, 6 },
+                   tLowAttack { "Attack threshold, low booms (mix and LFE):", 2, 18, 0.5, 6 },
+                   tNoise { "Noise rejection:", 0, 2, 0.05, 1 },
+                   tMatch { "Likeness needed for a phase reading:", 0, 1, 0.05, 0.3 },
+                   tHold { "Hold on screen:", 1, 20, 0.5, 4 };
+    juce::TextButton transientDefaultsButton { "Defaults" };
     ChainsView chainsView;
     juce::TextButton resetSessionButton { "Reset session" };
 

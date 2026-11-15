@@ -560,33 +560,41 @@ void SpectrumPlot::paint (juce::Graphics& g)
 }
 
 //==============================================================================
-void TransientStrip::show (const TransientEvent& e, double severity)
+void TransientStrip::show (const TransientEvent& e)
 {
-    recent.emplace_back (0.0, e.inLfe);
+    // An attack the LFE does not share must not wipe the verdict of one it does
+    if (! e.inLfe && event.inLfe && age < 1.0)
+        return;
 
-    if (e.inLfe && severity > 0.0)
-    {
-        cell.event = e;
-        cell.severity = severity;
-        cell.age = 0.0;
-    }
-
+    event = e;
+    age = 0.0;
     repaint();
 }
 
 void TransientStrip::advance (double seconds)
 {
-    const bool visible = cell.age < holdSeconds + fadeSeconds || ! recent.empty();
-    cell.age += seconds;
-
-    for (auto& r : recent)
-        r.first += seconds;
-
-    while (! recent.empty() && recent.front().first > countSeconds)
-        recent.pop_front();
+    const bool visible = age < holdSeconds + fadeSeconds;
+    age += seconds;
 
     if (visible)
         repaint();
+}
+
+bool TransientStrip::fine (const TransientEvent& e) const
+{
+    return e.match >= minMatch && e.delayUncertaintyMs <= unmeasurableMs && ! e.delayAtLimit;
+}
+
+bool TransientStrip::isFault (const TransientEvent& e) const
+{
+    if (! e.inLfe)
+        return false;
+
+    if (fine (e))
+        return std::abs (e.delayMs) > juce::jmax (alignedToleranceMs, 2.0 * e.delayUncertaintyMs)
+                 || std::abs (e.phase) > juce::MathConstants<double>::pi / 3.0;
+
+    return e.lfeAttack && std::abs (e.attackDelayMs) > attackToleranceMs;
 }
 
 void TransientStrip::paint (juce::Graphics& g)
@@ -599,123 +607,113 @@ void TransientStrip::paint (juce::Graphics& g)
     g.setFont (uiFont (12.0f));
     g.drawFittedText ("Transients\nmix vs LFE", 4, 0, FrequencyAxis::leftMargin + 30, getHeight(), juce::Justification::centredLeft, 2);
 
-    auto area = getLocalBounds().toFloat().withTrimmedLeft ((float) FrequencyAxis::leftMargin + 36.0f)
-                                          .withTrimmedRight ((float) FrequencyAxis::rightMargin).reduced (0.0f, 6.0f);
-    const double range = TransientDetector::maxLagSeconds * 1000.0;
+    const auto box = getLocalBounds().toFloat().withTrimmedLeft ((float) FrequencyAxis::leftMargin + 36.0f)
+                                               .withTrimmedRight ((float) FrequencyAxis::rightMargin).reduced (6.0f, 6.0f);
+    g.setColour (juce::Colour (0xff1b1b1b));
+    g.fillRoundedRectangle (box, 5.0f);
 
-    // Left: how many attacks of the mix, and how many of them are in the LFE too
+    auto inner = box.reduced (12.0f, 4.0f);
+    const auto& e = event;
+    const double range = e.searchMs > 0.0 ? e.searchMs : 250.0;
+
+    // Delay scale: LFE early on the left, late on the right
+    auto scaleRow = inner.removeFromBottom (14.0f);
+    g.setColour (juce::Colour (0xff777777));
+    g.setFont (uiFont (10.0f));
+    g.drawText ("early -" + juce::String ((int) range) + " ms", scaleRow.removeFromLeft (84.0f), juce::Justification::centredLeft);
+    g.drawText ("late +" + juce::String ((int) range) + " ms", scaleRow.removeFromRight (84.0f), juce::Justification::centredRight);
+    const auto scale = scaleRow;
+    const float mid = scale.getCentreX(), y = scale.getCentreY();
+    g.setColour (juce::Colour (0xff555555));
+    g.fillRect (scale.getX(), y, scale.getWidth(), 1.0f);
+    g.fillRect (mid, y - 5.0f, 1.0f, 10.0f);
+
+    const float alpha = (float) juce::jlimit (0.0, 1.0, 1.0 - (age - holdSeconds) / fadeSeconds);
+
+    if (alpha <= 0.0f)
     {
-        auto box = area.removeFromLeft (area.getWidth() * 0.36f).reduced (6.0f, 0.0f);
-        g.setColour (juce::Colour (0xff1b1b1b));
-        g.fillRoundedRectangle (box, 5.0f);
-
-        int total = 0, shared = 0;
-
-        for (const auto& r : recent)
-        {
-            ++total;
-            shared += r.second;
-        }
-
-        auto inner = box.reduced (10.0f, 4.0f);
-        auto number = inner.removeFromLeft (86.0f);
-        g.setColour (total == 0 ? juce::Colour (0xff555555) : (shared > 0 ? juce::Colour (0xfff5c400) : theme::text));
-        g.setFont (uiFont (24.0f, true));
-        g.drawText (total == 0 ? juce::String::fromUTF8 ("\xe2\x80\x94") : juce::String (shared) + " / " + juce::String (total),
-                    number, juce::Justification::centredLeft);
-        g.setColour (theme::dimText);
-        g.setFont (uiFont (11.0f));
-        g.drawFittedText ("attacks of the mix also in the LFE\n(downmix L+C+R, last " + juce::String ((int) countSeconds) + " s)",
-                          inner.toNearestInt(), juce::Justification::centredLeft, 2);
+        g.setColour (juce::Colour (0xff555555));
+        g.setFont (uiFont (12.0f));
+        g.drawText ("waiting for an attack in the mix", inner, juce::Justification::centredLeft);
+        return;
     }
 
-    // Right: how the LFE lines up with the last attack it shares with the mix
+    const auto amber = juce::Colour (0xfff5c400), orange = juce::Colour (0xffff8a00), red = juce::Colour (0xffff3a2a);
+    const auto degree = juce::String::fromUTF8 ("\xc2\xb0");
+    const auto about = juce::String::fromUTF8 ("\xe2\x89\x88 ");
+    juce::String verdict, detail;
+    juce::Colour colour = theme::dimText;
+    double shown = 0.0;
+    bool marker = false;
+
+    if (! e.inLfe)
     {
-        auto box = area.reduced (6.0f, 0.0f);
-
-        g.setColour (juce::Colour (0xff1b1b1b));
-        g.fillRoundedRectangle (box, 5.0f);
-
-        auto inner = box.reduced (10.0f, 4.0f);
-        g.setColour (theme::dimText);
-        g.setFont (uiFont (15.0f, true));
-        g.drawText ("LFE", inner.removeFromLeft (40.0f), juce::Justification::centredLeft);
-
-        // Delay scale: LFE early on the left, late on the right
-        auto scaleRow = inner.removeFromBottom (14.0f);
-        g.setColour (juce::Colour (0xff777777));
-        g.setFont (uiFont (10.0f));
-        g.drawText ("early", scaleRow.removeFromLeft (30.0f), juce::Justification::centredLeft);
-        g.drawText ("late", scaleRow.removeFromRight (26.0f), juce::Justification::centredRight);
-        const auto scale = scaleRow;
-        const float mid = scale.getCentreX(), y = scale.getCentreY();
-        g.setColour (juce::Colour (0xff555555));
-        g.fillRect (scale.getX(), y, scale.getWidth(), 1.0f);
-        g.fillRect (mid, y - 5.0f, 1.0f, 10.0f);
-
-        const float alpha = (float) juce::jlimit (0.0, 1.0, 1.0 - (cell.age - holdSeconds) / fadeSeconds);
-
-        if (alpha <= 0.0f)
-        {
-            g.setColour (juce::Colour (0xff555555));
-            g.setFont (uiFont (12.0f));
-            g.drawText (juce::String::fromUTF8 ("\xe2\x80\x94"), inner, juce::Justification::centred);
-            return;
-        }
-
-        const auto& e = cell.event;
-        const double phaseDegrees = std::abs (e.phase) * 180.0 / juce::MathConstants<double>::pi;
-        juce::String verdict;
-        juce::Colour colour;
-
+        verdict = "Attack in the mix: nothing in the LFE within " + juce::String ((int) range) + " ms";
+        detail = "Widen the search range in the Transients panel if the LFE may be further off.";
+    }
+    else if (fine (e))
+    {
         // An offset is only claimed when it clearly exceeds what can be measured
+        const double phaseDegrees = std::abs (e.phase) * 180.0 / juce::MathConstants<double>::pi;
         const double tolerance = juce::jmax (alignedToleranceMs, 2.0 * e.delayUncertaintyMs);
         const auto plusMinus = juce::String::fromUTF8 (" \xc2\xb1") + juce::String (e.delayUncertaintyMs, 1) + " ms";
+        shown = e.delayMs;
+        marker = true;
 
-        if (e.delayUncertaintyMs > unmeasurableMs)
-        {
-            verdict = "Related, timing not measurable";
-            colour = juce::Colour (0xfff5c400);
-        }
-        else if (e.delayAtLimit)
-        {
-            verdict = "LFE off by " + juce::String ((int) range) + " ms or more";
-            colour = juce::Colour (0xffff8a00);
-        }
-        else if (std::abs (e.delayMs) > tolerance)
+        if (std::abs (e.delayMs) > tolerance)
         {
             verdict = (e.delayMs > 0.0 ? "LFE late " : "LFE early ") + juce::String (std::abs (e.delayMs), 1) + plusMinus;
-            colour = juce::Colour (0xffff8a00);
+            colour = orange;
         }
-        else if (phaseDegrees > 120.0)
-        {
-            verdict = "Aligned, polarity inverted";
-            colour = juce::Colour (0xffff3a2a);
-        }
-        else if (phaseDegrees < 60.0)
-        {
-            verdict = "Aligned, in phase";
-            colour = juce::Colour (0xfff5c400);
-        }
+        else if (phaseDegrees > 120.0)  { verdict = "Aligned, polarity inverted";   colour = red; }
+        else if (phaseDegrees < 60.0)   { verdict = "Aligned, in phase";            colour = amber; }
         else
         {
-            verdict = "Aligned, phase shifted " + juce::String ((int) std::lround (phaseDegrees)) + juce::String::fromUTF8 ("\xc2\xb0");
-            colour = juce::Colour (0xffff8a00);
+            verdict = "Aligned, phase shifted " + juce::String ((int) std::lround (phaseDegrees)) + degree;
+            colour = orange;
         }
 
         const double sumDb = 10.0 * std::log10 (juce::jmax (1e-3, 1.0 + e.interactionNow));
-        const auto detail = "match " + juce::String (e.match, 2) + "   sum " + (sumDb >= 0.0 ? "+" : "") + juce::String (sumDb, 1) + " dB";
+        detail = "likeness " + juce::String (e.match, 2) + "   sum " + (sumDb >= 0.0 ? "+" : "") + juce::String (sumDb, 1) + " dB";
+    }
+    else if (e.lfeAttack)
+    {
+        shown = e.attackDelayMs;
+        marker = true;
 
-        colour = colour.withMultipliedAlpha (alpha * (float) (0.45 + 0.55 * juce::jlimit (0.0, 1.0, cell.severity)));
-        g.setColour (colour);
-        g.setFont (uiFont (14.0f, true));
-        g.drawText (verdict, inner.removeFromTop (18.0f), juce::Justification::centredLeft);
-        g.setColour (theme::dimText.withMultipliedAlpha (alpha));
-        g.setFont (uiFont (11.0f));
-        g.drawText (detail, inner.removeFromTop (14.0f), juce::Justification::centredLeft);
+        if (std::abs (e.attackDelayMs) > attackToleranceMs)
+        {
+            verdict = (e.attackDelayMs > 0.0 ? "LFE attack late " : "LFE attack early ") + about
+                        + juce::String ((int) std::lround (std::abs (e.attackDelayMs))) + " ms";
+            colour = orange;
+        }
+        else
+        {
+            verdict = "LFE attack on time (within " + juce::String ((int) attackToleranceMs) + " ms)";
+            colour = amber;
+        }
 
-        const float x = mid + (float) juce::jlimit (-1.0, 1.0, e.delayMs / range) * scale.getWidth() / 2.0f;
-        g.setColour (colour);
+        detail = "timed attack against attack: the LFE does not carry the same sound as the mix (likeness "
+                   + juce::String (e.match, 2) + "), no phase reading";
+    }
+    else
+    {
+        verdict = "In the LFE, timing not measurable";
+        detail = "likeness " + juce::String (e.match, 2);
+        colour = amber;
+    }
+
+    g.setColour (colour.withMultipliedAlpha (alpha));
+    g.setFont (uiFont (15.0f, true));
+    g.drawText (verdict, inner.removeFromTop (19.0f), juce::Justification::centredLeft);
+    g.setColour (theme::dimText.withMultipliedAlpha (alpha));
+    g.setFont (uiFont (11.0f));
+    g.drawText (detail, inner.removeFromTop (14.0f), juce::Justification::centredLeft);
+
+    if (marker)
+    {
+        const float x = mid + (float) juce::jlimit (-1.0, 1.0, shown / range) * scale.getWidth() / 2.0f;
+        g.setColour (colour.withMultipliedAlpha (alpha));
         g.fillEllipse (x - 4.5f, y - 4.5f, 9.0f, 9.0f);
     }
 }

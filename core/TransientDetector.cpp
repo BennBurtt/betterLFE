@@ -13,8 +13,9 @@ namespace
 
     constexpr double inputHighPassHz = 8.0;     // keeps DC and infrasonic drift out
     constexpr double floorPower = 1e-11;        // -110 dBFS: only digital silence is ignored
-    constexpr double minimumRiseDb = 6.0;       // an attack rises at least this far above the recent level...
-    constexpr double roughnessFactor = 5.5;     // ...and this many times the band's usual fluctuation
+    // An attack rises above the recent level by a set amount (6 dB by default)
+    // and by this many times the band's usual fluctuation
+    constexpr double roughnessFactor = 5.5;
     constexpr double slowSeconds = 0.30;        // "recent level"
     constexpr double roughnessSeconds = 1.0;
     constexpr double roughnessLagSeconds = 0.040;
@@ -32,17 +33,17 @@ namespace
 
     // ...or when the LFE rises by 6 dB there while matching the mix
     constexpr double lfeRiseRatio = 1.25, lfeRiseMatch = 0.7;
+    constexpr double minSearchMs = 5.0, maxSearchMs = 500.0;
 
     // Peak detector (mix): the peak of the last 12 ms must double against
     // the highest peak of the 36 ms before (AudioLib asks 1.5, AC-3 2.5 at
     // its coarsest layer), and stand out of the signal's usual variation.
     // Two views: above 600 Hz, where 12 ms holds enough cycles for a peak to
     // mean something, and above 8 kHz, where a hi-hat or a click stands alone.
-    constexpr double peakRiseDb = 6.0;
     constexpr double peakRoughnessFactor = 5.0;
     constexpr double peakFloor = 5e-4;          // -66 dBFS: below this the peak detector stays silent
     constexpr double midViewHz = 600.0, highViewHz = 8000.0;
-    constexpr double mixRefractorySeconds = 0.080;
+    constexpr double mixRefractorySeconds = 0.150;   // a kick, its click and its cymbal are one attack
 
     // Full-band analysis of the mix, and LFE analysis in its own range
     const std::vector<std::array<double, 2>> mixBands = { { { 10.0, 40.0 } }, { { 40.0, 150.0 } }, { { 150.0, 600.0 } } };
@@ -195,7 +196,7 @@ bool OnsetBank::process (double sample, int& samplesAgo)
 
         // Rise above the recent level, measured against what this band
         // usually does: a noisy band needs a bigger jump than a steady one.
-        const double threshold = std::max (minimumRiseDb, roughnessFactor * band.roughness);
+        const double threshold = std::max (minimumRise, factor * band.roughness);
         score = std::max (score, (logEnergy - band.level) / threshold);
 
         if (! frozen)
@@ -289,7 +290,7 @@ bool PeakOnset::process (double x, int& samplesAgo)
         previous = std::max (previous, peaks[(size_t) ((block - i) & 63)]);
 
     const double rise = 20.0 * std::log10 ((current + 0.1 * peakFloor) / (previous + 0.1 * peakFloor));
-    const double threshold = std::max (peakRiseDb, peakRoughnessFactor * roughness);
+    const double threshold = std::max (minimumRise, factor * roughness);
 
     // Usual variation: the upward half only (a sound dying away is not
     // roughness), counted twice to stand for both halves
@@ -322,7 +323,6 @@ TransientDetector::TransientDetector (double inputSampleRate, int decimationFact
 {
     preSamples = (int) std::lround (preSeconds * fs);
     segmentLength = std::min ((int) std::lround (segmentSeconds * fs), fftSize);
-    maxLag = (int) std::lround (maxLagSeconds * fs);
 
     // Decisions every millisecond on the mix, every decimated sample on the LFE
     mixOnsets.prepare (inputSampleRate, std::max (1, (int) std::lround (inputSampleRate / 1000.0)), mixBands);
@@ -346,7 +346,21 @@ TransientDetector::TransientDetector (double inputSampleRate, int decimationFact
         window[(size_t) i] = edge < taper ? 0.5 - 0.5 * std::cos (pi * (edge + 0.5) / taper) : 1.0;
     }
 
+    setSettings ({});
     reset();
+}
+
+void TransientDetector::setSettings (const TransientSettings& t)
+{
+    settings = t;
+    settings.searchMs = std::clamp (t.searchMs, minSearchMs, maxSearchMs);
+    settings.noiseRejection = std::clamp (t.noiseRejection, 0.0, 2.0);
+    maxLag = std::max (1, (int) std::lround (settings.searchMs * 0.001 * fs));
+
+    mixPeaks.setThreshold (settings.attackDb, peakRoughnessFactor * settings.noiseRejection);
+    mixHighPeaks.setThreshold (settings.attackDb, peakRoughnessFactor * settings.noiseRejection);
+    mixOnsets.setThreshold (settings.lowAttackDb, roughnessFactor * settings.noiseRejection);
+    lfeOnsets.setThreshold (settings.lowAttackDb, roughnessFactor * settings.noiseRejection);
 }
 
 void TransientDetector::reset()
@@ -362,6 +376,7 @@ void TransientDetector::reset()
     mixPeaks.reset();
     mixHighPeaks.reset();
     lastMixAttack = -1000000;
+    recentMix.clear();
     pendingMix.clear();
     recentLfe.clear();
     inputIndex = 0;
@@ -395,6 +410,10 @@ void TransientDetector::mixAttack (long long inputSample)
 
     lastMixAttack = inputSample;
     pendingMix.push_back (inputSample / factor);
+    recentMix.push_back (inputSample / factor);
+
+    while (recentMix.size() > 32)
+        recentMix.pop_front();
 }
 
 void TransientDetector::processInput (const float* frame)
@@ -437,7 +456,7 @@ void TransientDetector::processDecimated (const double* frame)
         recentLfe.pop_front();
 
     // Analyse an attack of the mix once its whole segment, and the LFE around it, has arrived
-    while (! pendingMix.empty() && sampleIndex >= pendingMix.front() - preSamples + segmentLength + maxLag)
+    while (! pendingMix.empty() && sampleIndex >= pendingMix.front() - preSamples + segmentLength + maxLag)   // 230 ms + range after the attack
     {
         analyse (pendingMix.front());
         pendingMix.pop_front();
@@ -453,7 +472,7 @@ void TransientDetector::analyse (long long onsetIndex)
 
     const long long base = reference - maxLag - whitenOrder;      // first sample needed
 
-    if (start - maxLag < 0 || base < sampleIndex - historySize + 1)
+    if (base < sampleIndex - historySize + 1)
         return;
 
     // Both signals through one and the same whitening filter, fitted to what
@@ -606,6 +625,21 @@ void TransientDetector::analyse (long long onsetIndex)
             best = li;
     }
 
+    // A narrow-band hit gives a broad, rippled peak: among the lags that
+    // match almost as well as the best one, the smallest offset is the
+    // likeliest, and the one a wide search range must not lose.
+    {
+        const double almost = 0.95 * envelope[(size_t) best];
+        int nearest = best;
+
+        for (int li = 1; li < lags - 1; ++li)
+            if (envelope[(size_t) li] >= almost && envelope[(size_t) li] >= envelope[(size_t) li - 1]
+                  && envelope[(size_t) li] >= envelope[(size_t) li + 1] && std::abs (li - maxLag) < std::abs (nearest - maxLag))
+                nearest = li;
+
+        best = nearest;
+    }
+
     const auto normalised = [&] (int li, double value)
     {
         return value / std::sqrt (energyX * energyLfe[(size_t) li] + 1e-60);  // value: a raw cross term
@@ -618,6 +652,7 @@ void TransientDetector::analyse (long long onsetIndex)
     };
 
     TransientEvent e;
+    e.searchMs = settings.searchMs;
     e.match = hasLow ? std::min (1.0, normalised (best, std::abs (cross[(size_t) best]))) : 0.0;
     e.phase = std::arg (cross[(size_t) best]);
     e.interactionBest = interaction (best, e.match);
@@ -700,15 +735,68 @@ void TransientDetector::analyse (long long onsetIndex)
     // Is this attack of the mix in the LFE as well? Either the LFE has an
     // attack of its own next to it, or its energy rises there (by 1 dB at
     // least) with a shape that matches the mix.
+    // An attack of the LFE belongs to the attack of the mix closest to it
+    const auto closest = [this, onsetIndex] (long long lfeIndex)
+    {
+        const auto own = std::abs (lfeIndex - onsetIndex);
+
+        for (const auto other : recentMix)
+            if (other != onsetIndex && std::abs (lfeIndex - other) < own - 2)
+                return false;
+
+        return true;
+    };
+
     bool near = false;
-    const auto before = (long long) std::lround (lfeNearBeforeSeconds * fs), after = (long long) std::lround (lfeNearAfterSeconds * fs);
+    const auto before = (long long) std::lround (lfeNearBeforeSeconds * fs) + maxLag, after = (long long) std::lround (lfeNearAfterSeconds * fs) + maxLag;
 
     for (const auto index : recentLfe)
-        near = near || (index >= onsetIndex - before && index <= onsetIndex + after);
+        near = near || (index >= onsetIndex - before && index <= onsetIndex + after && closest (index));
 
     const bool rises = lfeNew[(size_t) best] > lfeRiseRatio * lfeRef[(size_t) best]
                          && lfeRef[(size_t) best] >= 0.0;
-    e.inLfe = near || (rises && e.match >= lfeRiseMatch);
+
+    // Attack against attack. When the LFE carries something else than the mix
+    // (a sub-harmonic, a heavily filtered send), the waveforms cannot be
+    // compared, but the two attacks can still be timed: each one starts where
+    // its signal first passes a fifth of the way from what came before to its
+    // peak. Coarser than the correlation (a few ms), but it needs no likeness.
+    {
+        const auto startOf = [this] (int which, long long from, long long to, double gain, bool& found)
+        {
+            const auto quiet = (long long) std::lround (0.100 * fs);
+            double floor = 0.0, peak = 0.0;
+
+            for (long long i = from - quiet; i < from; ++i)
+                floor = std::max (floor, gain * std::abs (history (which, i)));
+
+            for (long long i = from; i <= to; ++i)
+                peak = std::max (peak, gain * std::abs (history (which, i)));
+
+            found = peak > 2.0 * floor && peak * peak > 100.0 * floorPower;
+
+            if (found)
+                for (long long i = from; i <= to; ++i)
+                    if (gain * std::abs (history (which, i)) > floor + 0.2 * (peak - floor))
+                        return i;
+
+            return from;
+        };
+
+        const auto tail = (long long) std::lround (0.150 * fs), lead = (long long) std::lround (0.030 * fs);
+        bool mixFound = false, lfeFound = false;
+        const auto mixStart = startOf (0, onsetIndex - lead, onsetIndex + tail, 1.0, mixFound);
+        const auto lfeStart = startOf (1, onsetIndex - maxLag, std::min (onsetIndex + maxLag + tail, sampleIndex), lfeGainLinear, lfeFound);
+
+        const auto mixAt0 = mixFound ? mixStart : onsetIndex;
+
+        // Within the range, and belonging to this attack of the mix rather
+        // than to a neighbour
+        e.lfeAttack = lfeFound && lfeStart - mixAt0 <= maxLag && closest (lfeStart);
+        e.attackDelayMs = 1000.0 * (double) (lfeStart - mixAt0) / fs;
+    }
+
+    e.inLfe = near || e.lfeAttack || (rises && e.match >= lfeRiseMatch);
     events.push_back (e);
 }
 
