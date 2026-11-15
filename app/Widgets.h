@@ -24,7 +24,7 @@ namespace theme
     const juce::Colour accent     { 0xffff5500 };
     const juce::Colour curveL     { 0xff4fc3f7 };
     const juce::Colour curveC     { 0xffe6e6e6 };
-    const juce::Colour curveR     { 0xfff48fb1 };
+    const juce::Colour curveR     { 0xffd90f1e };     // blood red
 }
 
 juce::Font uiFont (float height, bool bold = false);
@@ -62,6 +62,9 @@ public:
     HeaderBar();
 
     void setLevel (double target);
+
+    /** 0..1, how hard the bass (under 200 Hz) hits right now: the background pulses with it. */
+    void setBass (double drive)     { bass = juce::jlimit (0.0, 1.0, drive); }
     void setAnimationEnabled (bool);
 
     /** Moves the background on; call once per frame. */
@@ -75,7 +78,7 @@ public:
 
 private:
     juce::Image logo;
-    double level = 0.0, phase = 0.0;
+    double level = 0.0, phase = 0.0, bass = 0.0;
     bool animated = true;
 };
 
@@ -212,18 +215,11 @@ public:
 
     void update (const ChainsInfo&);
     void paint (juce::Graphics&) override;
-    void mouseDown (const juce::MouseEvent&) override;
 
     static juce::Colour colourFor (double penalty);
 
-    /** Which subwoofer level the table shows: 0..6 for -3..+3 dB, 7 for the worst of them in each cell. */
-    void setGainView (int index)    { gainView = juce::jlimit (0, ChainResult::numGains, index); repaint(); }
-
 private:
-    juce::Rectangle<float> gainButton (int index) const;
-
     ChainsInfo info;
-    int gainView = ChainResult::numGains;
 };
 
 /** Scrolling record of the last minutes: one thin lane per indicator. */

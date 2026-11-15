@@ -377,7 +377,7 @@ void MainComponent::buildCards()
                   transientDefaultsButton.setBounds (r.removeFromTop (24).removeFromRight (90));
               });
 
-    populate (chainsCard, 600, 352, { &chainsView, &resetSessionButton },
+    populate (chainsCard, 600, 348, { &chainsView, &resetSessionButton },
               [this] (juce::Rectangle<int> r)
               {
                   resetSessionButton.setBounds (r.removeFromBottom (24).removeFromRight (110));
@@ -649,9 +649,21 @@ void MainComponent::meterChannels (const float* interleaved, int numFrames)
 {
     const int index[3] = { chL, chC, chR };
 
+    // Everything under 200 Hz, all four channels, LFE as it plays (+10 dB): two one-pole low-passes
+    const double coeff = 1.0 - std::exp (-juce::MathConstants<double>::twoPi * 200.0 / juce::jmax (8000.0, engineRate));
+
     for (int i = 0; i < numFrames; ++i)
+    {
+        const float* in = interleaved + i * frame;
+
         for (size_t c = 0; c < 3; ++c)
-            framePeak[c] = juce::jmax (framePeak[c], (double) std::abs (interleaved[i * frame + index[c]]));
+            framePeak[c] = juce::jmax (framePeak[c], (double) std::abs (in[index[c]]));
+
+        const double sum = (double) in[chL] + in[chC] + in[chR] + 3.162 * in[chLFE];
+        bassState[0] += coeff * (sum - bassState[0]);
+        bassState[1] += coeff * (bassState[0] - bassState[1]);
+        bassFramePeak = juce::jmax (bassFramePeak, std::abs (bassState[1]));
+    }
 }
 
 void MainComponent::timerCallback()
@@ -700,6 +712,16 @@ void MainComponent::timerCallback()
     }
 
     header.setLevel (level);
+
+    // Bass under 200 Hz against the loudest of the last seconds: the background pulses at any level
+    bassRecentPeak = juce::jmax (bassFramePeak, bassRecentPeak * std::exp (-dt / 4.0));
+    {
+        const double target = bassRecentPeak > 1e-6 ? std::pow (bassFramePeak / bassRecentPeak, 1.5) : 0.0;
+        bassDrive += (target > bassDrive ? 1.0 - std::exp (-dt / 0.012) : 1.0 - std::exp (-dt / 0.18)) * (target - bassDrive);
+        bassFramePeak = 0.0;
+    }
+
+    header.setBass (bassDrive);
     header.advance (dt);
 
     {
@@ -773,21 +795,13 @@ void MainComponent::timerCallback()
             t.dependence = readoutInertia[2].update (t.dependence, dt);
             t.lfeBalanceDb = readoutInertia[3].update (t.lfeBalanceDb, dt);
             t.lfeShare = readoutInertia[4].update (t.lfeShare, dt);
-            const size_t perChain = 2 * ChainResult::numGains;
-            chainInertia.resize (t.chains.size() * perChain);
+            t.levelDependence = readoutInertia[5].update (t.levelDependence, dt);
+            chainInertia.resize (t.chains.size() * 2);
 
             for (size_t k = 0; k < t.chains.size(); ++k)
             {
-                auto& chain = t.chains[k];
-
-                for (size_t v = 0; v < (size_t) ChainResult::numGains; ++v)
-                {
-                    chain.gainChangeDb[v] = chainInertia[k * perChain + 2 * v].update (chain.gainChangeDb[v], dt);
-                    chain.gainPenalty[v] = chainInertia[k * perChain + 2 * v + 1].update (chain.gainPenalty[v], dt);
-                }
-
-                chain.changeDb = chain.gainChangeDb[(size_t) ChainResult::numGains / 2];
-                chain.penalty = chain.gainPenalty[(size_t) ChainResult::numGains / 2];
+                t.chains[k].changeDb = chainInertia[k * 2].update (t.chains[k].changeDb, dt);
+                t.chains[k].penalty = chainInertia[k * 2 + 1].update (t.chains[k].penalty, dt);
             }
 
             // The number on screen only changes once it has really moved

@@ -122,7 +122,7 @@ private:
     int displayedScore = -1;
 
     // Display inertia of every number and curve shown
-    std::array<Inertia, 5> readoutInertia;              // score, interaction, dependence, LFE balance, LFE share
+    std::array<Inertia, 6> readoutInertia;              // score, interaction, dependence, LFE balance, LFE share, level dependence
     std::vector<Inertia> chainInertia;                  // two per playback system: dB and penalty
     std::array<std::vector<Inertia>, 3> curveInertia;   // correlation curves
     HistoryStrip::Sample historySample;
@@ -132,6 +132,7 @@ private:
     // against the loudest of the last few seconds, so that it shows at any level
     void meterChannels (const float* interleaved, int numFrames);
     std::array<double, 3> framePeak { { 0.0, 0.0, 0.0 } }, recentPeak { { 0.0, 0.0, 0.0 } }, coneDrive { { 0.0, 0.0, 0.0 } };
+    double bassState[2] = { 0.0, 0.0 }, bassFramePeak = 0.0, bassRecentPeak = 0.0, bassDrive = 0.0;
     int inputGeneration = -1, framesShown = 0;
     bool restoring = false;
     std::vector<float> scratch;

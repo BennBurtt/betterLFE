@@ -179,114 +179,115 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level) const
     t.lfeShare = lfeTotal / (lfeTotal + screenTotal + 1e-60);
     t.lfeBalanceDb = std::clamp (10.0 * std::log10 ((lfeTotal + 1e-60) / (screenTotal + 1e-60)), -60.0, 60.0);
 
-    // Each system against the reference, band by band, at each subwoofer level
+    // Each system against the reference, band by band
     double worst = -1.0;
 
     for (size_t k = 0; k < t.chains.size(); ++k)
     {
         auto& chain = t.chains[k];
         const bool isStereo = chain.kind == ChainResult::Kind::stereo;
-        double worstHere = -1.0;
+        double band[numBands] = {}, total = 0.0;
 
-        for (int v = 0; v < ChainResult::numGains; ++v)
+        // For the level dependence: the same bands with the subwoofer off
+        // its level, as they are and as an unrelated LFE would give them
+        double screenPart[numBands] = {}, lfePart[numBands] = {}, crossPart[numBands] = {};
+
+        for (size_t g = 0; g < n; ++g)
         {
-            const bool calibrated = v == ChainResult::numGains / 2;
+            const double hz = a.grid[g];
+            const int b = bandOf (hz);
 
-            if (isStereo && ! calibrated)
+            if (b < 0)
                 continue;
 
-            const double offset = std::pow (10.0, gainSteps[v] / 20.0);
-            double band[numBands] = {}, total = 0.0;
-
-            for (size_t g = 0; g < n; ++g)
-            {
-                const double hz = a.grid[g];
-                const int b = bandOf (hz);
-
-                if (b < 0)
-                    continue;
-
-                double power;
-
-                if (isStereo)
-                {
-                    // Lo = L + 0.707 C, Ro = R + 0.707 C, no LFE
-                    power = m.pL[g] + m.pC[g] + m.pR[g] + std::sqrt (2.0) * (m.reLC[g] + m.reRC[g]);
-                }
-                else
-                {
-                    auto gain = gainsFor (chain, hz);
-                    gain.lfe *= offset;
-                    power = std::norm (gain.screen) * m.pF[g] + std::norm (gain.lfe) * m.pLfe[g]
-                              + 2.0 * (gain.screen * std::conj (gain.lfe) * cFL[g]).real();
-                }
-
-                band[b] += hz * std::max (power, 0.0);
-                total += hz * std::max (power, 0.0);
-            }
-
-            const double changeDb = limited ((total + 1e-60) / (referenceTotal + 1e-60));
-            double penalty = 0.0;
-
-            for (int b = 0; b < numBands; ++b)
-            {
-                if (reference[b] <= 0.0 && band[b] <= 0.0)
-                    continue;
-
-                const double bandChange = limited ((band[b] + 1e-60) / (reference[b] + 1e-60));
-
-                if (calibrated)
-                    chain.bandChangeDb[(size_t) b] = bandChange;
-
-                // What the band is worth: its share of the reference bass, or of
-                // this system's bass when the system has some where the reference
-                // had almost none.
-                const double share = std::max (reference[b] / (referenceTotal + 1e-60),
-                                               band[b] / (std::max (total, referenceTotal) + 1e-60));
-                const double rated = std::clamp ((std::abs (bandChange) - tolerance) / (doublingDb[b] - tolerance), 0.0, 1.0);
-
-                // In a stereo downmix, the very bottom of the spectrum does not
-                // count: it is felt in a cinema, not heard on the systems a
-                // downmix is played on.
-                const double relevance = isStereo && reference[b] > 0.0 ? audible[b] / reference[b] : 1.0;
-                penalty += share * rated * relevance;
-            }
-
-            penalty = std::min (penalty, 1.0);
-            chain.gainChangeDb[(size_t) v] = changeDb;
-            chain.gainPenalty[(size_t) v] = penalty;
-
-            if (calibrated)
-            {
-                chain.changeDb = changeDb;
-                chain.penalty = penalty;
-            }
+            double power;
 
             if (isStereo)
+            {
+                // Lo = L + 0.707 C, Ro = R + 0.707 C, no LFE
+                power = m.pL[g] + m.pC[g] + m.pR[g] + std::sqrt (2.0) * (m.reLC[g] + m.reRC[g]);
+            }
+            else
+            {
+                const auto gain = gainsFor (chain, hz);
+                const double screen = std::norm (gain.screen) * m.pF[g], lfe = std::norm (gain.lfe) * m.pLfe[g];
+                const double cross = 2.0 * (gain.screen * std::conj (gain.lfe) * cFL[g]).real();
+                power = screen + lfe + cross;
+                screenPart[b] += hz * screen;
+                lfePart[b] += hz * lfe;
+                crossPart[b] += hz * cross;
+            }
+
+            band[b] += hz * std::max (power, 0.0);
+            total += hz * std::max (power, 0.0);
+        }
+
+        chain.changeDb = limited ((total + 1e-60) / (referenceTotal + 1e-60));
+        chain.penalty = 0.0;
+
+        for (int b = 0; b < numBands; ++b)
+        {
+            if (reference[b] <= 0.0 && band[b] <= 0.0)
                 continue;
 
-            const double counted = chain.weight * gainRelevance[v] * penalty;
+            chain.bandChangeDb[(size_t) b] = limited ((band[b] + 1e-60) / (reference[b] + 1e-60));
 
-            if (counted > worstHere)
-            {
-                worstHere = counted;
-                chain.worstGain = v;
-            }
+            // What the band is worth: its share of the reference bass, or of
+            // this system's bass when the system has some where the reference
+            // had almost none.
+            const double share = std::max (reference[b] / (referenceTotal + 1e-60),
+                                           band[b] / (std::max (total, referenceTotal) + 1e-60));
+            const double rated = std::clamp ((std::abs (chain.bandChangeDb[(size_t) b]) - tolerance)
+                                               / (doublingDb[b] - tolerance), 0.0, 1.0);
 
-            if (counted > worst)
-            {
-                worst = counted;
-                t.worstChain = (int) k;
-                t.worstGainDb = gainSteps[v];
-            }
+            // In a stereo downmix, the very bottom of the spectrum does not
+            // count: it is felt in a cinema, not heard on the systems a
+            // downmix is played on.
+            const double relevance = isStereo && reference[b] > 0.0 ? audible[b] / reference[b] : 1.0;
+            chain.penalty += share * rated * relevance;
         }
+
+        chain.penalty = std::min (chain.penalty, 1.0);
 
         if (isStereo)
         {
-            chain.gainChangeDb.fill (chain.changeDb);
-            chain.gainPenalty.fill (chain.penalty);
             t.downmixChangeDb = chain.changeDb;
             t.dependence = dependenceCeiling * chain.penalty;
+            continue;
+        }
+
+        if (chain.weight * chain.penalty > worst)
+        {
+            worst = chain.weight * chain.penalty;
+            t.worstChain = (int) k;
+        }
+
+        // Level dependence of this system
+        for (int b = 0; b < numBands; ++b)
+        {
+            const double unrelated = screenPart[b] + lfePart[b];
+
+            // Only bands that carry a real part of the bass, with or without the cross term
+            if (unrelated < levelBandShare * (screenTotal + lfeTotal) || lfePart[b] <= 0.0)
+                continue;
+
+            const double now = std::max (unrelated + crossPart[b], 0.0);
+
+            for (int v = 0; v < numLevelSteps; ++v)
+            {
+                const double gain = std::pow (10.0, levelSteps[v] / 20.0);
+                const double expected = limited ((screenPart[b] + gain * gain * lfePart[b] + 1e-60) / (unrelated + 1e-60));
+                const double actual = limited ((std::max (screenPart[b] + gain * gain * lfePart[b] + gain * crossPart[b], 0.0) + 1e-60)
+                                                 / (now + 1e-60));
+                const double deviation = actual - expected;
+                const double severity = levelStepWeight[v] * std::clamp (std::abs (deviation) / levelRedDb, 0.0, 1.0);
+
+                if (severity > t.levelDependence)
+                {
+                    t.levelDependence = severity;
+                    t.levelDeviationDb = deviation;
+                }
+            }
         }
     }
 

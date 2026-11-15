@@ -235,11 +235,23 @@ en interaction.
 | Bass management | canaux d'écran croisés vers le sub (Linkwitz-Riley 4ᵉ ordre) à 60, 80, 100 Hz, LFE passe-bas 120 Hz ; avec et sans passe-bas raide à 120 Hz tenant lieu de filtre d'encodeur | 6 |
 | Stéréo | `Lo = L + 0,707·C`, `Ro = R + 0,707·C`, sans LFE | 1 |
 
-**Niveau du sub.** Chacun des 16 systèmes cinéma et bass management est
-recalculé avec son sub réglé à −3, −2, −1, 0, +1, +2 et +3 dB, soit 112 cas
-plus la stéréo. Dans le panneau « Playback chains », la ligne « Subwoofer
-level » choisit le niveau affiché ; « Worst » montre pour chaque système le
-niveau le plus pénalisant, avec une petite marque (« sub +3 »).
+**Dépendance au niveau du sub (« Level dependence »).** Un avertissement, hors
+score. Chacun des 16 systèmes cinéma et bass management est recalculé avec son
+sub réglé à ±1, ±2, ±3 et ±6 dB. Avec un LFE sans rapport avec la façade, le
+grave suit simplement la somme des puissances : c'est attendu, tout comme un
+grave qui monte de 1 dB quand il est entièrement dans un LFE joué 1 dB plus
+fort. Ce qui est signalé est l'écart à cette attente, bande par bande (bandes
+portant au moins 20 % du grave) :
+
+`écart = variation réelle − variation attendue d'un LFE sans rapport`
+
+Un écart négatif est une annulation qui s'installe, un écart positif un grave
+qui sort d'une annulation. La case passe de l'orange clair au rouge ; rouge à
+partir de 3 dB d'écart pour une erreur de niveau de 1 à 3 dB. Un problème qui
+n'apparaît qu'à ±6 dB compte pour 0,3 : il reste en orange clair.
+
+Les niveaux négatifs sont gardés : avec un LFE plus fort que la façade et en
+opposition, *baisser* le sub rapproche les deux de l'annulation.
 
 ### 3.5 Note d'un système
 
@@ -272,19 +284,6 @@ il survit.
 | Cinéma, sub en avance (−5 et −2,5 ms) | 0,25 |
 | Bass management (les six cas) | 1 |
 
-La pertinence d'un système est multipliée par celle de son erreur de niveau :
-
-| Niveau du sub | Pertinence |
-|---|---|
-| Réglé (0 dB) | 1 |
-| ±1 dB | 0,75 |
-| ±2 dB | 0,5 |
-| ±3 dB | 0,25 |
-
-Ces poids sont une hypothèse, comme les précédents. Ils sont choisis pour
-qu'un grave entièrement dans le LFE reste vers 20 : un sub décalé de 3 dB y
-déplace tout le grave de 3 dB.
-
 **Dépendance** : `0,95 × pénalité de la stéréo sans LFE`, c'est-à-dire de ce que
 le grave perd partout où le LFE manque ou est mal réglé. Le plafond de 0,95
 place un grave large bande entièrement dans le LFE vers 22 : grave (la salle
@@ -293,18 +292,17 @@ seule en décide) sans valoir une annulation.
 **L'infra-grave est mis à part.** Ce que la stéréo perd est pondéré par la
 fréquence : rien en dessous de 25 Hz, tout à partir de 60 Hz, et entre les
 deux un poids qui monte linéairement en octaves. Une sinusoïde de 20 Hz seule
-dans le LFE n'a donc aucune dépendance : on ne la ressent qu'en salle, et
-l'enlever ne change rien au downmix stéréo. Son score n'est pas 100 pour une
-autre raison : un sub mal réglé de 3 dB la déplace de 3 dB (interaction).
+dans le LFE ne coûte donc rien : on ne la ressent qu'en salle, et l'enlever ne
+change rien au downmix stéréo.
 
 | Grave présent uniquement dans le LFE | Dépendance | Score |
 |---|---|---|
-| Sinusoïde à 20 Hz | 0,00 | 87 |
-| 30 Hz | 0,21 | 69 |
-| 40 Hz | 0,52 | 42 |
-| 50 Hz | 0,76 | 20 |
-| 70 Hz et plus | 0,95 | 4 |
-| Bruit large bande 20–120 Hz | — | 20 |
+| Sinusoïde à 20 Hz | 0,00 | 100 |
+| 30 Hz | 0,21 | 79 |
+| 40 Hz | 0,52 | 48 |
+| 50 Hz | 0,76 | 24 |
+| 70 Hz et plus | 0,95 | 5 |
+| Bruit large bande 20–120 Hz | — | 22 |
 
 Les bornes viennent de trois constats (voir 3.8 bis) : le seuil d'audition
 monte très vite vers le bas (78,5 dB SPL à 20 Hz, 68,7 dB à 25 Hz, 37,5 dB à
@@ -349,8 +347,8 @@ Vérifiées par les tests, sur bruit large bande, au niveau Strong :
 | LFE 10 dB sous la façade, à 30 % copié sur elle | 95 |
 | LFE sans rapport, aussi fort que la façade | 60 |
 | LFE 10 dB sous la façade, à 60 % copié sur elle | 60 |
-| LFE seul | 20 |
-| LFE sans rapport, 6 dB au-dessus de la façade | 20 |
+| LFE seul | 22 |
+| LFE sans rapport, 6 dB au-dessus de la façade | 21 |
 | LFE aussi fort que la façade, à 60 % copié sur elle | 19 |
 | LFE 10 dB sous la façade, entièrement copié sur elle | 8 |
 | LFE identique à la façade | 0 |

@@ -249,7 +249,8 @@ void HeaderBar::paint (juce::Graphics& g)
                                   { juce::Colour (10, 40, 70),  0.08, 0.30, 0.12, 0.40, 0.18, 0.24, 0.42, 0.34 } };
 
     const double t = animated ? phase : 0.0;
-    const float brightness = 0.55f + 0.30f * (float) level;
+    const float hit = (float) bass;                         // 0..1, the bass right now
+    const float brightness = 0.50f + 0.18f * (float) level + 0.32f * hit;
     const double twoPi = juce::MathConstants<double>::twoPi;
     int index = 0;
 
@@ -258,7 +259,8 @@ void HeaderBar::paint (juce::Graphics& g)
         const double offset = 1.7 * index++;
         const float cx = w * (float) (glow.x + glow.sx * std::sin (twoPi * glow.px * 0.35 * t + offset));
         const float cy = h * (float) (glow.y + glow.sy * std::cos (twoPi * glow.py * 0.35 * t + 2.0 * offset));
-        const float radius = w * (float) (glow.size * (0.55 + 0.20 * std::sin (twoPi * glow.breathe * 0.4 * t + offset)));
+        const float radius = w * (float) (glow.size * (0.55 + 0.20 * std::sin (twoPi * glow.breathe * 0.4 * t + offset)))
+                               * (1.0f + 0.35f * hit);     // each bass hit swells the glows
 
         juce::ColourGradient gradient (glow.colour.withAlpha (brightness), cx, cy,
                                        glow.colour.withAlpha (0.0f), cx + radius, cy, true);
@@ -272,7 +274,7 @@ void HeaderBar::paint (juce::Graphics& g)
     {
         juce::Path wave;
         const double speed = (k == 0 ? 0.55 : -0.38), length = (k == 0 ? 2.2 : 3.4);
-        const float base = h * (k == 0 ? 0.62f : 0.48f), swing = h * (0.13f + 0.05f * (float) level);
+        const float base = h * (k == 0 ? 0.62f : 0.48f), swing = h * (0.10f + 0.04f * (float) level + 0.22f * hit);
 
         for (int step = 0; step * 6.0f <= w + 6.0f; ++step)
         {
@@ -285,7 +287,7 @@ void HeaderBar::paint (juce::Graphics& g)
             else            wave.lineTo (x, y);
         }
 
-        g.setColour ((k == 0 ? juce::Colour (70, 190, 190) : juce::Colour (150, 190, 90)).withAlpha (0.10f + 0.08f * (float) level));
+        g.setColour ((k == 0 ? juce::Colour (70, 190, 190) : juce::Colour (150, 190, 90)).withAlpha (0.10f + 0.06f * (float) level + 0.22f * hit));
         g.strokePath (wave, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
 
@@ -869,8 +871,17 @@ void CorrelationPlot::paint (juce::Graphics& g)
             else            { line.lineTo (x, y); }
         }
 
+        // L and R glow; C stays a plain line between them
+        if (c != 1)
+        {
+            g.setColour (colours[c].withAlpha (0.10f));
+            g.strokePath (line, juce::PathStrokeType (9.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.setColour (colours[c].withAlpha (0.22f));
+            g.strokePath (line, juce::PathStrokeType (4.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
+
         g.setColour (colours[c]);
-        g.strokePath (line, juce::PathStrokeType (1.7f, juce::PathStrokeType::curved));
+        g.strokePath (line, juce::PathStrokeType (c == 1 ? 1.7f : 2.0f, juce::PathStrokeType::curved));
     }
 
     // Legend
@@ -921,47 +932,11 @@ void ChainsView::update (const ChainsInfo& newInfo)
     repaint();
 }
 
-juce::Rectangle<float> ChainsView::gainButton (int index) const
-{
-    const float left = 150.0f, width = (index == ChainResult::numGains ? 64.0f : 44.0f);
-    return { left + 46.0f * (float) index, 0.0f, width, 20.0f };
-}
-
-void ChainsView::mouseDown (const juce::MouseEvent& e)
-{
-    for (int i = 0; i <= ChainResult::numGains; ++i)
-        if (gainButton (i).contains (e.position))
-            setGainView (i);
-}
-
 void ChainsView::paint (juce::Graphics& g)
 {
     const auto& t = info.translation;
     auto area = getLocalBounds().toFloat();
     const float rowHeight = 22.0f, labelWidth = 150.0f;
-
-    // Which subwoofer level the table shows
-    {
-        g.setColour (theme::dimText);
-        g.setFont (uiFont (12.0f, true));
-        g.drawText ("Subwoofer level", 0, 0, 150, 20, juce::Justification::centredLeft);
-
-        for (int i = 0; i <= ChainResult::numGains; ++i)
-        {
-            const auto box = gainButton (i).reduced (1.0f);
-            const bool on = i == gainView;
-            g.setColour (on ? juce::Colour (0xff3a6ea5) : juce::Colour (0xff2a2a2a));
-            g.fillRoundedRectangle (box, 3.0f);
-            g.setColour (on ? juce::Colours::white : theme::dimText);
-            g.setFont (uiFont (11.5f, on));
-            const double step = i < ChainResult::numGains ? PlaybackSimulator::gainSteps[i] : 0.0;
-            g.drawText (i == ChainResult::numGains ? juce::String ("Worst")
-                                                   : (step > 0.0 ? "+" : "") + juce::String ((int) step) + " dB",
-                        box, juce::Justification::centred);
-        }
-
-        area.removeFromTop (28.0f);
-    }
 
     const auto cinema = [&t] (double delayMs, bool inverted) -> const ChainResult*
     {
@@ -1007,28 +982,15 @@ void ChainsView::paint (juce::Graphics& g)
             return;
         }
 
-        const bool worstView = gainView >= ChainResult::numGains;
-        const auto v = (size_t) (worstView ? chain->worstGain : gainView);
-        const double db = chain->gainChangeDb[v];
-        g.setColour (colourFor (chain->gainPenalty[v]));
+        const double db = chain->changeDb;
+        g.setColour (colourFor (chain->penalty));
         g.fillRoundedRectangle (box, 3.0f);
         g.setColour (juce::Colours::white);
         g.setFont (uiFont (12.5f, true));
         const auto value = db <= -PlaybackSimulator::changeLimitDb + 0.05
                              ? juce::String::fromUTF8 ("\xe2\x89\xa4-") + juce::String ((int) PlaybackSimulator::changeLimitDb)
                              : (db >= 0.0 ? "+" : "") + juce::String (db, 1);
-
-        // In the "Worst" view, a small mark tells which level error it is
-        const double step = PlaybackSimulator::gainSteps[v];
-        const bool marked = worstView && chain->kind != ChainResult::Kind::stereo && v != (size_t) ChainResult::numGains / 2;
-        g.drawText (value + " dB", marked ? box.withTrimmedRight (30.0f) : box, juce::Justification::centred);
-
-        if (marked)
-        {
-            g.setFont (uiFont (9.5f));
-            g.setColour (juce::Colours::white.withAlpha (0.75f));
-            g.drawText ((step > 0.0 ? "sub +" : "sub ") + juce::String ((int) step), box.removeFromRight (36.0f), juce::Justification::centred);
-        }
+        g.drawText (value + " dB", box, juce::Justification::centred);
     };
 
     const auto table = [&] (const juce::StringArray& columns, const juce::StringArray& rows,
@@ -1092,10 +1054,7 @@ void ChainsView::paint (juce::Graphics& g)
     if (t.hasBass && t.worstChain >= 0 && t.interaction > 0.02)
     {
         const auto& c = t.chains[(size_t) t.worstChain];
-        const auto v = (size_t) c.worstGain;
-        const double step = PlaybackSimulator::gainSteps[v];
-        worst = "     worst: " + juce::String (c.name) + (v != (size_t) ChainResult::numGains / 2 ? ", sub " + juce::String (step > 0.0 ? "+" : "") + juce::String ((int) step) + " dB" : juce::String())
-                  + " (" + (c.gainChangeDb[v] >= 0.0 ? "+" : "") + juce::String (c.gainChangeDb[v], 1) + " dB)";
+        worst = "     worst system: " + juce::String (c.name) + " (" + (c.changeDb >= 0.0 ? "+" : "") + juce::String (c.changeDb, 1) + " dB)";
     }
 
     line ("Robustness", t.hasBass ? juce::String (juce::roundToInt (t.robustness)) + " / 100     interaction x LFE dependence" : none,
@@ -1110,6 +1069,56 @@ void ChainsView::paint (juce::Graphics& g)
                                                  + " % of the bass"
                                              : none,
           t.hasBass && t.lfeBalanceDb > PlaybackSimulator::balanceWarningDb);
+
+    // Level dependence: one box, the stronger its colour the more a subwoofer
+    // set off its level would move the bass beyond what is expected
+    {
+        auto row = area.removeFromTop (rowHeight + 2.0f);
+        g.setColour (theme::dimText);
+        g.setFont (uiFont (12.5f));
+        g.drawText ("Level dependence", row.removeFromLeft (labelWidth + 40.0f), juce::Justification::centredLeft);
+
+        const double severity = t.hasBass ? juce::jlimit (0.0, 1.0, t.levelDependence) : 0.0;
+        const auto quiet = juce::Colour (0xff2a2a2a), lightOrange = juce::Colour (0xffffb347), orange = juce::Colour (0xffff8a00),
+                   red = juce::Colour (0xffe0261b);
+        juce::Colour fill = quiet;
+
+        if (severity > 0.05)
+            fill = severity < 0.3 ? quiet.interpolatedWith (lightOrange, (float) (0.25 + 1.5 * severity))
+                 : severity < 0.9 ? lightOrange.interpolatedWith (orange, (float) ((severity - 0.3) / 0.6)).interpolatedWith (red, (float) juce::jmax (0.0, (severity - 0.6) / 0.6))
+                                  : red;
+
+        auto box = row.removeFromLeft (150.0f).reduced (1.5f);
+        g.setColour (fill);
+        g.fillRoundedRectangle (box, 3.0f);
+
+        juce::String text = none, note;
+
+        if (t.hasBass)
+        {
+            const double dev = t.levelDeviationDb;
+
+            if (severity <= 0.05)
+            {
+                text = "as expected";
+                note = "a subwoofer off its level moves the bass no more than it should";
+            }
+            else
+            {
+                text = (dev >= 0.0 ? "+" : "") + juce::String (dev, 1) + " dB off";
+                note = dev < 0.0 ? "cancellation risk when the subwoofer is off its level"
+                                 : "boost risk when the subwoofer is off its level";
+            }
+        }
+
+        g.setColour (severity > 0.3 ? juce::Colours::white : theme::text);
+        g.setFont (uiFont (12.5f, severity > 0.3));
+        g.drawText (text, box, juce::Justification::centred);
+        g.setColour (theme::dimText);
+        g.setFont (uiFont (11.5f));
+        g.drawText (note, row.withTrimmedLeft (10.0f), juce::Justification::centredLeft);
+        area.removeFromTop (2.0f);
+    }
 
     const auto signedValue = [] (double v) { return (v >= 0.0 ? "+" : "") + juce::String (v, 2); };
     const int seconds = (int) info.sessionSeconds;

@@ -1132,18 +1132,12 @@ static void testPlaybackChains()
 
         for (const auto& c : t.chains)
             if (c.kind != ChainResult::Kind::stereo)
-                for (int v = 0; v < ChainResult::numGains; ++v)
-                    worst = std::max (worst, c.weight * PlaybackSimulator::gainRelevance[v] * c.gainPenalty[(size_t) v]);
+                worst = std::max (worst, c.weight * c.penalty);
 
-        check (std::abs (t.interaction - worst) < 1e-12, "interaction = worst relevance x penalty, over the subwoofer levels", t.interaction);
+        check (std::abs (t.interaction - worst) < 1e-12, "interaction = worst relevance x penalty", t.interaction);
 
-        // All the bass in the LFE: a subwoofer 3 dB off moves it by 3 dB, on time or not
-        const auto& onTime = cinema (t, 0.0, false);
-        check (std::abs (onTime.gainChangeDb[6] - 3.0) < 0.05 && std::abs (onTime.gainChangeDb[0] + 3.0) < 0.05
-                 && std::abs (onTime.gainChangeDb[3]) < 0.05, "LFE alone: sub +/-3 dB moves the bass by +/-3 dB", onTime.gainChangeDb[6]);
-        check (std::abs (onTime.gainChangeDb[3] - onTime.changeDb) < 1e-12 && std::abs (onTime.gainPenalty[3] - onTime.penalty) < 1e-12,
-               "the calibrated level is the middle of the seven", onTime.changeDb);
-        check (std::abs (t.worstGainDb) > 1.5, "LFE alone: the worst case is a subwoofer level error", t.worstGainDb);
+        // All the bass in the LFE: it follows the subwoofer level exactly, which is expected
+        check (t.levelDependence < 0.02, "LFE alone: no level dependence, the bass moves as expected", t.levelDependence);
         check (std::abs (t.robustness - 100.0 * (1.0 - t.interaction) * (1.0 - t.dependence)) < 1e-9,
                "robustness = 100 (1 - interaction) (1 - dependence)", t.robustness);
         std::printf ("  LFE alone: robustness %.0f\n", t.robustness);
@@ -1162,7 +1156,8 @@ static void testPlaybackChains()
         check (std::abs (cinema (t, 5.0, true).changeDb) < 0.3, "unrelated: delay and polarity change nothing", cinema (t, 5.0, true).changeDb);
         check (std::abs (stereo (t).changeDb + 3.01) < 0.8, "half the bass in the LFE: stereo loses about 3 dB", stereo (t).changeDb);
         check (std::abs (home (t, 80.0, false).changeDb) < 1.0, "unrelated: bass management stays close", home (t, 80.0, false).changeDb);
-        std::printf ("  unrelated, equal levels: robustness %.0f\n", t.robustness);
+        std::printf ("  unrelated, equal levels: robustness %.0f, level dependence %.2f (%+.1f dB)\n", t.robustness, t.levelDependence, t.levelDeviationDb);
+        check (t.levelDependence < 0.15, "unrelated LFE: the bass follows the subwoofer level as expected", t.levelDependence);
     }
     {
         // The case to avoid: unrelated, but the LFE 6 dB above the screen channel
@@ -1191,7 +1186,8 @@ static void testPlaybackChains()
         check (t.robustness < 1.0, "identical: 0, an inverted subwoofer cancels the bass", t.robustness);
         check (t.worstChain >= 0 && t.chains[(size_t) t.worstChain].inverted, "identical: the worst system has the subwoofer inverted",
                (double) t.worstChain);
-        std::printf ("  identical signals: robustness %.0f\n", t.robustness);
+        std::printf ("  identical signals: robustness %.0f, level dependence %.2f (%+.1f dB)\n", t.robustness, t.levelDependence, t.levelDeviationDb);
+        check (t.levelDependence > 0.99, "identical signals: a subwoofer level error swings the bass far beyond what is expected", t.levelDependence);
     }
     {
         // LFE 5 ms late in the mix: a subwoofer 5 ms early realigns it. Against the
@@ -1235,8 +1231,7 @@ static void testPlaybackChains()
             previous = t.dependence;
 
             if (hz <= 20.0)
-                check (t.dependence < 0.01 && t.robustness > 85.0 && t.robustness < 90.0,
-                       "20 Hz in the LFE alone: no dependence; only a subwoofer level error costs", t.robustness);
+                check (t.dependence < 0.01 && t.robustness > 99.0, "20 Hz in the LFE alone: no dependence, score 100", t.robustness);
 
             if (hz >= 70.0)
                 check (std::abs (t.dependence - PlaybackSimulator::dependenceCeiling) < 0.01, "70 Hz and above: full dependence", t.dependence);
@@ -1297,7 +1292,8 @@ static void testPlaybackChains()
             const auto t = sim.compute (e.result());
             check (t.robustness <= previous + 1.0, "the more the LFE copies the screen, the lower the score", t.robustness);
             previous = t.robustness;
-            std::printf ("  LFE 10 dB below the screen, %.0f %% shared: robustness %.0f\n", 100.0 * shared, t.robustness);
+            std::printf ("  LFE 10 dB below the screen, %.0f %% shared: robustness %.0f, level dependence %.2f (%+.1f dB)\n",
+                         100.0 * shared, t.robustness, t.levelDependence, t.levelDeviationDb);
         }
     }
     {
@@ -1311,7 +1307,9 @@ static void testPlaybackChains()
             s.l = n;
             s.lfe = scaled (sum (scaled (n, shared), scaled (other, std::sqrt (1.0 - shared * shared))), asHeard);
             run (e, s);
-            std::printf ("  LFE as loud as the screen, %.0f %% shared: robustness %.0f\n", 100.0 * shared, sim.compute (e.result()).robustness);
+            const auto loud = sim.compute (e.result());
+            std::printf ("  LFE as loud as the screen, %.0f %% shared: robustness %.0f, level dependence %.2f (%+.1f dB)\n",
+                         100.0 * shared, loud.robustness, loud.levelDependence, loud.levelDeviationDb);
         }
     }
     {
