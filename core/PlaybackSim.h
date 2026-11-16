@@ -113,8 +113,9 @@ struct Translation
     // its calibrated level. Against an LFE unrelated to the screen, whose
     // bass simply follows the power sum, how much more (a boost out of a
     // cancellation) or less (a cancellation setting in) the bass moves.
-    double levelDependence = 0.0;       // 0..1, drives the warning; 1 from 3 dB off at a small level error
-    double levelDeviationDb = 0.0;      // the largest such difference, signed: negative when the bass falls short
+    double levelDependence = 0.0;       // 0..1, drives the warning and the score: the mean against the "red" value
+    double levelMeanDb = 0.0;           // mean of that difference over every system and subwoofer level, in dB
+    double levelDeviationDb = 0.0;      // the largest one, signed: negative when the bass falls short
 
     // LFE as heard (+10 dB) against the screen channels, 20-120 Hz
     double lfeBalanceDb = 0.0;          // positive: the LFE is the louder of the two
@@ -199,7 +200,24 @@ public:
     // as a cancellation. (The infra-bass part of it is not counted.)
     static constexpr double dependenceCeiling = 0.89;
 
-    Translation compute (const Analysis&, Level level = Level::strong) const;
+    static constexpr double speedOfSound = 343.0;       // m/s: a subwoofer 1.7 m further away is 5 ms late
+
+    /** Everything that is a choice rather than a measurement, adjustable at run time (Dev panel). */
+    struct Tuning
+    {
+        std::array<double, 3> toleranceDb { { 3.0, 2.0, 1.0 } };    // Soft, Medium, Strong
+        double lateRelevance = 0.5, earlyRelevance = 0.25;          // cinema subwoofer late / early, against 1 on time
+        double dependenceCeiling = PlaybackSimulator::dependenceCeiling;
+        double infraLoHz = PlaybackSimulator::infraLoHz, infraHiHz = PlaybackSimulator::infraHiHz;
+        double infraWeight = PlaybackSimulator::infraWeight;
+        double levelDependenceWeight = PlaybackSimulator::levelDependenceWeight;
+        double levelRedDb = PlaybackSimulator::levelRedDb;
+    };
+
+    Tuning tuning;
+
+    /** `lfeGainDb`: how much louder than a screen channel the LFE is played, 10 in a cinema, 0 to take it as recorded. */
+    Translation compute (const Analysis&, Level level = Level::strong, double lfeGainDb = lfeInBandGainDb) const;
 };
 
 } // namespace subguard

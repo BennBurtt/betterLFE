@@ -510,7 +510,7 @@ int main (int argc, char** argv)
     std::fprintf (readme, "SubGUARD test files\n===================\n\n"
                           "48 kHz, 24-bit, 5.1 in the order L R C LFE Ls Rs: choose the format \"5.1 ITU\" in the app.\n"
                           "Each file starts with one second of silence. Loop a file for a steadier read-out.\n"
-                          "Default settings assumed: transient check switched on (Transients panel), level Strong, both polarities, LFE +10 dB box unchecked.\n"
+                          "Default settings assumed: transient check switched on (Transients panel), level Strong, both polarities, LFE +10 dB box checked.\n"
                           "\"Measured\" is what the analysis engine itself reads at the end of the file.\n\n");
 
     std::printf ("%-36s %6s %6s %6s %7s   %-17s %s\n", "file", "score", "inter", "depen", "LFE dB", "corr L / C / R", "transients");

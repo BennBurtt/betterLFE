@@ -51,7 +51,7 @@ public:
     void resized() override;
 
 private:
-    enum CardId { sourceCard, spectrumCard, alertCard, transientsCard, chainsCard, numCards };
+    enum CardId { sourceCard, spectrumCard, alertCard, transientsCard, chainsCard, devCard, numCards };
 
     void timerCallback() override;
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
@@ -94,7 +94,7 @@ private:
     // One button per panel; a panel opens over the analyzer, one at a time
     std::array<juce::TextButton, numCards> cardButtons;
     std::array<Card, numCards> cards { { Card ("Source & Format"), Card ("Spectrum"), Card ("Phase Alert"),
-                                         Card ("Transients"), Card ("Playback chains") } };
+                                         Card ("Transients"), Card ("Playback chains"), Card ("Dev: algorithm settings") } };
     int openCard = -1;
 
     juce::Label formatLabel { {}, "Channel Format:" }, deviceLabel { {}, "Input Device:" },
@@ -116,6 +116,18 @@ private:
     juce::TextButton transientDefaultsButton { "Defaults" };
     ChainsView chainsView;
     LabelledSlider scoreSpeed { "Score speed:", 0, 1, 0.05, 0 };
+
+    // Dev panel: every choice of the score, adjustable
+    LabelledSlider dTolSoft { "Tolerance, Soft:", 0.5, 4.5, 0.1, 3 }, dTolMedium { "Tolerance, Medium:", 0.5, 4.5, 0.1, 2 },
+                   dTolStrong { "Tolerance, Strong:", 0.5, 4.5, 0.1, 1 },
+                   dLate { "Weight, cinema sub late:", 0, 1, 0.05, 0.5 }, dEarly { "Weight, cinema sub early:", 0, 1, 0.05, 0.25 },
+                   dCeiling { "LFE dependence, ceiling:", 0, 1, 0.01, 0.89 }, dInfraWeight { "Infra-bass weight:", 0, 1, 0.05, 0.25 },
+                   dInfraLo { "Infra-bass up to:", 10, 40, 1, 25 }, dInfraHi { "Full weight from:", 40, 100, 1, 60 },
+                   dLevelWeight { "LFE level dependence, weight in score:", 0, 0.5, 0.01, 0.15 },
+                   dLevelRed { "LFE level dependence, red at a mean of:", 0.5, 12, 0.1, 3 };
+    juce::TextButton devDefaultsButton { "Defaults" };
+    std::vector<LabelledSlider*> devSliders();
+    void applyDevSettings();
     juce::TextButton resetButton { "Reset" };
     double slowScore = -1.0;        // the score after the extra "Score speed" smoothing; negative: not started
     void updateSpeakers();

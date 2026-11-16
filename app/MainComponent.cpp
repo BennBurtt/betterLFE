@@ -119,7 +119,7 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
 
     setSize (1200, 1000);
 
-    const juce::StringArray cardNames { "source", "spectrum", "alert", "transients", "chains" };
+    const juce::StringArray cardNames { "source", "spectrum", "alert", "transients", "chains", "dev" };
     showCard (cardNames.indexOf (options.openCard));
 
     lastTick = juce::Time::getMillisecondCounterHiRes() * 0.001;
@@ -202,7 +202,9 @@ void MainComponent::buildCards()
                                   "On: an LFE much quieter (or louder) than the screen channel counts less.");
 
 
-    lfeGainToggle.setTooltip ("Weigh the LFE as it plays in a cinema: 10 dB of in-band gain over a screen channel.");
+    lfeGainToggle.setTooltip ("On: the LFE counts 10 dB louder than a screen channel, as a cinema plays it. Off: as recorded.\n"
+                              "It applies everywhere: spectrum, alerts, playback chains and score.");
+    lfeGainToggle.setToggleState (true, juce::dontSendNotification);
     animationToggle.setToggleState (true, juce::dontSendNotification);
     animationToggle.onClick = [this] { header.setAnimationEnabled (animationToggle.getToggleState()); };
 
@@ -395,7 +397,69 @@ void MainComponent::buildCards()
     populate (chainsCard, 600, 300, { &chainsView },
               [this] (juce::Rectangle<int> r) { chainsView.setBounds (r); });
 
-    const char* names[] = { "Source", "Spectrum", "Phase Alert", "Transients", "Playback chains" };
+    // Dev panel
+    {
+        const auto db = [] (double v) { return juce::String (v, 1) + " dB"; };
+        const auto plain = [] (double v) { return juce::String (v, 2); };
+        const auto hz = [] (double v) { return juce::String ((int) v) + " Hz"; };
+        dTolSoft.format = dTolMedium.format = dTolStrong.format = dLevelRed.format = db;
+        dLate.format = dEarly.format = dCeiling.format = dInfraWeight.format = dLevelWeight.format = plain;
+        dInfraLo.format = dInfraHi.format = hz;
+
+        dTolSoft.setTooltip ("How many dB a band may change on a playback system before it starts to count, at each level.");
+        dCeiling.setTooltip ("How much of the score a bass entirely in the LFE can take away. 0.89 puts 'LFE alone' near 21.");
+        dInfraWeight.setTooltip ("What bass under the 'infra-bass up to' frequency still counts for in the LFE dependence; it rises to 1 at 'full weight from'.");
+        dLevelWeight.setTooltip ("The most the LFE level dependence can take off the score.");
+        dLevelRed.setTooltip ("Mean difference from the expected bass at which the LFE level dependence box is fully red.");
+
+        for (auto* slider : devSliders())
+        {
+            slider->refresh();
+            slider->onChange = [this] { applyDevSettings(); };
+        }
+
+        devDefaultsButton.onClick = [this]
+        {
+            const PlaybackSimulator::Tuning d;
+            dTolSoft.setValue (d.toleranceDb[0]);
+            dTolMedium.setValue (d.toleranceDb[1]);
+            dTolStrong.setValue (d.toleranceDb[2]);
+            dLate.setValue (d.lateRelevance);
+            dEarly.setValue (d.earlyRelevance);
+            dCeiling.setValue (d.dependenceCeiling);
+            dInfraWeight.setValue (d.infraWeight);
+            dInfraLo.setValue (d.infraLoHz);
+            dInfraHi.setValue (d.infraHiHz);
+            dLevelWeight.setValue (d.levelDependenceWeight);
+            dLevelRed.setValue (d.levelRedDb);
+        };
+
+        auto& card = cards[(size_t) devCard];
+
+        for (auto* slider : devSliders())
+            card.addAndMakeVisible (slider);
+
+        card.addAndMakeVisible (devDefaultsButton);
+        card.onLayout = [this] (juce::Rectangle<int> r)
+        {
+            auto leftColumn = r.removeFromLeft (r.getWidth() / 2).withTrimmedRight (10);
+            auto rightColumn = r.withTrimmedLeft (10);
+            int index = 0;
+
+            for (auto* slider : devSliders())
+            {
+                auto& column = index++ < 6 ? leftColumn : rightColumn;
+                slider->setBounds (column.removeFromTop (46));
+                column.removeFromTop (4);
+            }
+
+            devDefaultsButton.setBounds (rightColumn.removeFromTop (30).removeFromRight (90).withTrimmedTop (6));
+        };
+        card.setSize (640, 352);
+        addChildComponent (card);
+    }
+
+    const char* names[] = { "Source", "Spectrum", "Phase Alert", "Transients", "Playback chains", "Dev" };
 
     for (int i = 0; i < numCards; ++i)
     {
@@ -444,7 +508,7 @@ void MainComponent::resized()
     header.setBounds (area.removeFromTop (juce::jmax (110, juce::jmin (headerHeight, getHeight() / 6))));
 
     auto bar = area.removeFromTop (barHeight).reduced (10, 6);
-    const int widths[numCards] = { 90, 90, 104, 100, 140 };
+    const int widths[numCards] = { 90, 90, 104, 100, 140, 60 };
     resetButton.setBounds (bar.removeFromRight (80));
 
     for (int i = 0; i < numCards; ++i)
@@ -656,6 +720,26 @@ void MainComponent::feedDemoSignal (int numFrames)
 }
 
 //==============================================================================
+std::vector<LabelledSlider*> MainComponent::devSliders()
+{
+    return { &dTolSoft, &dTolMedium, &dTolStrong, &dLate, &dEarly, &dCeiling,
+             &dInfraWeight, &dInfraLo, &dInfraHi, &dLevelWeight, &dLevelRed };
+}
+
+void MainComponent::applyDevSettings()
+{
+    auto& t = simulator.tuning;
+    t.toleranceDb = { { dTolSoft.value(), dTolMedium.value(), dTolStrong.value() } };
+    t.lateRelevance = dLate.value();
+    t.earlyRelevance = dEarly.value();
+    t.dependenceCeiling = dCeiling.value();
+    t.infraWeight = dInfraWeight.value();
+    t.infraLoHz = dInfraLo.value();
+    t.infraHiHz = dInfraHi.value();
+    t.levelDependenceWeight = dLevelWeight.value();
+    t.levelRedDb = dLevelRed.value();
+}
+
 void MainComponent::updateSpeakers()
 {
     // A soloed speaker leaves the others out; a muted one is out whatever happens
@@ -674,7 +758,8 @@ void MainComponent::meterChannels (const float* interleaved, int numFrames)
 {
     const int index[3] = { chL, chC, chR };
 
-    // Everything under 200 Hz, all four channels, LFE as it plays (+10 dB): two one-pole low-passes
+    // Everything under 200 Hz, all four channels, the LFE as it is played: two one-pole low-passes
+    const double lfePlayedGain = lfeGainToggle.getToggleState() ? 3.162 : 1.0;
     const double coeff = 1.0 - std::exp (-juce::MathConstants<double>::twoPi * 200.0 / juce::jmax (8000.0, engineRate));
 
     for (int i = 0; i < numFrames; ++i)
@@ -686,7 +771,7 @@ void MainComponent::meterChannels (const float* interleaved, int numFrames)
 
         anyFramePeak = juce::jmax (anyFramePeak, (double) std::abs (in[chLFE]));
 
-        const double sum = (double) in[chL] + in[chC] + in[chR] + 3.162 * in[chLFE];
+        const double sum = (double) in[chL] + in[chC] + in[chR] + lfePlayedGain * in[chLFE];
         bassState[0] += coeff * (sum - bassState[0]);
         bassState[1] += coeff * (bassState[0] - bassState[1]);
         bassFramePeak = juce::jmax (bassFramePeak, std::abs (bassState[1]));
@@ -808,7 +893,7 @@ void MainComponent::timerCallback()
 
         // Playback chains, robustness, LFE dependence, overlap
         ChainsInfo info;
-        info.translation = simulator.compute (engine->result(), currentLevel());
+        info.translation = simulator.compute (engine->result(), currentLevel(), lfeGainToggle.getToggleState() ? lfeInBandGainDb : 0.0);
         info.sessionCorrelation = { { engine->globalCorrelation (0), engine->globalCorrelation (1), engine->globalCorrelation (2) } };
         info.sessionSeconds = engine->globalSeconds();
         auto& t = info.translation;
@@ -938,7 +1023,23 @@ void MainComponent::loadState()
     formatBox.setSelectedId (settings->getIntValue ("format", 1), juce::dontSendNotification);
     fpsBox.setSelectedId (settings->getIntValue ("fps", 60), juce::dontSendNotification);
     windowBox.setSelectedId (settings->getIntValue ("window", 2), juce::dontSendNotification);
-    lfeGainToggle.setToggleState (settings->getBoolValue ("lfeGain", false), juce::dontSendNotification);
+    lfeGainToggle.setToggleState (settings->getBoolValue ("lfeGainEverywhere", true), juce::dontSendNotification);
+
+    {
+        const char* keys[] = { "devTolSoft", "devTolMedium", "devTolStrong", "devLate", "devEarly", "devCeiling",
+                               "devInfraWeight", "devInfraLo", "devInfraHi", "devLevelWeight", "devLevelRed" };
+        int index = 0;
+
+        for (auto* slider : devSliders())
+        {
+            const auto* key = keys[index++];
+
+            if (settings->containsKey (key))
+                slider->setValue (settings->getDoubleValue (key));
+        }
+
+        applyDevSettings();
+    }
     animationToggle.setToggleState (settings->getBoolValue ("animation", true), juce::dontSendNotification);
     header.setAnimationEnabled (animationToggle.getToggleState());
     inertia.setValue (settings->getDoubleValue ("inertia", 70.0));
@@ -976,7 +1077,16 @@ void MainComponent::saveState()
     settings->setValue ("format", formatBox.getSelectedId());
     settings->setValue ("fps", fpsBox.getSelectedId());
     settings->setValue ("window", windowBox.getSelectedId());
-    settings->setValue ("lfeGain", lfeGainToggle.getToggleState());
+    settings->setValue ("lfeGainEverywhere", lfeGainToggle.getToggleState());
+
+    {
+        const char* keys[] = { "devTolSoft", "devTolMedium", "devTolStrong", "devLate", "devEarly", "devCeiling",
+                               "devInfraWeight", "devInfraLo", "devInfraHi", "devLevelWeight", "devLevelRed" };
+        int index = 0;
+
+        for (auto* slider : devSliders())
+            settings->setValue (keys[index++], slider->value());
+    }
     settings->setValue ("animation", animationToggle.getToggleState());
     settings->setValue ("inertia", inertia.value());
     settings->setValue ("integration", integration.value());

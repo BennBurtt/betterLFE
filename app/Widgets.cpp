@@ -1075,7 +1075,15 @@ void ChainsView::paint (juce::Graphics& g)
     heading ("Bass on each playback system against the mix as approved (cinema, sub on time, in polarity), 20-120 Hz");
 
     const double delays[] = { -5.0, -2.5, 0.0, 2.5, 5.0 };
-    table ({ "-5 ms", "-2.5 ms", "0 ms", "+2.5 ms", "+5 ms" }, { "Cinema, sub in polarity", "Cinema, sub inverted" },
+    // The subwoofer nearer or further than it should be: metres first, the time it makes in brackets
+    juce::StringArray distances;
+
+    for (double ms : delays)
+        distances.add (std::abs (ms) < 1e-9 ? juce::String ("0 m")
+                                            : (ms > 0.0 ? "+" : "-") + juce::String (std::abs (ms) * 0.001 * PlaybackSimulator::speedOfSound, 1)
+                                                + " m (" + (ms > 0.0 ? "+" : "-") + juce::String (std::abs (ms), 1) + " ms)");
+
+    table (distances, { "Cinema, sub in polarity", "Cinema, sub inverted" },
            [&] (int r, int c) { return cinema (delays[c], r == 1); });
 
     const double corners[] = { 60.0, 80.0, 100.0 };
@@ -1110,7 +1118,7 @@ void ChainsView::paint (juce::Graphics& g)
     line ("  from interaction", t.hasBass ? juce::String (juce::roundToInt (100.0 * (1.0 - t.interaction))) + " / 100" + worst : none,
           t.hasBass && t.interaction > 0.5);
 
-    line ("  from LFE dependence", t.hasBass ? juce::String (juce::roundToInt (100.0 * (1.0 - t.dependence)))
+    line ("  from LFE dependence (audible)", t.hasBass ? juce::String (juce::roundToInt (100.0 * (1.0 - t.dependence)))
                                                  + " / 100     LFE " + (t.lfeBalanceDb >= 0.0 ? "+" : "") + juce::String (t.lfeBalanceDb, 1)
                                                  + " dB against the screen, carries " + juce::String (juce::roundToInt (100.0 * t.lfeShare))
                                                  + " % of the bass"
@@ -1135,7 +1143,7 @@ void ChainsView::paint (juce::Graphics& g)
                  : severity < 0.9 ? lightOrange.interpolatedWith (orange, (float) ((severity - 0.3) / 0.6)).interpolatedWith (red, (float) juce::jmax (0.0, (severity - 0.6) / 0.6))
                                   : red;
 
-        auto box = row.removeFromLeft (150.0f).reduced (1.5f);
+        auto box = row.removeFromLeft (210.0f).reduced (1.5f);
         g.setColour (fill);
         g.fillRoundedRectangle (box, 3.0f);
 
@@ -1144,18 +1152,13 @@ void ChainsView::paint (juce::Graphics& g)
         if (t.hasBass)
         {
             const double dev = t.levelDeviationDb;
+            text = "mean " + juce::String (t.levelMeanDb, 1) + " dB  (max " + (dev >= 0.0 ? "+" : "") + juce::String (dev, 1) + ")";
 
             if (severity <= 0.05)
-            {
-                text = "as expected";
-                note = "a subwoofer off its level moves the bass no more than it should";
-            }
+                note = "over all systems and subwoofer levels: the bass moves no more than it should";
             else
-            {
-                text = (dev >= 0.0 ? "+" : "") + juce::String (dev, 1) + " dB off";
-                note = dev < 0.0 ? "cancellation risk when the subwoofer is off its level"
-                                 : "boost risk when the subwoofer is off its level";
-            }
+                note = dev < 0.0 ? "over all systems and subwoofer levels: cancellation risk when the subwoofer is off its level"
+                                 : "over all systems and subwoofer levels: boost risk when the subwoofer is off its level";
         }
 
         g.setColour (severity > 0.3 ? juce::Colours::white : theme::text);

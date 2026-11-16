@@ -47,10 +47,8 @@ namespace
 
     struct Gains { cd screen, lfe; };
 
-    Gains gainsFor (const ChainResult& chain, double hz)
+    Gains gainsFor (const ChainResult& chain, double hz, double lfeGain)
     {
-        const double lfeGain = std::pow (10.0, PlaybackSimulator::lfeInBandGainDb / 20.0);
-
         if (chain.kind == ChainResult::Kind::cinema)
             return { 1.0, lfeGain * (chain.inverted ? -1.0 : 1.0) * std::polar (1.0, -2.0 * pi * hz * chain.delayMs * 0.001) };
 
@@ -60,14 +58,6 @@ namespace
             lfe *= encoderLowPass (hz);
 
         return { lr4AllPass (hz, chain.crossoverHz), lfe };
-    }
-
-    // A quarter at 25 Hz and below, 1 from 60 Hz up, linear in octaves between.
-    double stereoRelevance (double hz)
-    {
-        const double rise = std::clamp (std::log (hz / PlaybackSimulator::infraLoHz)
-                                          / std::log (PlaybackSimulator::infraHiHz / PlaybackSimulator::infraLoHz), 0.0, 1.0);
-        return PlaybackSimulator::infraWeight + (1.0 - PlaybackSimulator::infraWeight) * rise;
     }
 
     int bandOf (double hz)
@@ -86,10 +76,18 @@ namespace
     }
 }
 
-Translation PlaybackSimulator::compute (const Analysis& a, Level level) const
+Translation PlaybackSimulator::compute (const Analysis& a, Level level, double lfeGainDb) const
 {
     Translation t;
-    const double tolerance = toleranceDb (level);
+    const double tolerance = tuning.toleranceDb[(size_t) level];
+
+    // A quarter (by default) at 25 Hz and below, 1 from 60 Hz up, linear in octaves between
+    const auto stereoRelevance = [this] (double hz)
+    {
+        const double lo = tuning.infraLoHz, hi = std::max (tuning.infraHiHz, lo * 1.01);
+        const double rise = std::clamp (std::log (hz / lo) / std::log (hi / lo), 0.0, 1.0);
+        return tuning.infraWeight + (1.0 - tuning.infraWeight) * rise;
+    };
 
     const auto& m = a.matrix;
     const auto n = a.grid.size();
@@ -97,7 +95,8 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level) const
     if (n == 0 || m.pF.size() != n)
         return t;
 
-    const double lfeGain2 = std::pow (10.0, lfeInBandGainDb / 10.0);
+    // The LFE as it is played: 10 dB up in a cinema (SMPTE RP 200), or as recorded
+    const double lfeGain2 = std::pow (10.0, lfeGainDb / 10.0), lfeGain = std::sqrt (lfeGain2);
 
     // Cross term with what chance could produce taken out: nothing below
     // 2 sigma of coherence (chance level), everything above 3 sigma (or above
@@ -120,9 +119,13 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level) const
             c.kind = ChainResult::Kind::cinema;
             c.delayMs = delaySteps[d];
             c.inverted = pol == 1;
-            c.weight = delayRelevance[d];
+            c.weight = c.delayMs < 0.0 ? tuning.earlyRelevance : (c.delayMs > 0.0 ? tuning.lateRelevance : 1.0);
             char text[96];
-            std::snprintf (text, sizeof (text), "cinema, sub %+.1f ms%s", c.delayMs, c.inverted ? ", inverted" : "");
+            if (c.delayMs < 0.0 || c.delayMs > 0.0)
+                std::snprintf (text, sizeof (text), "cinema, sub %+.1f m (%+.1f ms)%s", c.delayMs * 0.001 * speedOfSound, c.delayMs,
+                               c.inverted ? ", inverted" : "");
+            else
+                std::snprintf (text, sizeof (text), "cinema, sub in place%s", c.inverted ? ", inverted" : "");
             c.name = text;
             t.chains.push_back (c);
         }
@@ -182,6 +185,7 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level) const
 
     // Each system against the reference, band by band
     double worst = -1.0;
+    double levelSum = 0.0, levelWeightSum = 0.0, levelMax = 0.0;
 
     for (size_t k = 0; k < t.chains.size(); ++k)
     {
@@ -213,7 +217,7 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level) const
             }
             else
             {
-                const auto gain = gainsFor (chain, hz);
+                const auto gain = gainsFor (chain, hz, lfeGain);
                 const double screen = std::norm (gain.screen) * m.pF[g], lfe = std::norm (gain.lfe) * m.pLfe[g];
                 const double cross = 2.0 * (gain.screen * std::conj (gain.lfe) * cFL[g]).real();
                 power = screen + lfe + cross;
@@ -241,8 +245,10 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level) const
             // had almost none.
             const double share = std::max (reference[b] / (referenceTotal + 1e-60),
                                            band[b] / (std::max (total, referenceTotal) + 1e-60));
-            const double rated = std::clamp ((std::abs (chain.bandChangeDb[(size_t) b]) - tolerance)
-                                               / (doublingDb[b] - tolerance), 0.0, 1.0);
+            // 0 up to the tolerance, 1 at a doubling of loudness (the tolerance stays under it)
+            const double allowed = std::min (tolerance, doublingDb[b] - 0.5);
+            const double rated = std::clamp ((std::abs (chain.bandChangeDb[(size_t) b]) - allowed)
+                                               / (doublingDb[b] - allowed), 0.0, 1.0);
 
             // In a stereo downmix, the very bottom of the spectrum does not
             // count: it is felt in a cinema, not heard on the systems a
@@ -256,7 +262,7 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level) const
         if (isStereo)
         {
             t.downmixChangeDb = chain.changeDb;
-            t.dependence = dependenceCeiling * chain.penalty;
+            t.dependence = tuning.dependenceCeiling * chain.penalty;
             continue;
         }
 
@@ -266,40 +272,49 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level) const
             t.worstChain = (int) k;
         }
 
-        // Level dependence of this system
-        for (int b = 0; b < numBands; ++b)
+        // Level dependence of this system: one value per subwoofer level, the
+        // largest difference from the expectation over the bands that carry
+        // a real part of the bass
+        for (int v = 0; v < numLevelSteps; ++v)
         {
-            const double unrelated = screenPart[b] + lfePart[b];
+            const double gain = std::pow (10.0, levelSteps[v] / 20.0);
+            double worstBand = 0.0;
 
-            // Only bands that carry a real part of the bass, with or without the cross term
-            if (unrelated < levelBandShare * (screenTotal + lfeTotal) || lfePart[b] <= 0.0)
-                continue;
-
-            const double now = std::max (unrelated + crossPart[b], 0.0);
-
-            for (int v = 0; v < numLevelSteps; ++v)
+            for (int b = 0; b < numBands; ++b)
             {
-                const double gain = std::pow (10.0, levelSteps[v] / 20.0);
+                const double unrelated = screenPart[b] + lfePart[b];
+
+                if (unrelated < levelBandShare * (screenTotal + lfeTotal) || lfePart[b] <= 0.0)
+                    continue;
+
+                const double now = std::max (unrelated + crossPart[b], 0.0);
                 const double expected = limited ((screenPart[b] + gain * gain * lfePart[b] + 1e-60) / (unrelated + 1e-60));
                 const double actual = limited ((std::max (screenPart[b] + gain * gain * lfePart[b] + gain * crossPart[b], 0.0) + 1e-60)
                                                  / (now + 1e-60));
-                const double deviation = actual - expected;
-                const double severity = levelStepWeight[v] * std::clamp (std::abs (deviation) / levelRedDb, 0.0, 1.0);
 
-                if (severity > t.levelDependence)
-                {
-                    t.levelDependence = severity;
-                    t.levelDeviationDb = deviation;
-                }
+                if (std::abs (actual - expected) > std::abs (worstBand))
+                    worstBand = actual - expected;
             }
+
+            levelSum += levelStepWeight[v] * std::abs (worstBand);
+            levelWeightSum += levelStepWeight[v];
+
+            if (levelStepWeight[v] * std::abs (worstBand) > std::abs (levelMax))
+                levelMax = levelStepWeight[v] * worstBand;
         }
     }
+
+    // Mean over every system and subwoofer level (a problem that only shows
+    // 6 dB off counts for less), and the largest
+    t.levelMeanDb = levelWeightSum > 0.0 ? levelSum / levelWeightSum : 0.0;
+    t.levelDeviationDb = levelMax;
+    t.levelDependence = std::clamp (t.levelMeanDb / std::max (tuning.levelRedDb, 0.1), 0.0, 1.0);
 
     // Two separate risks. Interaction: the worst that a playback system does
     // to the bass, since a mix is only as safe as its worst plausible outcome.
     // Dependence: how much of the bass exists only in the LFE.
     t.interaction = std::clamp (worst, 0.0, 1.0);
-    t.robustness = 100.0 * (1.0 - t.interaction) * (1.0 - t.dependence) * (1.0 - levelDependenceWeight * t.levelDependence);
+    t.robustness = 100.0 * (1.0 - t.interaction) * (1.0 - t.dependence) * (1.0 - tuning.levelDependenceWeight * t.levelDependence);
 
     // Overlap: RMS level of each group per band. A mean per-bin power over a
     // band of width W becomes an RMS power of mean . W . window / 3 (Hann window).

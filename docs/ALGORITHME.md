@@ -231,7 +231,7 @@ en interaction.
 
 | Famille | Cas | Nombre |
 |---|---|---|
-| Cinéma | sub décalé de −5, −2,5, 0, +2,5, +5 ms × polarité normale ou inversée | 10 |
+| Cinéma | sub trop près ou trop loin de 0,9 m et 1,7 m (soit ±2,5 et ±5 ms à 343 m/s), ou en place × polarité normale ou inversée | 10 |
 | Bass management | canaux d'écran croisés vers le sub (Linkwitz-Riley 4ᵉ ordre) à 60, 80, 100 Hz, LFE passe-bas 120 Hz ; avec et sans passe-bas raide à 120 Hz tenant lieu de filtre d'encodeur | 6 |
 | Stéréo | le mix sans son LFE, comme dans tout downmix deux canaux. Seul le LFE est retiré : la façade reste sommée comme dans la référence, pour que la façon dont L, C et R se replient (qui ne dépend pas du LFE) ne compte pas comme une perte | 1 |
 
@@ -245,10 +245,13 @@ portant au moins 20 % du grave) :
 
 `écart = variation réelle − variation attendue d'un LFE sans rapport`
 
+La valeur affichée est la **moyenne** de cet écart sur tous les cas calculés
+(16 systèmes × 8 niveaux, la bande la plus touchée de chaque cas), avec le
+**maximum** entre parenthèses.
+
 Un écart négatif est une annulation qui s'installe, un écart positif un grave
-qui sort d'une annulation. La case passe de l'orange clair au rouge ; rouge à
-partir de 3 dB d'écart pour une erreur de niveau de 1 à 3 dB. Un problème qui
-n'apparaît qu'à ±6 dB compte pour 0,3 : il reste en orange clair.
+qui sort d'une annulation. La case passe de l'orange clair au rouge ; rouge
+quand la moyenne atteint 3 dB. Un cas à ±6 dB compte pour 0,3 dans la moyenne.
 
 Les niveaux négatifs sont gardés : avec un LFE plus fort que la façade et en
 opposition, *baisser* le sub rapproche les deux de l'annulation.
@@ -543,3 +546,14 @@ du son) : bruit blanc ou rose, aucune ; grondement grave (sous 90 Hz), 1 à 3.
     *Noise & Health*, vol. 6, 2004.
 26. RTINGS, méthodes de mesure « Low-Frequency Extension » des téléviseurs et
     barres de son.
+
+## Niveau du LFE et réglages
+
+**Case « LFE +10 dB ».** Elle s'applique partout : spectre, alertes, systèmes
+de lecture et score. Cochée (défaut), le LFE compte 10 dB plus fort qu'un canal
+d'écran, comme en salle [9]. Décochée, il est pris tel qu'enregistré.
+
+**Panneau « Dev ».** Tout ce qui est un choix et non une mesure y est
+réglable : tolérances des trois niveaux, poids d'un sub en retard ou en avance,
+plafond de la dépendance au LFE, poids et bornes de l'infra-grave, poids de la
+dépendance au niveau dans le score et moyenne à laquelle sa case est rouge.

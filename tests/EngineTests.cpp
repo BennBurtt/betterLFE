@@ -1187,7 +1187,20 @@ static void testPlaybackChains()
         check (t.worstChain >= 0 && t.chains[(size_t) t.worstChain].inverted, "identical: the worst system has the subwoofer inverted",
                (double) t.worstChain);
         std::printf ("  identical signals: robustness %.0f, level dependence %.2f (%+.1f dB)\n", t.robustness, t.levelDependence, t.levelDeviationDb);
-        check (t.levelDependence > 0.99, "identical signals: a subwoofer level error swings the bass far beyond what is expected", t.levelDependence);
+        check (t.levelDependence > 0.5 && t.levelMeanDb > 1.5 && std::abs (t.levelDeviationDb) > 20.0,
+               "identical signals: a subwoofer level error swings the bass far beyond what is expected", t.levelMeanDb);
+
+        // Taken as recorded (no +10 dB), the LFE is 10 dB under the screen: nothing cancels any more
+        const auto asRecorded = sim.compute (e.result(), PlaybackSimulator::Level::strong, 0.0);
+        check (asRecorded.lfeBalanceDb < -9.0 && asRecorded.lfeBalanceDb > -11.0, "LFE gain 0 dB: the LFE is weighed as recorded", asRecorded.lfeBalanceDb);
+        check (asRecorded.robustness > t.robustness + 5.0, "LFE gain 0 dB: the score follows", asRecorded.robustness);
+
+        // The choices are adjustable
+        PlaybackSimulator tuned;
+        tuned.tuning.toleranceDb = { { 3.0, 2.0, 4.0 } };
+        tuned.tuning.levelDependenceWeight = 0.0;
+        check (tuned.compute (e.result(), PlaybackSimulator::Level::strong, 0.0).robustness > asRecorded.robustness,
+               "tuning: a wider tolerance raises the score", tuned.compute (e.result(), PlaybackSimulator::Level::strong, 0.0).robustness);
     }
     {
         // LFE 5 ms late in the mix: a subwoofer 5 ms early realigns it. Against the
