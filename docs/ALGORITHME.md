@@ -21,7 +21,7 @@ Répond à : *sur la durée, le LFE est-il lié au canal d'écran, et dans quel 
 
    | Grandeur | Formule |
    |---|---|
-   | Cohérence | `γ² = |Sxy|² / (Sxx·Syy)` [2][3] |
+   | Cohérence | `γ² = abs(Sxy)² / (Sxx·Syy)` [2][3] |
    | Phase | `arg(Sxy)` |
    | Corrélation | `c = Re(Sxy) / √(Sxx·Syy)` |
    | Interaction | `s = 2·Re(Sxy) / (Sxx + Syy)` |
@@ -46,7 +46,7 @@ Répond à : *sur la durée, le LFE est-il lié au canal d'écran, et dans quel 
    le sélecteur au-dessus du spectre : Soft (0,90), Medium (0,75), Strong
    (0,50, par défaut). En mode « Out of
    phase only », seules les valeurs négatives alertent.
-5. Quand le LFE est absent (moins de −100 dBFS RMS pendant 0,5 s), tout ce qui
+5. Quand le LFE est absent (niveau RMS sous -100 dBFS pendant 0,5 s), tout ce qui
    a été mesuré face à lui est effacé : la courbe et les alertes repartent de
    zéro au lieu de garder la trace d'un son terminé. Un LFE très bas, à
    −80 dBFS par exemple, reste analysé normalement.
@@ -138,7 +138,10 @@ elle est aussi dans le LFE, et si oui comment le LFE se place.
    qui y sonne d'autre, `β` la largeur de bande
    efficace qu'ils partagent et `N = 2·B·T` le nombre d'échantillons
    indépendants du segment. Un coup à bande étroite ou noyé dans autre chose
-   reçoit une grande incertitude.
+   reçoit une grande incertitude. Cette borne est un minimum théorique : sur un
+   signal très étroit ou tout en bas du spectre (sous 30 Hz, où une période
+   dépasse 33 ms), l'erreur réelle peut la dépasser, et un décalage de quelques
+   millisecondes n'y a de toute façon guère de sens à l'écoute.
 6. **Verdict fin**, pour les attaques présentes dans le LFE, seulement si la ressemblance des deux transitoires une fois
    réalignés dépasse le seuil (en mode « Out of phase only » : seulement si la
    corrélation sans réalignement est négative au-delà du seuil) :
@@ -182,6 +185,13 @@ détecté dans la queue d'un coup s'attribuait le LFE de ce coup et le lisait
 « en avance ».
 
 ## 3. Robustesse du grave : systèmes de lecture et score
+
+> **Ce que le score garantit, et ce qu'il ne garantit pas.** Les systèmes de
+> lecture sont des modèles *électriques* : retard, polarité, filtrage, niveau.
+> Un score de 100 dit que le mix résiste à ces écarts et au bass management
+> courant. Il ne dit rien de l'acoustique d'une salle : sous la fréquence de
+> Schroeder, les modes propres creusent la réponse de 15 à 20 dB à certaines
+> places, pour la façade comme pour le caisson, quel que soit le mix.
 
 **Question posée :** une fois sorti de l'auditorium, de combien le grave du mix
 s'écarte-t-il de ce qui a été validé, selon la façon dont il est diffusé ?
