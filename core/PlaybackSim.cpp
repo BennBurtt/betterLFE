@@ -205,8 +205,11 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level) const
 
             if (isStereo)
             {
-                // Lo = L + 0.707 C, Ro = R + 0.707 C, no LFE
-                power = m.pL[g] + m.pC[g] + m.pR[g] + std::sqrt (2.0) * (m.reLC[g] + m.reRC[g]);
+                // The mix with its LFE left out, as every two-channel downmix does.
+                // Only the LFE is taken away: the screen channels are summed as
+                // in the reference, so that how L, C and R fold together (which
+                // is not the LFE's doing) does not count as a loss.
+                power = m.pF[g];
             }
             else
             {

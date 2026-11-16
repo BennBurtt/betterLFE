@@ -21,8 +21,9 @@
 //                  (4th-order Linkwitz-Riley at 60, 80 or 100 Hz), LFE low-passed
 //                  at 120 Hz; with and without a steep 120 Hz low-pass standing
 //                  in for an encoder's LFE filter (a model, not Dolby's filter).
-//   Stereo         two-channel downmix of L, C, R; the LFE is left out, as in
-//                  the Dolby and ITU-R BS.775 downmixes.
+//   Stereo         the mix with its LFE left out, as in the Dolby and ITU-R
+//                  BS.775 two-channel downmixes. Only the LFE is removed: the
+//                  screen channels stay summed as in the reference.
 //
 // FROM dB TO PERCEPTION
 //   The difference between a system and the reference is taken per band, in dB.

@@ -1298,6 +1298,27 @@ static void testPlaybackChains()
         }
     }
     {
+        // The same bass in L, C and R, and an unrelated LFE 9 dB below the screen:
+        // the LFE carries about a tenth of the bass, and leaving it out costs
+        // half a dB. How L, C and R fold into two channels is not its doing.
+        const auto bass = noise (10.0, 81);
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        Scene s;
+        s.l = bass;
+        s.c = bass;
+        s.r = bass;
+        s.lfe = scaled (noise (10.0, 82), 3.0 * 0.35 * asHeard);
+        run (e, s);
+        const auto t = sim.compute (e.result());
+        std::printf ("  same bass in L, C, R; LFE %+.1f dB against the screen, %.0f %% of the bass: dependence %.2f, robustness %.0f\n",
+                     t.lfeBalanceDb, 100.0 * t.lfeShare, t.dependence, t.robustness);
+        check (t.lfeShare > 0.07 && t.lfeShare < 0.16, "small LFE under a screen sharing its bass: about a tenth of the bass", t.lfeShare);
+        check (t.dependence < 0.02, "small LFE: leaving it out costs nothing audible", t.dependence);
+        check (std::abs (t.downmixChangeDb) < 0.8, "small LFE: the bass without it is within 0.8 dB", t.downmixChangeDb);
+        check (t.robustness > 95.0, "small unrelated LFE: score near 100", t.robustness);
+    }
+
+    {
         // Equal levels, partly shared
         const auto other = noise (10.0, 75);
 

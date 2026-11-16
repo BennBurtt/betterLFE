@@ -233,7 +233,7 @@ en interaction.
 |---|---|---|
 | Cinéma | sub décalé de −5, −2,5, 0, +2,5, +5 ms × polarité normale ou inversée | 10 |
 | Bass management | canaux d'écran croisés vers le sub (Linkwitz-Riley 4ᵉ ordre) à 60, 80, 100 Hz, LFE passe-bas 120 Hz ; avec et sans passe-bas raide à 120 Hz tenant lieu de filtre d'encodeur | 6 |
-| Stéréo | `Lo = L + 0,707·C`, `Ro = R + 0,707·C`, sans LFE | 1 |
+| Stéréo | le mix sans son LFE, comme dans tout downmix deux canaux. Seul le LFE est retiré : la façade reste sommée comme dans la référence, pour que la façon dont L, C et R se replient (qui ne dépend pas du LFE) ne compte pas comme une perte | 1 |
 
 **Dépendance au niveau du sub (« LFE level dependence »).** Un avertissement,
 qui retire aussi jusqu'à 15 % du score. Chacun des 16 systèmes cinéma et bass management est recalculé avec son
