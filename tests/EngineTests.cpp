@@ -1138,8 +1138,8 @@ static void testPlaybackChains()
 
         // All the bass in the LFE: it follows the subwoofer level exactly, which is expected
         check (t.levelDependence < 0.02, "LFE alone: no level dependence, the bass moves as expected", t.levelDependence);
-        check (std::abs (t.robustness - 100.0 * (1.0 - t.interaction) * (1.0 - t.dependence)) < 1e-9,
-               "robustness = 100 (1 - interaction) (1 - dependence)", t.robustness);
+        check (std::abs (t.robustness - 100.0 * (1.0 - t.interaction) * (1.0 - t.dependence) * (1.0 - 0.15 * t.levelDependence)) < 1e-9,
+               "robustness = 100 (1 - interaction) (1 - dependence) (1 - 0.15 level dependence)", t.robustness);
         std::printf ("  LFE alone: robustness %.0f\n", t.robustness);
     }
     {
@@ -1231,7 +1231,8 @@ static void testPlaybackChains()
             previous = t.dependence;
 
             if (hz <= 20.0)
-                check (t.dependence < 0.01 && t.robustness > 99.0, "20 Hz in the LFE alone: no dependence, score 100", t.robustness);
+                check (t.dependence > 0.20 && t.dependence < 0.27 && t.robustness > 72.0 && t.robustness < 80.0,
+                       "20 Hz in the LFE alone: infra-bass counts for a quarter", t.robustness);
 
             if (hz >= 70.0)
                 check (std::abs (t.dependence - PlaybackSimulator::dependenceCeiling) < 0.01, "70 Hz and above: full dependence", t.dependence);

@@ -44,19 +44,19 @@
 //                   bass-managed systems. The worst case, not an average: a
 //                   mix that cancels on one plausible system is not made safe
 //                   by the systems where it survives.
-//     dependence  = 0.95 x the penalty of the stereo downmix without LFE, i.e.
+//     dependence  = 0.89 x the penalty of the stereo downmix without LFE, i.e.
 //                   of what the bass loses wherever the LFE is missing or
 //                   wrongly set. Infra-bass is left out of it: below 25 Hz
-//                   it does not count at all, from 60 Hz up it counts fully.
+//                   it counts for a quarter, from 60 Hz up it counts fully.
 //
-//     robustness = 100 . (1 - interaction) . (1 - dependence)
+//     robustness = 100 . (1 - interaction) . (1 - dependence) . (1 - 0.15 level dependence)
 //
 //   Anchors: screen alone 100; LFE identical to the screen 0 (an inverted
 //   subwoofer cancels it); LFE alone about 22 (the room alone decides the
 //   bass); 50 when the worst on-time system moves the bass half-way to a
 //   doubling or halving of loudness.
 //
-// LEVEL DEPENDENCE (a warning, not part of the score)
+// LEVEL DEPENDENCE (a warning, and up to 15 % off the score)
 //   The same systems with the subwoofer 1, 2, 3 and 6 dB too loud or too
 //   quiet. With an LFE unrelated to the screen the bass follows the power
 //   sum: that is expected, and so is a bass 1 dB up when all of it is in an
@@ -158,10 +158,14 @@ public:
     // about 25 Hz a tone is close to the threshold of hearing (78.5 dB SPL at
     // 20 Hz, 68.7 dB at 25 Hz in ISO 226) and no television, soundbar or small
     // loudspeaker reproduces it: it is felt in a cinema, and its absence
-    // changes nothing in the downmix. From about 60 Hz up (threshold 37.5 dB at
+    // changes little in the downmix: it counts for a quarter. From about 60 Hz up (threshold 37.5 dB at
     // 63 Hz; a television that reaches 60 Hz is already a good one) it counts
     // fully. In between, the weight rises linearly in octaves.
     static constexpr double infraLoHz = 25.0, infraHiHz = 60.0;
+    static constexpr double infraWeight = 0.25;         // what the infra-bass still counts for: felt, and missed, but not heard
+
+    // The level dependence takes a little off the score: at most this share
+    static constexpr double levelDependenceWeight = 0.15;
 
     // Rating bands and, for each, the level change that doubles loudness
     // (ISO 226:2003 around 80 phon, at 25, 40, 70 and 100 Hz).
@@ -192,7 +196,7 @@ public:
     // With all the bass in the LFE, spread over 20-120 Hz, the score stops at
     // about 22: bad, since the room alone then decides the bass, but not as bad
     // as a cancellation. (The infra-bass part of it is not counted.)
-    static constexpr double dependenceCeiling = 0.95;
+    static constexpr double dependenceCeiling = 0.89;
 
     Translation compute (const Analysis&, Level level = Level::strong) const;
 };

@@ -62,11 +62,12 @@ namespace
         return { lr4AllPass (hz, chain.crossoverHz), lfe };
     }
 
-    // 0 at 25 Hz and below, 1 from 60 Hz up, linear in octaves between.
+    // A quarter at 25 Hz and below, 1 from 60 Hz up, linear in octaves between.
     double stereoRelevance (double hz)
     {
-        return std::clamp (std::log (hz / PlaybackSimulator::infraLoHz) / std::log (PlaybackSimulator::infraHiHz / PlaybackSimulator::infraLoHz),
-                           0.0, 1.0);
+        const double rise = std::clamp (std::log (hz / PlaybackSimulator::infraLoHz)
+                                          / std::log (PlaybackSimulator::infraHiHz / PlaybackSimulator::infraLoHz), 0.0, 1.0);
+        return PlaybackSimulator::infraWeight + (1.0 - PlaybackSimulator::infraWeight) * rise;
     }
 
     int bandOf (double hz)
@@ -295,7 +296,7 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level) const
     // to the bass, since a mix is only as safe as its worst plausible outcome.
     // Dependence: how much of the bass exists only in the LFE.
     t.interaction = std::clamp (worst, 0.0, 1.0);
-    t.robustness = 100.0 * (1.0 - t.interaction) * (1.0 - t.dependence);
+    t.robustness = 100.0 * (1.0 - t.interaction) * (1.0 - t.dependence) * (1.0 - levelDependenceWeight * t.levelDependence);
 
     // Overlap: RMS level of each group per band. A mean per-bin power over a
     // band of width W becomes an RMS power of mean . W . window / 3 (Hann window).

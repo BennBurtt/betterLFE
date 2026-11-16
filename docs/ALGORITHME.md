@@ -235,8 +235,8 @@ en interaction.
 | Bass management | canaux d'écran croisés vers le sub (Linkwitz-Riley 4ᵉ ordre) à 60, 80, 100 Hz, LFE passe-bas 120 Hz ; avec et sans passe-bas raide à 120 Hz tenant lieu de filtre d'encodeur | 6 |
 | Stéréo | `Lo = L + 0,707·C`, `Ro = R + 0,707·C`, sans LFE | 1 |
 
-**Dépendance au niveau du sub (« Level dependence »).** Un avertissement, hors
-score. Chacun des 16 systèmes cinéma et bass management est recalculé avec son
+**Dépendance au niveau du sub (« LFE level dependence »).** Un avertissement,
+qui retire aussi jusqu'à 15 % du score. Chacun des 16 systèmes cinéma et bass management est recalculé avec son
 sub réglé à ±1, ±2, ±3 et ±6 dB. Avec un LFE sans rapport avec la façade, le
 grave suit simplement la somme des puissances : c'est attendu, tout comme un
 grave qui monte de 1 dB quand il est entièrement dans un LFE joué 1 dB plus
@@ -268,9 +268,9 @@ Pour chaque système et chaque bande (20–30, 30–60, 60–90, 90–120 Hz) :
 
 ### 3.6 Score
 
-Deux risques distincts, multipliés :
+Deux risques distincts, multipliés, plus une légère retenue pour la dépendance au niveau du sub (15 % au plus, voir 3.4) :
 
-`robustesse = 100 × (1 − interaction) × (1 − dépendance)`
+`robustesse = 100 × (1 − interaction) × (1 − dépendance) × (1 − 0,15 × dépendance au niveau)`
 
 **Interaction** : la plus forte valeur de `pertinence × pénalité` parmi les
 systèmes cinéma et bass management. C'est le pire cas, pas une moyenne : un mix
@@ -284,25 +284,26 @@ il survit.
 | Cinéma, sub en avance (−5 et −2,5 ms) | 0,25 |
 | Bass management (les six cas) | 1 |
 
-**Dépendance** : `0,95 × pénalité de la stéréo sans LFE`, c'est-à-dire de ce que
-le grave perd partout où le LFE manque ou est mal réglé. Le plafond de 0,95
+**Dépendance** : `0,89 × pénalité de la stéréo sans LFE`, c'est-à-dire de ce que
+le grave perd partout où le LFE manque ou est mal réglé. Le plafond de 0,89
 place un grave large bande entièrement dans le LFE vers 22 : grave (la salle
 seule en décide) sans valoir une annulation.
 
 **L'infra-grave est mis à part.** Ce que la stéréo perd est pondéré par la
-fréquence : rien en dessous de 25 Hz, tout à partir de 60 Hz, et entre les
+fréquence : un quart en dessous de 25 Hz, tout à partir de 60 Hz, et entre les
 deux un poids qui monte linéairement en octaves. Une sinusoïde de 20 Hz seule
-dans le LFE ne coûte donc rien : on ne la ressent qu'en salle, et l'enlever ne
-change rien au downmix stéréo.
+dans le LFE coûte donc peu : on ne la ressent qu'en salle, et l'enlever change
+peu le downmix stéréo. Elle garde un quart de son poids, pour ne pas compter
+pour rien.
 
 | Grave présent uniquement dans le LFE | Dépendance | Score |
 |---|---|---|
-| Sinusoïde à 20 Hz | 0,00 | 100 |
-| 30 Hz | 0,21 | 79 |
-| 40 Hz | 0,52 | 48 |
+| Sinusoïde à 20 Hz | 0,22 | 78 |
+| 30 Hz | 0,37 | 63 |
+| 40 Hz | 0,59 | 41 |
 | 50 Hz | 0,76 | 24 |
-| 70 Hz et plus | 0,95 | 5 |
-| Bruit large bande 20–120 Hz | — | 22 |
+| 70 Hz et plus | 0,89 | 11 |
+| Bruit large bande 20–120 Hz | — | 21 |
 
 Les bornes viennent de trois constats (voir 3.8 bis) : le seuil d'audition
 monte très vite vers le bas (78,5 dB SPL à 20 Hz, 68,7 dB à 25 Hz, 37,5 dB à
@@ -344,13 +345,13 @@ Vérifiées par les tests, sur bruit large bande, au niveau Strong :
 |---|---|
 | Façade seule, LFE muet | 100 |
 | LFE sans rapport avec la façade, 10 dB sous elle à l'écoute | 100 |
-| LFE 10 dB sous la façade, à 30 % copié sur elle | 95 |
+| LFE 10 dB sous la façade, à 30 % copié sur elle | 93 |
 | LFE sans rapport, aussi fort que la façade | 60 |
-| LFE 10 dB sous la façade, à 60 % copié sur elle | 60 |
-| LFE seul | 22 |
+| LFE 10 dB sous la façade, à 60 % copié sur elle | 57 |
+| LFE seul | 21 |
 | LFE sans rapport, 6 dB au-dessus de la façade | 21 |
-| LFE aussi fort que la façade, à 60 % copié sur elle | 19 |
-| LFE 10 dB sous la façade, entièrement copié sur elle | 8 |
+| LFE aussi fort que la façade, à 60 % copié sur elle | 18 |
+| LFE 10 dB sous la façade, entièrement copié sur elle | 7 |
 | LFE identique à la façade | 0 |
 | LFE identique mais en retard de 5 ms | 0 |
 
@@ -367,7 +368,7 @@ grave de près de 6 dB entre un sub en polarité et un sub inversé.
 | Filtres de bass management (Linkwitz-Riley 24 dB/oct) | Modèle courant, variable selon les appareils |
 | Filtre d'encodeur (Butterworth 8ᵉ ordre à 120 Hz) | Modèle : le filtre LFE de Dolby Digital Plus n'est pas public |
 | Étendue des défauts de salle (±5 ms, polarité) | **Hypothèse.** Le rapport SMPTE constate de larges écarts mais ses chiffres ne sont pas publics |
-| Pertinences des systèmes, plafond de dépendance (0,95), bornes de l'infra-grave (25 et 60 Hz) | **Hypothèse** d'ingénierie, suivant la consigne (0 ms ×2, avance ×0,5 ; LFE seul vers 20–25). Aucune statistique publiée sur la fréquence de ces défauts |
+| Pertinences des systèmes, plafond de dépendance (0,89), bornes et poids de l'infra-grave (25 et 60 Hz, un quart), poids de la dépendance au niveau (15 %) | **Hypothèse** d'ingénierie, suivant la consigne (0 ms ×2, avance ×0,5 ; LFE seul vers 20–25). Aucune statistique publiée sur la fréquence de ces défauts |
 | Acoustique de la salle (modes, places) | Non simulée |
 
 ### 3.8 bis Dépendance au LFE : ce que dit la littérature
@@ -388,7 +389,7 @@ Les premières vont dans le même sens : ce qui n'existe que dans le LFE peut ma
 Mesurer la dépendance par ce que perd la stéréo sans LFE est donc la traduction
 directe de ces textes. Aucune ne donne de seuil chiffré (« à partir de quelle
 part le LFE porte trop »), ni de statistique sur la proportion de spectateurs
-écoutant sans caisson : le plafond de 0,95 reste un choix.
+écoutant sans caisson : le plafond de 0,89 reste un choix.
 
 Le repli manuel décrit par Netflix n'est pas simulé : à −10 dB, le LFE y arrive
 20 dB sous son niveau de salle, ce qui change peu le résultat.
@@ -403,11 +404,6 @@ score ; il est la raison d'être de ce témoin.
 **Recouvrement.** Niveau RMS du LFE et de la somme d'écran par bande (30–60,
 60–90, 90–120 Hz). Les marques sous le spectre se réchauffent quand les deux
 jouent à moins de 10 dB l'un de l'autre dans 60–120 Hz.
-
-**Polarité de séance.** Corrélation LFE ↔ L, C, R pondérée par l'énergie,
-cumulée sans oubli depuis la dernière remise à zéro. Signalée sous −0,3 après
-30 s. Elle reflète ce qui a été joué : rejouer une scène la compte plusieurs
-fois.
 
 ## 4. Inertie d'affichage
 

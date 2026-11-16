@@ -31,17 +31,27 @@ juce::Font uiFont (float height, bool bold = false);
 
 //==============================================================================
 /** Clickable speaker: shows the alert level of one screen channel, click to mute. */
-class SpeakerIndicator : public juce::Component
+class SpeakerIndicator : public juce::Component,
+                         public juce::SettableTooltipClient
 {
 public:
     explicit SpeakerIndicator (juce::String labelText);
 
+    /** 0..1: how strongly the alert lamp under the speaker is lit. */
     void setLevel (double newLevel);
 
     /** 0..1, how hard the channel is playing right now: the cone moves with it. */
     void setDrive (double newDrive);
-    bool isActive() const   { return active; }
-    void setActive (bool shouldBeActive);
+
+    /** Click: solo. Option-click: mute. */
+    bool isSolo() const     { return solo; }
+    bool isMuted() const    { return muted; }
+
+    /** Left out of the analysis (muted, or another speaker is soloed): drawn dimmed. */
+    void setDimmed (bool shouldBeDimmed);
+
+    /** Off: the cabinet and cone stay still, whatever plays. */
+    void setMoving (bool shouldMove);
 
     std::function<void()> onToggle;
 
@@ -51,7 +61,7 @@ public:
 private:
     juce::String label;
     double level = 0.0, drive = 0.0;
-    bool active = true;
+    bool solo = false, muted = false, dimmed = false, moving = true;
 };
 
 //==============================================================================
@@ -233,12 +243,14 @@ public:
         float score = 1.0f;         // 0..1, lowest robustness over the column
         bool scored = false;        // false: nothing to score (silence)
         float dependence = 0.0f;    // 0..1, LFE share of the bass
+        float level = 0.0f;         // 0..1, loudest peak over the column (-60 .. 0 dBFS)
     };
 
     static constexpr double secondsPerColumn = 0.5;
     static constexpr int columns = 300;                 // two and a half minutes
 
     void push (const Sample&);
+    void clear();
     void paint (juce::Graphics&) override;
 
 private:

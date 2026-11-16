@@ -76,10 +76,10 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
     buildCards();
 
     for (auto* speaker : { &header.left, &header.centre, &header.right })
-        speaker->onToggle = [this]
-        {
-            engineSettings.mute = { { ! header.left.isActive(), ! header.centre.isActive(), ! header.right.isActive() } };
-        };
+    {
+        speaker->onToggle = [this] { updateSpeakers(); };
+        speaker->setTooltip ("Click: solo. Option-click: mute.");
+    }
 
     // Demo signal: LFE made of low tones; L shares its 28-50 Hz part in phase,
     // R its 70-110 Hz part with flipped polarity, C is unrelated.
@@ -119,7 +119,7 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
 
     setSize (1200, 1000);
 
-    const juce::StringArray cardNames { "source", "analysis", "spectrum", "response", "alert", "transients", "chains" };
+    const juce::StringArray cardNames { "source", "spectrum", "alert", "transients", "chains" };
     showCard (cardNames.indexOf (options.openCard));
 
     lastTick = juce::Time::getMillisecondCounterHiRes() * 0.001;
@@ -230,7 +230,10 @@ void MainComponent::buildCards()
     }
     decay.format = [] (double v) { return juce::String (v, 2) + " s"; };
 
-    for (auto* slider : { &inertia, &integration, &decay })
+    scoreSpeed.format = [] (double v) { return v <= 0.0 ? juce::String ("0 (fast)") : juce::String (v, 2); };
+    scoreSpeed.setTooltip ("0: the score follows the mix as it does now. Towards 1: more and more inertia, up to about ten seconds.");
+
+    for (auto* slider : { &inertia, &integration, &decay, &scoreSpeed })
         slider->refresh();
 
     const auto percentAnd = [] (double percent, double ms)
@@ -287,11 +290,28 @@ void MainComponent::buildCards()
 
 
 
-    resetSessionButton.onClick = [this]
+    // Reset: the history strip and the score start afresh
+    resetButton.setTooltip ("Clears the history strip and restarts the score.");
+    resetButton.onClick = [this]
     {
+        history.clear();
+        historySample = {};
+        historyClock = 0.0;
+
+        for (auto& filter : readoutInertia)
+            filter.reset();
+
+        chainInertia.clear();
+        slowScore = -1.0;
+        displayedScore = -1;
+
         if (engine != nullptr)
+        {
+            engine->resetCorrelation();
             engine->resetGlobal();
+        }
     };
+    addAndMakeVisible (resetButton);
 
     // What each card holds, its size and how it lays its content out
     const auto populate = [this] (int cardIndex, int width, int height, std::initializer_list<juce::Component*> children,
@@ -307,7 +327,7 @@ void MainComponent::buildCards()
         addChildComponent (card);
     };
 
-    populate (sourceCard, 360, 196, { &formatLabel, &formatBox, &deviceLabel, &deviceBox, &statusLabel },
+    populate (sourceCard, 360, 226, { &formatLabel, &formatBox, &deviceLabel, &deviceBox, &statusLabel, &lfeGainToggle },
               [this] (juce::Rectangle<int> r)
               {
                   formatLabel.setBounds (r.removeFromTop (20));
@@ -317,11 +337,23 @@ void MainComponent::buildCards()
                   deviceBox.setBounds (r.removeFromTop (26));
                   r.removeFromTop (4);
                   statusLabel.setBounds (r.removeFromTop (30));
+                  lfeGainToggle.setBounds (r.removeFromTop (26));
               });
 
-    populate (analysisCard, 330, 156, { &fpsLabel, &fpsBox, &windowLabel, &windowBox, &lfeGainToggle, &animationToggle },
+    populate (spectrumCard, 330, 352, { &rangeLabel, &rangeBox, &peakHoldToggle, &tiltToggle, &inertia, &integration,
+                                        &fpsLabel, &fpsBox, &windowLabel, &windowBox, &animationToggle },
               [this] (juce::Rectangle<int> r)
               {
+                  rangeLabel.setBounds (r.removeFromTop (20));
+                  rangeBox.setBounds (r.removeFromTop (26));
+                  r.removeFromTop (6);
+                  peakHoldToggle.setBounds (r.removeFromTop (24));
+                  tiltToggle.setBounds (r.removeFromTop (24));
+                  r.removeFromTop (6);
+                  inertia.setBounds (r.removeFromTop (46));
+                  r.removeFromTop (4);
+                  integration.setBounds (r.removeFromTop (46));
+                  r.removeFromTop (8);
                   auto combos = r.removeFromTop (46);
                   auto fps = combos.removeFromLeft (100);
                   fpsLabel.setBounds (fps.removeFromTop (20));
@@ -329,29 +361,10 @@ void MainComponent::buildCards()
                   windowLabel.setBounds (combos.removeFromTop (20));
                   windowBox.setBounds (combos);
                   r.removeFromTop (8);
-                  lfeGainToggle.setBounds (r.removeFromTop (26));
                   animationToggle.setBounds (r.removeFromTop (26));
               });
 
-    populate (spectrumCard, 250, 156, { &rangeLabel, &rangeBox, &peakHoldToggle, &tiltToggle },
-              [this] (juce::Rectangle<int> r)
-              {
-                  rangeLabel.setBounds (r.removeFromTop (20));
-                  rangeBox.setBounds (r.removeFromTop (26));
-                  r.removeFromTop (8);
-                  peakHoldToggle.setBounds (r.removeFromTop (26));
-                  tiltToggle.setBounds (r.removeFromTop (26));
-              });
-
-    populate (responseCard, 300, 150, { &inertia, &integration },
-              [this] (juce::Rectangle<int> r)
-              {
-                  inertia.setBounds (r.removeFromTop (46));
-                  r.removeFromTop (8);
-                  integration.setBounds (r.removeFromTop (46));
-              });
-
-    populate (alertCard, 320, 156, { &decay, &alertModeBox, &levelWeightToggle },
+    populate (alertCard, 320, 210, { &decay, &alertModeBox, &levelWeightToggle, &scoreSpeed },
               [this] (juce::Rectangle<int> r)
               {
                   decay.setBounds (r.removeFromTop (46));
@@ -359,6 +372,8 @@ void MainComponent::buildCards()
                   alertModeBox.setBounds (r.removeFromTop (26));
                   r.removeFromTop (4);
                   levelWeightToggle.setBounds (r.removeFromTop (24));
+                  r.removeFromTop (8);
+                  scoreSpeed.setBounds (r.removeFromTop (46));
               });
 
     populate (transientsCard, 380, 452, { &transientToggle, &tAttack, &tHoldProfile, &tRelease, &tSensitivity, &tSearch, &tMatch, &tHold,
@@ -377,15 +392,10 @@ void MainComponent::buildCards()
                   transientDefaultsButton.setBounds (r.removeFromTop (24).removeFromRight (90));
               });
 
-    populate (chainsCard, 600, 348, { &chainsView, &resetSessionButton },
-              [this] (juce::Rectangle<int> r)
-              {
-                  resetSessionButton.setBounds (r.removeFromBottom (24).removeFromRight (110));
-                  chainsView.setBounds (r.withTrimmedBottom (-24));
-                  resetSessionButton.toFront (false);
-              });
+    populate (chainsCard, 600, 300, { &chainsView },
+              [this] (juce::Rectangle<int> r) { chainsView.setBounds (r); });
 
-    const char* names[] = { "Source", "Analysis", "Spectrum", "Response", "Alert", "Transients", "Playback chains" };
+    const char* names[] = { "Source", "Spectrum", "Phase Alert", "Transients", "Playback chains" };
 
     for (int i = 0; i < numCards; ++i)
     {
@@ -434,7 +444,8 @@ void MainComponent::resized()
     header.setBounds (area.removeFromTop (juce::jmax (110, juce::jmin (headerHeight, getHeight() / 6))));
 
     auto bar = area.removeFromTop (barHeight).reduced (10, 6);
-    const int widths[numCards] = { 90, 90, 90, 90, 80, 100, 140 };
+    const int widths[numCards] = { 90, 90, 104, 100, 140 };
+    resetButton.setBounds (bar.removeFromRight (80));
 
     for (int i = 0; i < numCards; ++i)
     {
@@ -645,6 +656,20 @@ void MainComponent::feedDemoSignal (int numFrames)
 }
 
 //==============================================================================
+void MainComponent::updateSpeakers()
+{
+    // A soloed speaker leaves the others out; a muted one is out whatever happens
+    SpeakerIndicator* speakers[] = { &header.left, &header.centre, &header.right };
+    const bool anySolo = header.left.isSolo() || header.centre.isSolo() || header.right.isSolo();
+
+    for (size_t c = 0; c < 3; ++c)
+    {
+        const bool out = speakers[c]->isMuted() || (anySolo && ! speakers[c]->isSolo());
+        speakers[c]->setDimmed (out);
+        engineSettings.mute[c] = out;
+    }
+}
+
 void MainComponent::meterChannels (const float* interleaved, int numFrames)
 {
     const int index[3] = { chL, chC, chR };
@@ -658,6 +683,8 @@ void MainComponent::meterChannels (const float* interleaved, int numFrames)
 
         for (size_t c = 0; c < 3; ++c)
             framePeak[c] = juce::jmax (framePeak[c], (double) std::abs (in[index[c]]));
+
+        anyFramePeak = juce::jmax (anyFramePeak, (double) std::abs (in[chLFE]));
 
         const double sum = (double) in[chL] + in[chC] + in[chR] + 3.162 * in[chLFE];
         bassState[0] += coeff * (sum - bassState[0]);
@@ -712,6 +739,12 @@ void MainComponent::timerCallback()
     }
 
     header.setLevel (level);
+
+    // Waveform of the history strip: the loudest peak of the column, -60 .. 0 dBFS
+    anyFramePeak = juce::jmax (anyFramePeak, framePeak[0], framePeak[1], framePeak[2]);
+    historySample.level = juce::jmax (historySample.level,
+                                      (float) juce::jlimit (0.0, 1.0, (juce::Decibels::gainToDecibels (anyFramePeak, -200.0) + 60.0) / 60.0));
+    anyFramePeak = 0.0;
 
     // Bass under 200 Hz against the loudest of the last seconds: the background pulses at any level
     bassRecentPeak = juce::jmax (bassFramePeak, bassRecentPeak * std::exp (-dt / 4.0));
@@ -786,11 +819,20 @@ void MainComponent::timerCallback()
                 filter.reset();
 
             chainInertia.clear();
+            slowScore = -1.0;
             displayedScore = -1;
         }
         else
         {
             t.robustness = readoutInertia[0].update (t.robustness, dt);
+
+            // Score speed: an extra, plain smoothing on top, up to about ten seconds
+            if (scoreSpeed.value() > 0.0 && slowScore >= 0.0)
+                slowScore += (1.0 - std::exp (-dt / (10.0 * scoreSpeed.value() * scoreSpeed.value()))) * (t.robustness - slowScore);
+            else
+                slowScore = t.robustness;
+
+            t.robustness = slowScore;
             t.interaction = readoutInertia[1].update (t.interaction, dt);
             t.dependence = readoutInertia[2].update (t.dependence, dt);
             t.lfeBalanceDb = readoutInertia[3].update (t.lfeBalanceDb, dt);
@@ -903,6 +945,7 @@ void MainComponent::loadState()
     integration.setValue (settings->getDoubleValue ("integration", 2.0));
     levelButtons[(size_t) juce::jlimit (0, 2, settings->getIntValue ("alertSensitivity", 3) - 1)].setToggleState (true, juce::dontSendNotification);
     decay.setValue (settings->getDoubleValue ("decay", 1.0));
+    scoreSpeed.setValue (settings->getDoubleValue ("scoreSpeed", 0.0));
     transientToggle.setToggleState (settings->getBoolValue ("transientCheck", false), juce::dontSendNotification);
     tAttack.setValue (settings->getDoubleValue ("transientAttack", 40.0));
     tHoldProfile.setValue (settings->getDoubleValue ("transientHoldProfile", 25.0));
@@ -939,6 +982,7 @@ void MainComponent::saveState()
     settings->setValue ("integration", integration.value());
     settings->setValue ("alertSensitivity", (int) currentLevel() + 1);
     settings->setValue ("decay", decay.value());
+    settings->setValue ("scoreSpeed", scoreSpeed.value());
     settings->setValue ("transientCheck", transientToggle.getToggleState());
     settings->setValue ("transientAttack", tAttack.value());
     settings->setValue ("transientHoldProfile", tHoldProfile.value());

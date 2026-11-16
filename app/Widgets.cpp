@@ -88,27 +88,43 @@ void SpeakerIndicator::setDrive (double newDrive)
     }
 }
 
-void SpeakerIndicator::setActive (bool shouldBeActive)
+void SpeakerIndicator::setDimmed (bool shouldBeDimmed)
 {
-    active = shouldBeActive;
-    repaint();
+    if (dimmed != shouldBeDimmed)
+    {
+        dimmed = shouldBeDimmed;
+        repaint();
+    }
+}
+
+void SpeakerIndicator::setMoving (bool shouldMove)
+{
+    if (moving != shouldMove)
+    {
+        moving = shouldMove;
+        repaint();
+    }
 }
 
 void SpeakerIndicator::mouseDown (const juce::MouseEvent& e)
 {
-    if (e.mods.isLeftButtonDown())
-    {
-        setActive (! active);
+    if (! e.mods.isLeftButtonDown())
+        return;
 
-        if (onToggle)
-            onToggle();
-    }
+    // Click: solo. Option-click: mute.
+    if (e.mods.isAltDown())     muted = ! muted;
+    else                        solo = ! solo;
+
+    repaint();
+
+    if (onToggle)
+        onToggle();
 }
 
 void SpeakerIndicator::paint (juce::Graphics& g)
 {
     g.setOpacity (1.0f);
-    g.beginTransparencyLayer (active ? 1.0f : 0.4f);
+    g.beginTransparencyLayer (dimmed ? 0.4f : 1.0f);
 
     const float wAvail = (float) getWidth(), hAvail = (float) getHeight();
     const float aspect = 0.65f;
@@ -119,22 +135,33 @@ void SpeakerIndicator::paint (juce::Graphics& g)
 
     const juce::Rectangle<float> r ((wAvail - drawW) / 2.0f, (hAvail - drawH) / 2.0f, drawW, drawH);
 
-    const double shown = active ? level : 0.0;
-    const float push = active ? (float) drive : 0.0f;      // the channel playing: the cabinet swells a little, the cone more
+    const bool lit = solo && ! dimmed;                              // soloed: the speaker shines
+    const double shown = dimmed ? 0.0 : level;
+    const float push = (moving && ! dimmed) ? (float) drive : 0.0f; // the channel playing: the cabinet swells a little, the cone more
 
     const float cx = r.getCentreX();
     const float cabH = r.getHeight() * 0.60f * (1.0f + 0.035f * push), cabW = cabH * 0.55f;
     const float cabX = cx - cabW / 2.0f, cabY = r.getY() + r.getHeight() * 0.05f - r.getHeight() * 0.012f * push;
 
-    const juce::Colour edge (205, 205, 205);
+    const juce::Colour edge = lit ? juce::Colour (255, 255, 255) : juce::Colour (205, 205, 205);
     const float line = juce::jmax (1.2f, drawW * 0.022f);
+    const juce::Rectangle<float> cabinet (cabX, cabY, cabW, cabH);
+
+    if (lit)
+    {
+        // Halo around a soloed speaker
+        for (int ring = 3; ring >= 1; --ring)
+        {
+            g.setColour (juce::Colour (150, 225, 255).withAlpha (0.10f));
+            g.drawRoundedRectangle (cabinet.expanded ((float) ring * line * 1.4f), drawW * 0.07f + (float) ring * line, line * 2.2f);
+        }
+    }
 
     // Cabinet
-    const juce::Rectangle<float> cabinet (cabX, cabY, cabW, cabH);
-    g.setColour (juce::Colour (16, 16, 16));
+    g.setColour (lit ? juce::Colour (30, 42, 48) : juce::Colour (16, 16, 16));
     g.fillRoundedRectangle (cabinet, drawW * 0.07f);
     g.setColour (edge);
-    g.drawRoundedRectangle (cabinet, drawW * 0.07f, line);
+    g.drawRoundedRectangle (cabinet, drawW * 0.07f, lit ? line * 1.3f : line);
 
     // Tweeter and woofer
     const auto driver = [&] (float centreY, float radius, juce::Colour fill)
@@ -156,32 +183,35 @@ void SpeakerIndicator::paint (juce::Graphics& g)
         g.fillEllipse (cx - cap, cabY + cabH * 0.68f - cap, 2.0f * cap, 2.0f * cap);
     }
 
-    // Alert arc under the cabinet: a thin line that takes colour
-    const float arcW = cabW * 2.1f, arcH = r.getHeight() * 0.22f;
+    // Alert lamp under the cabinet: an arc of fixed size that lights up, like a bulb
+    const float arcW = r.getHeight() * 0.60f * 0.55f * 2.1f, arcH = r.getHeight() * 0.22f;
     const juce::Rectangle<float> arcRect (cx - arcW / 2.0f, r.getY() + r.getHeight() * 0.69f, arcW, arcH);
 
     juce::Path arc;
     arc.addArc (arcRect.getX(), arcRect.getY(), arcRect.getWidth(), arcRect.getHeight(),
                 juce::MathConstants<float>::pi * 2.0f / 3.0f, juce::MathConstants<float>::pi * 4.0f / 3.0f, true);
 
-    const float baseThick = juce::jmax (1.2f, r.getHeight() * 0.012f);
+    const float thick = juce::jmax (1.8f, r.getHeight() * 0.018f);
     const auto rounded = [] (float t) { return juce::PathStrokeType (t, juce::PathStrokeType::curved, juce::PathStrokeType::rounded); };
 
-    g.setColour (juce::Colour (130, 130, 130).withAlpha (0.35f));
-    g.strokePath (arc, rounded (baseThick));
+    g.setColour (juce::Colour (120, 120, 120).withAlpha (0.35f));      // the lamp, off
+    g.strokePath (arc, rounded (thick));
 
     if (shown > 0.01)
     {
-        const auto alert = juce::Colour ((juce::uint8) 255, (juce::uint8) std::lround (255.0 * (1.0 - shown)), (juce::uint8) 0,
-                                         (juce::uint8) std::lround (90.0 + 165.0 * shown));
-        g.setColour (alert.withMultipliedAlpha (0.22f));
-        g.strokePath (arc, rounded (baseThick * (2.6f + 1.6f * (float) shown)));     // faint glow
-        g.setColour (alert);
-        g.strokePath (arc, rounded (baseThick * (1.3f + 0.9f * (float) shown)));
+        // Yellow to red with the alert; only the light changes, never the size
+        const auto alert = juce::Colour ((juce::uint8) 255, (juce::uint8) std::lround (255.0 * (1.0 - shown)), (juce::uint8) 0);
+        const float light = (float) juce::jlimit (0.0, 1.0, 0.25 + 0.75 * shown);
+        g.setColour (alert.withAlpha (0.16f * light));
+        g.strokePath (arc, rounded (thick * 4.0f));
+        g.setColour (alert.withAlpha (0.30f * light));
+        g.strokePath (arc, rounded (thick * 2.2f));
+        g.setColour (alert.withAlpha (light));
+        g.strokePath (arc, rounded (thick));
     }
 
     // Label
-    g.setColour (juce::Colour (235, 235, 235));
+    g.setColour (lit ? juce::Colours::white : juce::Colour (235, 235, 235));
     g.setFont (uiFont (juce::jmax (11.0f, r.getHeight() * 0.19f), true));
     g.drawText (label, juce::Rectangle<float> (cx - arcW / 2.0f, r.getY() + r.getHeight() * 0.66f, arcW, r.getHeight() * 0.30f),
                 juce::Justification::centred, false);
@@ -200,6 +230,12 @@ HeaderBar::HeaderBar()
 void HeaderBar::setAnimationEnabled (bool shouldAnimate)
 {
     animated = shouldAnimate;
+
+    // One switch for everything that moves: the background and the speakers.
+    // The alert lamps are not part of it.
+    for (auto* speaker : { &left, &centre, &right })
+        speaker->setMoving (animated);
+
     repaint();
 }
 
@@ -237,20 +273,25 @@ void HeaderBar::paint (juce::Graphics& g)
                                              juce::Colour (4, 4, 4), 0.0f, h, false));
     g.fillRect (bounds);
 
-    // Drifting glows in the colours of the app: deep blue, teal, green, olive.
-    // Each one wanders on its own path and breathes at its own pace, so the
-    // background moves at any level; the input level only brightens it.
+    // Glows in the colours of the app: deep blue, teal, green, olive. Each one
+    // wanders sideways on its own path and breathes at its own pace, so the
+    // background moves at any level. The bass lifts them: at rest they lie
+    // along the bottom edge, and each hit sends them up the banner.
+    // With the animation off, the same picture is drawn, still: nothing in
+    // it may depend on the signal, or a speaker repainting on its own would
+    // show a patch that no longer matches the rest.
     struct Glow { juce::Colour colour; double x, y, sx, sy, px, py, size, breathe; };
 
-    static const Glow glows[] = { { juce::Colour (12, 60, 82),  0.22, 0.55, 0.20, 0.35, 0.21, 0.33, 0.55, 0.37 },
-                                  { juce::Colour (18, 84, 88),  0.50, 0.70, 0.30, 0.30, 0.16, 0.27, 0.62, 0.29 },
-                                  { juce::Colour (38, 96, 52),  0.74, 0.50, 0.22, 0.40, 0.25, 0.19, 0.50, 0.43 },
-                                  { juce::Colour (84, 88, 26),  0.90, 0.75, 0.16, 0.30, 0.13, 0.31, 0.38, 0.23 },
-                                  { juce::Colour (10, 40, 70),  0.08, 0.30, 0.12, 0.40, 0.18, 0.24, 0.42, 0.34 } };
+    static const Glow glows[] = { { juce::Colour (12, 60, 82),  0.22, 0.30, 0.20, 0.10, 0.21, 0.33, 0.55, 0.37 },
+                                  { juce::Colour (18, 84, 88),  0.50, 0.20, 0.30, 0.10, 0.16, 0.27, 0.62, 0.29 },
+                                  { juce::Colour (38, 96, 52),  0.74, 0.35, 0.22, 0.12, 0.25, 0.19, 0.50, 0.43 },
+                                  { juce::Colour (84, 88, 26),  0.90, 0.25, 0.16, 0.10, 0.13, 0.31, 0.38, 0.23 },
+                                  { juce::Colour (10, 40, 70),  0.08, 0.15, 0.12, 0.12, 0.18, 0.24, 0.42, 0.34 } };
 
-    const double t = animated ? phase : 0.0;
-    const float hit = (float) bass;                         // 0..1, the bass right now
-    const float brightness = 0.50f + 0.18f * (float) level + 0.32f * hit;
+    const double t = phase;                                 // frozen when the animation is off
+    const float hit = animated ? (float) bass : 0.35f;      // 0..1, the bass right now
+    const float loud = animated ? (float) level : 0.3f;
+    const float brightness = 0.45f + 0.15f * loud + 0.30f * hit;
     const double twoPi = juce::MathConstants<double>::twoPi;
     int index = 0;
 
@@ -258,9 +299,11 @@ void HeaderBar::paint (juce::Graphics& g)
     {
         const double offset = 1.7 * index++;
         const float cx = w * (float) (glow.x + glow.sx * std::sin (twoPi * glow.px * 0.35 * t + offset));
-        const float cy = h * (float) (glow.y + glow.sy * std::cos (twoPi * glow.py * 0.35 * t + 2.0 * offset));
-        const float radius = w * (float) (glow.size * (0.55 + 0.20 * std::sin (twoPi * glow.breathe * 0.4 * t + offset)))
-                               * (1.0f + 0.35f * hit);     // each bass hit swells the glows
+        const float wander = (float) (glow.sy * std::cos (twoPi * glow.py * 0.35 * t + 2.0 * offset));
+        const float low = h * (1.10f + wander), high = h * ((float) glow.y + wander);     // resting place, and where a full hit takes it
+        const float cy = low + (high - low) * hit;
+        const float radius = w * (float) (glow.size * (0.50 + 0.18 * std::sin (twoPi * glow.breathe * 0.4 * t + offset)))
+                               * (0.80f + 0.35f * hit);
 
         juce::ColourGradient gradient (glow.colour.withAlpha (brightness), cx, cy,
                                        glow.colour.withAlpha (0.0f), cx + radius, cy, true);
@@ -269,12 +312,13 @@ void HeaderBar::paint (juce::Graphics& g)
         g.fillRect (bounds);
     }
 
-    // Two slow waves across the banner, like the one in the logo
+    // Two slow waves, like the one in the logo: they too rise with the bass
     for (int k = 0; k < 2; ++k)
     {
         juce::Path wave;
         const double speed = (k == 0 ? 0.55 : -0.38), length = (k == 0 ? 2.2 : 3.4);
-        const float base = h * (k == 0 ? 0.62f : 0.48f), swing = h * (0.10f + 0.04f * (float) level + 0.22f * hit);
+        const float rest = h * (k == 0 ? 0.90f : 0.82f), top = h * (k == 0 ? 0.42f : 0.30f);
+        const float base = rest + (top - rest) * hit, swing = h * (0.06f + 0.03f * loud + 0.16f * hit);
 
         for (int step = 0; step * 6.0f <= w + 6.0f; ++step)
         {
@@ -287,7 +331,7 @@ void HeaderBar::paint (juce::Graphics& g)
             else            wave.lineTo (x, y);
         }
 
-        g.setColour ((k == 0 ? juce::Colour (70, 190, 190) : juce::Colour (150, 190, 90)).withAlpha (0.10f + 0.06f * (float) level + 0.22f * hit));
+        g.setColour ((k == 0 ? juce::Colour (70, 190, 190) : juce::Colour (150, 190, 90)).withAlpha (0.10f + 0.05f * loud + 0.22f * hit));
         g.strokePath (wave, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
 
@@ -872,15 +916,18 @@ void CorrelationPlot::paint (juce::Graphics& g)
         }
 
         // L and R glow; C stays a plain line between them
+        // L shines widest, so that it still shows where R runs over it
         if (c != 1)
         {
-            g.setColour (colours[c].withAlpha (0.10f));
-            g.strokePath (line, juce::PathStrokeType (9.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-            g.setColour (colours[c].withAlpha (0.22f));
-            g.strokePath (line, juce::PathStrokeType (4.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            const float wide = c == 0 ? 15.0f : 9.0f, narrow = c == 0 ? 7.0f : 4.5f;
+            const auto glowColour = c == 0 ? colours[c].brighter (0.3f) : colours[c];
+            g.setColour (glowColour.withAlpha (c == 0 ? 0.16f : 0.10f));
+            g.strokePath (line, juce::PathStrokeType (wide, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.setColour (glowColour.withAlpha (c == 0 ? 0.34f : 0.22f));
+            g.strokePath (line, juce::PathStrokeType (narrow, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         }
 
-        g.setColour (colours[c]);
+        g.setColour (c == 0 ? colours[c].brighter (0.25f) : colours[c]);
         g.strokePath (line, juce::PathStrokeType (c == 1 ? 1.7f : 2.0f, juce::PathStrokeType::curved));
     }
 
@@ -1076,7 +1123,7 @@ void ChainsView::paint (juce::Graphics& g)
         auto row = area.removeFromTop (rowHeight + 2.0f);
         g.setColour (theme::dimText);
         g.setFont (uiFont (12.5f));
-        g.drawText ("Level dependence", row.removeFromLeft (labelWidth + 40.0f), juce::Justification::centredLeft);
+        g.drawText ("LFE level dependence", row.removeFromLeft (labelWidth + 40.0f), juce::Justification::centredLeft);
 
         const double severity = t.hasBass ? juce::jlimit (0.0, 1.0, t.levelDependence) : 0.0;
         const auto quiet = juce::Colour (0xff2a2a2a), lightOrange = juce::Colour (0xffffb347), orange = juce::Colour (0xffff8a00),
@@ -1114,21 +1161,14 @@ void ChainsView::paint (juce::Graphics& g)
         g.setColour (severity > 0.3 ? juce::Colours::white : theme::text);
         g.setFont (uiFont (12.5f, severity > 0.3));
         g.drawText (text, box, juce::Justification::centred);
+
+        // The explanation gets its own line, full width
+        auto noteRow = area.removeFromTop (18.0f);
+        noteRow.removeFromLeft (labelWidth + 40.0f);
         g.setColour (theme::dimText);
         g.setFont (uiFont (11.5f));
-        g.drawText (note, row.withTrimmedLeft (10.0f), juce::Justification::centredLeft);
-        area.removeFromTop (2.0f);
+        g.drawFittedText (note, noteRow.toNearestInt(), juce::Justification::centredLeft, 1);
     }
-
-    const auto signedValue = [] (double v) { return (v >= 0.0 ? "+" : "") + juce::String (v, 2); };
-    const int seconds = (int) info.sessionSeconds;
-    const bool enough = info.sessionSeconds >= polarityMinSeconds;
-    const bool opposed = enough && (info.sessionCorrelation[0] < polarityWarning || info.sessionCorrelation[1] < polarityWarning
-                                      || info.sessionCorrelation[2] < polarityWarning);
-    line ("Session polarity, LFE vs", "L " + signedValue (info.sessionCorrelation[0]) + "   C " + signedValue (info.sessionCorrelation[1])
-                                        + "   R " + signedValue (info.sessionCorrelation[2]) + "     over "
-                                        + juce::String (seconds / 60) + ":" + juce::String (seconds % 60).paddedLeft ('0', 2),
-          opposed);
 }
 
 //==============================================================================
@@ -1139,6 +1179,13 @@ void HistoryStrip::push (const Sample& sample)
 
     samples[writePos] = sample;
     writePos = (writePos + 1) % samples.size();
+    repaint();
+}
+
+void HistoryStrip::clear()
+{
+    samples.clear();
+    writePos = 0;
     repaint();
 }
 
@@ -1154,6 +1201,21 @@ void HistoryStrip::paint (juce::Graphics& g)
     const int lanes = 3;
     const float lane = area.getHeight() / (float) lanes;
 
+    // Behind the lanes: the level of what was played, as a white waveform
+    if (! samples.empty())
+    {
+        const float width = area.getWidth() / (float) columns, mid = area.getCentreY(), half = area.getHeight() / 2.0f;
+        g.setColour (juce::Colours::white.withAlpha (0.30f));
+
+        for (int c = 0; c < columns; ++c)
+        {
+            const float level = samples[(writePos + (size_t) c) % samples.size()].level;
+
+            if (level > 0.01f)
+                g.fillRect (area.getX() + width * (float) c, mid - half * level, juce::jmax (1.0f, width - 0.6f), 2.0f * half * level);
+        }
+    }
+
     g.setFont (uiFont (10.5f));
 
     for (int i = 0; i < lanes; ++i)
@@ -1162,7 +1224,7 @@ void HistoryStrip::paint (juce::Graphics& g)
         g.setColour (theme::dimText);
         g.drawText (names[i], juce::Rectangle<float> (4.0f, row.getY() - 2.0f, area.getX() - 10.0f, row.getHeight() + 4.0f),
                     juce::Justification::centredRight);
-        g.setColour (juce::Colour (0xff1c1c1c));
+        g.setColour (juce::Colour (0xff1c1c1c).withAlpha (0.45f));      // see-through: the waveform shows behind
         g.fillRect (row);
 
         if (samples.empty())
@@ -1185,7 +1247,7 @@ void HistoryStrip::paint (juce::Graphics& g)
                 const auto red = juce::Colour (0xffe53935), orange = juce::Colour (0xffff9800), green = juce::Colour (0xff43a047);
                 const auto colour = s.score < 0.5f ? red.interpolatedWith (orange, s.score / 0.5f)
                                                    : orange.interpolatedWith (green, (s.score - 0.5f) / 0.5f);
-                g.setColour (colour);
+                g.setColour (colour.withAlpha (0.80f));
                 g.fillRect (x, row.getY(), width + 0.5f, row.getHeight());
                 continue;
             }

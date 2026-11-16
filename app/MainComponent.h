@@ -51,7 +51,7 @@ public:
     void resized() override;
 
 private:
-    enum CardId { sourceCard, analysisCard, spectrumCard, responseCard, alertCard, transientsCard, chainsCard, numCards };
+    enum CardId { sourceCard, spectrumCard, alertCard, transientsCard, chainsCard, numCards };
 
     void timerCallback() override;
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
@@ -93,8 +93,8 @@ private:
 
     // One button per panel; a panel opens over the analyzer, one at a time
     std::array<juce::TextButton, numCards> cardButtons;
-    std::array<Card, numCards> cards { { Card ("Source & Format"), Card ("Analysis"), Card ("Spectrum"),
-                                         Card ("Responsiveness"), Card ("Alert"), Card ("Transients"), Card ("Playback chains") } };
+    std::array<Card, numCards> cards { { Card ("Source & Format"), Card ("Spectrum"), Card ("Phase Alert"),
+                                         Card ("Transients"), Card ("Playback chains") } };
     int openCard = -1;
 
     juce::Label formatLabel { {}, "Channel Format:" }, deviceLabel { {}, "Input Device:" },
@@ -115,7 +115,10 @@ private:
                    tHold { "Display time:", 1, 20, 0.5, 4 };
     juce::TextButton transientDefaultsButton { "Defaults" };
     ChainsView chainsView;
-    juce::TextButton resetSessionButton { "Reset session" };
+    LabelledSlider scoreSpeed { "Score speed:", 0, 1, 0.05, 0 };
+    juce::TextButton resetButton { "Reset" };
+    double slowScore = -1.0;        // the score after the extra "Score speed" smoothing; negative: not started
+    void updateSpeakers();
 
     double lastTick = 0.0, engineRate = 0.0, demoTime = 0.0;
     double historyClock = 0.0;
@@ -133,6 +136,7 @@ private:
     void meterChannels (const float* interleaved, int numFrames);
     std::array<double, 3> framePeak { { 0.0, 0.0, 0.0 } }, recentPeak { { 0.0, 0.0, 0.0 } }, coneDrive { { 0.0, 0.0, 0.0 } };
     double bassState[2] = { 0.0, 0.0 }, bassFramePeak = 0.0, bassRecentPeak = 0.0, bassDrive = 0.0;
+    double anyFramePeak = 0.0;      // loudest sample of the frame over the four channels, for the waveform of the history
     int inputGeneration = -1, framesShown = 0;
     bool restoring = false;
     std::vector<float> scratch;
