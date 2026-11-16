@@ -45,6 +45,19 @@ void LabelledSlider::refresh()
     valueLabel.setText (format ? format (slider.getValue()) : juce::String (slider.getValue()), juce::dontSendNotification);
 }
 
+void LabelledSlider::paint (juce::Graphics& g)
+{
+    if (highlightTo <= highlightFrom)
+        return;
+
+    // A lighter stretch behind the track
+    const auto track = slider.getBounds().toFloat();
+    const float x0 = track.getX() + (float) slider.getPositionOfValue (highlightFrom);
+    const float x1 = track.getX() + (float) slider.getPositionOfValue (highlightTo);
+    g.setColour (juce::Colours::white.withAlpha (0.16f));
+    g.fillRoundedRectangle (x0, track.getCentreY() - 8.0f, x1 - x0, 16.0f, 4.0f);
+}
+
 void LabelledSlider::resized()
 {
     auto area = getLocalBounds();
@@ -394,7 +407,7 @@ void MainComponent::buildCards()
                   transientDefaultsButton.setBounds (r.removeFromTop (24).removeFromRight (90));
               });
 
-    populate (chainsCard, 600, 300, { &chainsView },
+    populate (chainsCard, 600, 356, { &chainsView },
               [this] (juce::Rectangle<int> r) { chainsView.setBounds (r); });
 
     // Dev panel
@@ -405,6 +418,15 @@ void MainComponent::buildCards()
         dTolSoft.format = dTolMedium.format = dTolStrong.format = dLevelRed.format = db;
         dLate.format = dEarly.format = dCeiling.format = dInfraWeight.format = dLevelWeight.format = plain;
         dInfraLo.format = dInfraHi.format = hz;
+        dListening.format = [] (double v) { return juce::String ((int) v) + " dB(C)"; };
+        dListening.setHighlight (76.0, 85.0);
+        dListening.setTooltip ("The sound pressure level a screen channel gives with the calibration signal at -20 dBFS RMS. "
+                               "85 dB(C) is the cinema calibration; 76 to 85 (lighter) are the levels used on dubbing stages.\n"
+                               "It sets how loud the bass is heard, hence how many dB double its loudness (ISO 226).");
+        devLoudnessLabel.setFont (uiFont (11.5f));
+        devLoudnessLabel.setColour (juce::Label::textColourId, theme::dimText);
+        devLoudnessLabel.setJustificationType (juce::Justification::topLeft);
+        devLoudnessLabel.setMinimumHorizontalScale (1.0f);
 
         dTolSoft.setTooltip ("How many dB a band may change on a playback system before it starts to count, at each level.");
         dCeiling.setTooltip ("How much of the score a bass entirely in the LFE can take away. 0.89 puts 'LFE alone' near 21.");
@@ -432,6 +454,7 @@ void MainComponent::buildCards()
             dInfraHi.setValue (d.infraHiHz);
             dLevelWeight.setValue (d.levelDependenceWeight);
             dLevelRed.setValue (d.levelRedDb);
+            dListening.setValue (d.listeningLevelDbC);
         };
 
         auto& card = cards[(size_t) devCard];
@@ -440,8 +463,12 @@ void MainComponent::buildCards()
             card.addAndMakeVisible (slider);
 
         card.addAndMakeVisible (devDefaultsButton);
+        card.addAndMakeVisible (devLoudnessLabel);
         card.onLayout = [this] (juce::Rectangle<int> r)
         {
+            auto bottom = r.removeFromBottom (48);
+            devDefaultsButton.setBounds (bottom.removeFromRight (100).removeFromTop (26).withTrimmedLeft (10));
+            devLoudnessLabel.setBounds (bottom);
             auto leftColumn = r.removeFromLeft (r.getWidth() / 2).withTrimmedRight (10);
             auto rightColumn = r.withTrimmedLeft (10);
             int index = 0;
@@ -453,9 +480,8 @@ void MainComponent::buildCards()
                 column.removeFromTop (4);
             }
 
-            devDefaultsButton.setBounds (rightColumn.removeFromTop (30).removeFromRight (90).withTrimmedTop (6));
         };
-        card.setSize (640, 352);
+        card.setSize (680, 404);
         addChildComponent (card);
     }
 
@@ -723,7 +749,7 @@ void MainComponent::feedDemoSignal (int numFrames)
 std::vector<LabelledSlider*> MainComponent::devSliders()
 {
     return { &dTolSoft, &dTolMedium, &dTolStrong, &dLate, &dEarly, &dCeiling,
-             &dInfraWeight, &dInfraLo, &dInfraHi, &dLevelWeight, &dLevelRed };
+             &dInfraWeight, &dInfraLo, &dInfraHi, &dLevelWeight, &dLevelRed, &dListening };
 }
 
 void MainComponent::applyDevSettings()
@@ -738,6 +764,7 @@ void MainComponent::applyDevSettings()
     t.infraHiHz = dInfraHi.value();
     t.levelDependenceWeight = dLevelWeight.value();
     t.levelRedDb = dLevelRed.value();
+    t.listeningLevelDbC = dListening.value();
 }
 
 void MainComponent::updateSpeakers()
@@ -939,6 +966,25 @@ void MainComponent::timerCallback()
         if (cards[chainsCard].isVisible())
             chainsView.update (info);
 
+        if (cards[devCard].isVisible())
+        {
+            // What the listening level makes of the bass playing now, band by band
+            juce::String text = "Bass playing now, per band:  ";
+            const char* bands[] = { "20-30 Hz", "30-60 Hz", "60-90 Hz", "90-120 Hz" };
+
+            for (size_t b = 0; b < 4; ++b)
+                text << bands[b] << "  " << (! t.hasBass ? juce::String ("--")
+                                                         : juce::String (juce::roundToInt (t.bandSplDb[b])) + " dB SPL, "
+                                                             + (t.bandPhon[b] < 20.0 ? juce::String ("under 20 phon")
+                                                                                     : juce::String (juce::roundToInt (t.bandPhon[b])) + " phon")
+                                                             + ", " + juce::String (t.bandDoublingDb[b], 1) + " dB double it")
+                     << (b == 1 ? "\n" + juce::String ("                                              ") : (b < 3 ? "      " : ""));
+
+            text = text.replace ("Bass playing now, per band:  ", "Bass now:  ").replace ("                                              ", "                  ");
+
+            devLoudnessLabel.setText (text, juce::dontSendNotification);
+        }
+
         spectrum.setScore ((double) displayedScore);
         spectrum.setOverlap ({ { t.overlap[0].amount, t.overlap[1].amount, t.overlap[2].amount } });
 
@@ -1027,7 +1073,7 @@ void MainComponent::loadState()
 
     {
         const char* keys[] = { "devTolSoft", "devTolMedium", "devTolStrong", "devLate", "devEarly", "devCeiling",
-                               "devInfraWeight", "devInfraLo", "devInfraHi", "devLevelWeight", "devLevelRed" };
+                               "devInfraWeight", "devInfraLo", "devInfraHi", "devLevelWeight", "devLevelRed", "devListening" };
         int index = 0;
 
         for (auto* slider : devSliders())
@@ -1081,7 +1127,7 @@ void MainComponent::saveState()
 
     {
         const char* keys[] = { "devTolSoft", "devTolMedium", "devTolStrong", "devLate", "devEarly", "devCeiling",
-                               "devInfraWeight", "devInfraLo", "devInfraHi", "devLevelWeight", "devLevelRed" };
+                               "devInfraWeight", "devInfraLo", "devInfraHi", "devLevelWeight", "devLevelRed", "devListening" };
         int index = 0;
 
         for (auto* slider : devSliders())

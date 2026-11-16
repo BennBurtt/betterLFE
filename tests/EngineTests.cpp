@@ -1311,6 +1311,34 @@ static void testPlaybackChains()
         }
     }
     {
+        // ISO 226:2003. Known points of the standard: the threshold-side values
+        // quoted in the documentation, the round trip, and the dB that double
+        // loudness around 80 phon.
+        check (std::abs (PlaybackSimulator::iso226Phon (40.0, PlaybackSimulator::iso226Spl (40.0, 63.0)) - 63.0) < 1e-6, "ISO 226: SPL -> phon -> SPL", 0.0);
+        check (std::abs (PlaybackSimulator::iso226Spl (25.0, 90.0) - PlaybackSimulator::iso226Spl (25.0, 80.0) - 5.0) < 0.1
+                 && std::abs (PlaybackSimulator::iso226Spl (100.0, 90.0) - PlaybackSimulator::iso226Spl (100.0, 80.0) - 6.9) < 0.1,
+               "ISO 226: 5.0 dB double loudness at 25 Hz, 6.9 dB at 100 Hz, around 80 phon",
+               PlaybackSimulator::iso226Spl (25.0, 90.0) - PlaybackSimulator::iso226Spl (25.0, 80.0));
+        check (PlaybackSimulator::iso226Spl (25.0, 60.0) > PlaybackSimulator::iso226Spl (100.0, 60.0) + 15.0,
+               "ISO 226: a low tone needs far more level for the same loudness",
+               PlaybackSimulator::iso226Spl (25.0, 60.0) - PlaybackSimulator::iso226Spl (100.0, 60.0));
+
+        // A 50 Hz tone peaking at -20 dBFS in the centre, i.e. -23 dBFS RMS: 3 dB under
+        // the calibration level, 82 dB SPL at the cinema calibration
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        Scene s;
+        s.c = sine (50.0, -20.0, 6.0);
+        run (e, s);
+        PlaybackSimulator loud, quiet;
+        quiet.tuning.listeningLevelDbC = 76.0;
+        const auto a85 = loud.compute (e.result()), a76 = quiet.compute (e.result());
+        std::printf ("  50 Hz at -23 dBFS RMS: %.1f dB SPL and %.0f phon at 85 dB(C); %.1f dB SPL and %.0f phon at 76 dB(C)\n",
+                     a85.bandSplDb[1], a85.bandPhon[1], a76.bandSplDb[1], a76.bandPhon[1]);
+        check (std::abs (a85.bandSplDb[1] - 82.0) < 0.3, "listening level: a tone 3 dB under the calibration signal reads 3 dB under the level", a85.bandSplDb[1]);
+        check (std::abs (a85.bandSplDb[1] - a76.bandSplDb[1] - 9.0) < 0.01 && a85.bandPhon[1] > a76.bandPhon[1] + 10.0,
+               "listening level: 9 dB lower is heard much quieter in the bass", a85.bandPhon[1] - a76.bandPhon[1]);
+    }
+    {
         // The bass in L and R, a quieter centre, and an LFE that is the centre
         // inverted: against the centre alone it cancels, against the whole
         // screen it is small. Correlation says -1; the level-weighted value

@@ -76,6 +76,59 @@ namespace
     }
 }
 
+//==============================================================================
+// ISO 226:2003, normal equal-loudness-level contours:
+//
+//   Lp = (10 / af) . log10 (Af) - Lu + 94
+//   Af = 4.47e-3 . (10^(0.025 LN) - 1.15) + (0.4 . 10^((Tf + Lu) / 10 - 9))^af
+//
+// with the standard's table of af, Lu, Tf at the preferred frequencies.
+// Between them the three parameters are interpolated in log frequency.
+namespace
+{
+    struct Iso226Row { double hz, alpha, lu, tf; };
+
+    constexpr Iso226Row iso226Table[] = { { 20.0,  0.532, -31.6, 78.5 }, { 25.0,  0.506, -27.2, 68.7 }, { 31.5, 0.480, -23.0, 59.5 },
+                                          { 40.0,  0.455, -19.1, 51.1 }, { 50.0,  0.432, -15.9, 44.0 }, { 63.0, 0.409, -13.0, 37.5 },
+                                          { 80.0,  0.387, -10.3, 31.5 }, { 100.0, 0.367, -8.1,  26.5 }, { 125.0, 0.349, -6.2, 22.1 } };
+
+    Iso226Row iso226At (double hz)
+    {
+        const int last = (int) (sizeof (iso226Table) / sizeof (iso226Table[0])) - 1;
+        hz = std::clamp (hz, iso226Table[0].hz, iso226Table[last].hz);
+
+        for (int i = 0; i < last; ++i)
+        {
+            const auto& a = iso226Table[i];
+            const auto& b = iso226Table[i + 1];
+
+            if (hz <= b.hz)
+            {
+                const double u = std::log (hz / a.hz) / std::log (b.hz / a.hz);
+                return { hz, a.alpha + (b.alpha - a.alpha) * u, a.lu + (b.lu - a.lu) * u, a.tf + (b.tf - a.tf) * u };
+            }
+        }
+
+        return iso226Table[last];
+    }
+}
+
+double PlaybackSimulator::iso226Spl (double hz, double phon)
+{
+    const auto r = iso226At (hz);
+    const double af = 4.47e-3 * (std::pow (10.0, 0.025 * phon) - 1.15) + std::pow (0.4 * std::pow (10.0, (r.tf + r.lu) / 10.0 - 9.0), r.alpha);
+    return 10.0 / r.alpha * std::log10 (af) - r.lu + 94.0;
+}
+
+double PlaybackSimulator::iso226Phon (double hz, double splDb)
+{
+    const auto r = iso226At (hz);
+    const double af = std::pow (10.0, (splDb + r.lu - 94.0) * r.alpha / 10.0);
+    const double inner = (af - std::pow (0.4 * std::pow (10.0, (r.tf + r.lu) / 10.0 - 9.0), r.alpha)) / 4.47e-3 + 1.15;
+    return inner > 0.0 ? 40.0 * std::log10 (inner) : -100.0;      // far below the threshold of hearing
+}
+
+//==============================================================================
 Translation PlaybackSimulator::compute (const Analysis& a, Level level, double lfeGainDb) const
 {
     Translation t;
@@ -153,7 +206,7 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
     // Reference: screen plus LFE 10 dB up, on time and in polarity. The grid
     // is logarithmic, so each point stands for a width proportional to its
     // frequency.
-    double reference[numBands] = {}, referenceTotal = 0.0, weightTotal = 0.0;
+    double reference[numBands] = {}, referenceTotal = 0.0, weightTotal = 0.0, bandWeight[numBands] = {};
     double audible[numBands] = {};      // reference bass weighted by how much a small system would render it
     double screenTotal = 0.0, lfeTotal = 0.0;
 
@@ -168,6 +221,7 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
         const double lfe = lfeGain2 * m.pLfe[g];
         const double power = std::max (0.0, m.pF[g] + lfe + 2.0 * std::sqrt (lfeGain2) * cFL[g].real());
         reference[b] += hz * power;
+        bandWeight[b] += hz;
         audible[b] += hz * power * stereoRelevance (hz);
         referenceTotal += hz * power;
         weightTotal += hz;
@@ -182,6 +236,29 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
 
     t.lfeShare = lfeTotal / (lfeTotal + screenTotal + 1e-60);
     t.lfeBalanceDb = std::clamp (10.0 * std::log10 ((lfeTotal + 1e-60) / (screenTotal + 1e-60)), -60.0, 60.0);
+
+    // From level to loudness. The reference bass of each band has an RMS
+    // level in dBFS; the listening level says what sound pressure that is
+    // (the calibration signal, -20 dBFS RMS in one screen channel, gives the
+    // chosen dB(C)); ISO 226 gives its loudness level in phon, and how many
+    // dB take it 10 phon up, i.e. double its loudness. The standard runs
+    // from 20 to 90 phon: the level is kept within 20..80 for that step.
+    double doubling[numBands];
+
+    for (int b = 0; b < numBands; ++b)
+    {
+        const double meanPower = bandWeight[b] > 0.0 ? reference[b] / bandWeight[b] : 0.0;
+        const double rms = meanPower * (bandLimits[b + 1] - bandLimits[b]) * a.windowSeconds / 3.0;    // Hann window
+        const double dbfs = 10.0 * std::log10 (rms + 1e-30);
+        const double spl = tuning.listeningLevelDbC + (dbfs - referenceDbfs);
+        const double phon = iso226Phon (bandCentreHz[b], spl);
+        const double at = std::clamp (phon, 20.0, 80.0);
+
+        doubling[b] = iso226Spl (bandCentreHz[b], at + 10.0) - iso226Spl (bandCentreHz[b], at);
+        t.bandSplDb[(size_t) b] = spl;
+        t.bandPhon[(size_t) b] = phon;
+        t.bandDoublingDb[(size_t) b] = doubling[b];
+    }
 
     // Each system against the reference, band by band
     double worst = -1.0;
@@ -246,9 +323,9 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
             const double share = std::max (reference[b] / (referenceTotal + 1e-60),
                                            band[b] / (std::max (total, referenceTotal) + 1e-60));
             // 0 up to the tolerance, 1 at a doubling of loudness (the tolerance stays under it)
-            const double allowed = std::min (tolerance, doublingDb[b] - 0.5);
+            const double allowed = std::min (tolerance, doubling[b] - 0.5);
             const double rated = std::clamp ((std::abs (chain.bandChangeDb[(size_t) b]) - allowed)
-                                               / (doublingDb[b] - allowed), 0.0, 1.0);
+                                               / (doubling[b] - allowed), 0.0, 1.0);
 
             // In a stereo downmix, the very bottom of the spectrum does not
             // count: it is felt in a cinema, not heard on the systems a

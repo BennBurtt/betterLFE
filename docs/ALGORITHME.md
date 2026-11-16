@@ -141,7 +141,9 @@ elle est aussi dans le LFE, et si oui comment le LFE se place.
    reçoit une grande incertitude. Cette borne est un minimum théorique : sur un
    signal très étroit ou tout en bas du spectre (sous 30 Hz, où une période
    dépasse 33 ms), l'erreur réelle peut la dépasser, et un décalage de quelques
-   millisecondes n'y a de toute façon guère de sens à l'écoute.
+   millisecondes n'y a de toute façon guère de sens à l'écoute. L'app n'annonce
+   donc jamais une précision meilleure qu'un seizième de période du son commun
+   aux deux signaux : 2 ms à 30 Hz, 0,6 ms à 100 Hz.
 6. **Verdict fin**, pour les attaques présentes dans le LFE, seulement si la ressemblance des deux transitoires une fois
    réalignés dépasse le seuil (en mode « Out of phase only » : seulement si la
    corrélation sans réalignement est négative au-delà du seuil) :
@@ -226,6 +228,32 @@ de 80 phones :
 **Un écart de 6 dB sur le grave est donc entendu comme un grave deux fois plus
 fort ou deux fois plus faible.** C'est le fondement chiffré de la règle « plus
 de 6 dB, c'est grave ».
+
+**Niveau d'écoute.** La conversion n'est plus figée à 80 phones : elle suit le
+niveau réel du grave et le niveau d'écoute choisi (panneau Dev, 70 à 90 dB(C) ;
+76 à 85, en plus clair, sont les niveaux des auditoriums de mixage).
+
+1. Le niveau d'écoute est le niveau de pression qu'un canal d'écran produit
+   avec le signal de calibrage à −20 dBFS RMS : 85 dB(C) en salle [9].
+2. Le grave de référence de chaque bande a un niveau RMS en dBFS ; son niveau
+   de pression est `niveau d'écoute + (dBFS + 20)`. Le LFE y entre avec son
+   gain de lecture (+10 dB si la case est cochée).
+3. ISO 226:2003 [14] donne le niveau d'isosonie `LN` (phones) d'un son pur de
+   cette fréquence à cette pression, par sa formule :
+   `Lp = (10/αf)·log10(Af) − LU + 94`, avec
+   `Af = 4,47·10⁻³·(10^(0,025·LN) − 1,15) + (0,4·10^((Tf+LU)/10 − 9))^αf`
+   et les paramètres `αf`, `LU`, `Tf` de la norme (interpolés en fréquence
+   logarithmique aux centres de bande 25, 40, 70 et 100 Hz).
+4. Doubler la sensation, c'est monter de 10 phones : le nombre de dB par
+   doublement est `Lp(LN + 10) − Lp(LN)`, pris entre 20 et 80 phones (la norme
+   couvre 20 à 90).
+
+En pratique ce nombre varie peu : à 25 Hz, de 5,9 dB vers 20 phones à 5,0 dB
+à partir de 60 phones ; à 100 Hz, de 8,4 à 6,9 dB. Le niveau d'écoute change
+donc peu le score ; il change surtout ce qui est audible. Limites : la norme
+vaut pour des sons purs, de face, en champ libre, alors qu'on juge ici des
+bandes de bruit en salle ; et la lecture en dB(C) du bruit de calibrage est
+prise égale à son niveau de pression.
 
 ### 3.3 Référence
 

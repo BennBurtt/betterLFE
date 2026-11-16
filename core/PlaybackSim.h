@@ -113,6 +113,11 @@ struct Translation
     // its calibrated level. Against an LFE unrelated to the screen, whose
     // bass simply follows the power sum, how much more (a boost out of a
     // cancellation) or less (a cancellation setting in) the bass moves.
+    // Loudness of the reference bass in each rating band, at the chosen
+    // listening level (ISO 226:2003): its level in phon, and how many dB
+    // double it there. This is what turns a level change into a sensation.
+    std::array<double, ChainResult::numBands> bandSplDb {}, bandPhon {}, bandDoublingDb {};
+
     double levelDependence = 0.0;       // 0..1, drives the warning and the score: the mean against the "red" value
     double levelMeanDb = 0.0;           // mean of that difference over every system and subwoofer level, in dB
     double levelDeviationDb = 0.0;      // the largest one, signed: negative when the bass falls short
@@ -212,7 +217,20 @@ public:
         double infraWeight = PlaybackSimulator::infraWeight;
         double levelDependenceWeight = PlaybackSimulator::levelDependenceWeight;
         double levelRedDb = PlaybackSimulator::levelRedDb;
+
+        // Listening level: the sound pressure level, in dB(C), that a screen
+        // channel gives with the reference signal at -20 dBFS RMS. 85 is the
+        // cinema calibration (SMPTE RP 200); dubbing stages and smaller
+        // rooms work between 76 and 85.
+        double listeningLevelDbC = 85.0;
     };
+
+    static constexpr double referenceDbfs = -20.0;      // RMS level of the calibration signal
+    static constexpr double bandCentreHz[ChainResult::numBands] = { 25.0, 40.0, 70.0, 100.0 };
+
+    /** ISO 226:2003: sound pressure level of a pure tone at `hz` (20..125) heard at `phon`, and the reverse. */
+    static double iso226Spl (double hz, double phon);
+    static double iso226Phon (double hz, double splDb);
 
     Tuning tuning;
 

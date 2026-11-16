@@ -788,6 +788,11 @@ void TransientDetector::analyse (long long onsetIndex)
     e.delayUncertaintyMs = 1000.0 * std::sqrt ((1.0 - m2) / (m2 * independent))
                              / (2.0 * pi * std::max (rmsBandwidth, 0.5));
 
+    // The bound is a theoretical best. Whatever it says, an offset is never
+    // claimed finer than a sixteenth of a period of what the two signals
+    // share: 2 ms at 30 Hz, 0.6 ms at 100 Hz.
+    e.delayUncertaintyMs = std::max (e.delayUncertaintyMs, 1000.0 / (16.0 * std::max (centroid, 5.0)));
+
     // Is this attack of the mix in the LFE as well? Either the LFE has an
     // attack of its own next to it, or its energy rises there (by 1 dB at
     // least) with a shape that matches the mix.

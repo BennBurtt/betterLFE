@@ -1172,6 +1172,14 @@ void ChainsView::paint (juce::Graphics& g)
         g.setFont (uiFont (11.5f));
         g.drawFittedText (note, noteRow.toNearestInt(), juce::Justification::centredLeft, 1);
     }
+
+    // What this table is, and is not
+    area.removeFromTop (6.0f);
+    g.setColour (theme::dimText.withAlpha (0.8f));
+    g.setFont (uiFont (11.0f));
+    g.drawFittedText ("Electrical models: delay, polarity, filters and level. Room acoustics (modes, seats) are not simulated: "
+                      "a score of 100 does not protect against a room's own faults.",
+                      area.removeFromTop (30.0f).toNearestInt(), juce::Justification::topLeft, 2);
 }
 
 //==============================================================================

@@ -24,12 +24,17 @@ public:
     std::function<juce::String (double)> format;
     std::function<void()> onChange;
 
+    /** Marks a stretch of the track in a lighter shade (the values in common use). */
+    void setHighlight (double from, double to)  { highlightFrom = from; highlightTo = to; repaint(); }
+
     void refresh();
     void resized() override;
+    void paint (juce::Graphics&) override;
 
 private:
     juce::Label caption, valueLabel;
     juce::Slider slider;
+    double highlightFrom = 0.0, highlightTo = 0.0;
 };
 
 struct LaunchOptions
@@ -125,6 +130,8 @@ private:
                    dInfraLo { "Infra-bass up to:", 10, 40, 1, 25 }, dInfraHi { "Full weight from:", 40, 100, 1, 60 },
                    dLevelWeight { "LFE level dependence, weight in score:", 0, 0.5, 0.01, 0.15 },
                    dLevelRed { "LFE level dependence, red at a mean of:", 0.5, 12, 0.1, 3 };
+    LabelledSlider dListening { "Listening level:", 70, 90, 1, 85 };
+    juce::Label devLoudnessLabel;       // what the listening level makes of the bass playing now
     juce::TextButton devDefaultsButton { "Defaults" };
     std::vector<LabelledSlider*> devSliders();
     void applyDevSettings();
