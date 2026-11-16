@@ -1311,6 +1311,26 @@ static void testPlaybackChains()
         }
     }
     {
+        // The bass in L and R, a quieter centre, and an LFE that is the centre
+        // inverted: against the centre alone it cancels, against the whole
+        // screen it is small. Correlation says -1; the level-weighted value
+        // says how little it matters.
+        const auto bass = noise (8.0, 91);
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        Scene s;
+        s.l = bass;
+        s.r = bass;
+        s.c = scaled (bass, 0.4);
+        s.lfe = scaled (bass, -0.4);
+        run (e, s);
+        const auto& a = e.result();
+        std::printf ("  LFE = inverted centre under a louder L and R: correlation %.2f, level-weighted %.2f\n",
+                     over (a, a.correlation[chC], 30.0, 100.0).hi, over (a, a.interaction[chC], 30.0, 100.0).lo);
+        check (over (a, a.correlation[chC], 30.0, 100.0).hi < -0.95, "small opposed LFE: correlation with the centre is -1", over (a, a.correlation[chC], 30.0, 100.0).hi);
+        check (over (a, a.interaction[chC], 30.0, 100.0).lo > -0.12, "small opposed LFE: weighed against the whole screen, it counts little",
+               over (a, a.interaction[chC], 30.0, 100.0).lo);
+    }
+    {
         // The same bass in L, C and R, and an unrelated LFE 9 dB below the screen:
         // the LFE carries about a tenth of the bass, and leaving it out costs
         // half a dB. How L, C and R fold into two channels is not its doing.

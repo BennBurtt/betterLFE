@@ -594,7 +594,12 @@ bool LfeEngine::analyze (const Settings& settings)
         {
             const double px = sm[statPower + p], re = sm[statRe + p], im = sm[statIm + p];
 
-            out.interaction[(size_t) p][g] = std::clamp (2.0 * re / (px + pl + tiny), -1.0, 1.0);
+            // Level-weighted value: what this channel's share with the LFE does
+            // to the bass of the whole screen. The LFE is weighed against the
+            // screen sum, not against the one channel: an LFE as loud as a quiet
+            // centre, under a left and right that carry the bass, moves little.
+            const double screen = std::max (px, sm[statPower + pairFacade]);
+            out.interaction[(size_t) p][g] = std::clamp (2.0 * re / (screen + pl + tiny), -1.0, 1.0);
             out.correlation[(size_t) p][g] = std::clamp (re / (std::sqrt (px * pl) + tiny), -1.0, 1.0);
             out.coherence[(size_t) p][g] = std::clamp ((re * re + im * im) / (px * pl + tiny), 0.0, 1.0);
             out.phase[(size_t) p][g] = std::atan2 (im, re);

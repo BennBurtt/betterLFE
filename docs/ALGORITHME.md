@@ -51,6 +51,11 @@ Répond à : *sur la durée, le LFE est-il lié au canal d'écran, et dans quel 
    zéro au lieu de garder la trace d'un son terminé. Un LFE très bas, à
    −80 dBFS par exemple, reste analysé normalement.
 
+   Dans `s`, le LFE est pesé contre **toute la façade** et non contre le seul
+   canal comparé (`Sxx` y est remplacé par la puissance de L+C+R quand elle est
+   plus grande) : un LFE aussi fort qu'un centre discret, sous un gauche et un
+   droit qui portent le grave, compte peu.
+
 Conséquence physique : il faut quelques cycles pour conclure. Un signal commun
 est reconnu en 0,5 s au-dessus de 50 Hz, 1,5 s au-dessus de 20 Hz, 3 s
 au-dessus de 8 Hz.
