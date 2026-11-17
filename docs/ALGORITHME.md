@@ -530,9 +530,10 @@ La frise du bas montre les 2 min 30 dernières (une colonne par demi-seconde),
 sur une échelle de temps compressée vers le passé (logarithmique, échelle
 15 s) : les dernières secondes défilent vite à droite et prennent la plus
 grande part de la largeur, les plus anciennes se tassent vers la gauche. Une
-ligne blanche lumineuse, par-dessus les lignes d'alerte, y trace le niveau
-crête joué (4 points par colonne, en dB, la plus forte crête visible en haut,
-48 dB de dynamique).
+forme d'onde blanche discrète, comme dans un DAW, y montre ce qui a été joué
+par-dessus les lignes d'alerte : crêtes positives et négatives et cœur RMS des
+quatre canaux, 4 points par colonne, amplitude linéaire calée sur la plus
+forte crête visible (zoom de 40 dB au plus).
 Sa ligne « Robustness » est toujours colorée tant qu'il y a du grave : vert
 pour un score de 100, orange à 50, rouge à 0, en dégradé continu.
 
