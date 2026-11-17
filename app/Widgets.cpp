@@ -1200,6 +1200,7 @@ void HistoryStrip::pushWave (const WavePoint& point)
 
     wave[waveWritePos] = point;
     waveWritePos = (waveWritePos + 1) % wave.size();
+    waveFilled = std::min (waveFilled + 1, wave.size());
 }
 
 void HistoryStrip::clear()
@@ -1207,8 +1208,26 @@ void HistoryStrip::clear()
     samples.clear();
     writePos = 0;
     wave.clear();
-    waveWritePos = 0;
+    waveWritePos = waveFilled = 0;
     repaint();
+}
+
+void HistoryStrip::setClock (double sinceColumn, double sinceWavePoint, const Sample& current, const WavePoint& currentWave)
+{
+    columnPhase = sinceColumn;
+    wavePhase = sinceWavePoint;
+    inProgress = current;
+    waveInProgress = currentWave;
+    repaint();
+}
+
+float HistoryStrip::xForAge (double ageSeconds, juce::Rectangle<float> area)
+{
+    // Time compressed into the past: the last seconds run fast at the right,
+    // the older ones settle slowly towards the left, never quite reaching it.
+    const double span = columns * secondsPerColumn;
+    const double u = std::log1p (juce::jlimit (0.0, span, ageSeconds) / timeScaleSeconds) / std::log1p (span / timeScaleSeconds);
+    return area.getRight() - area.getWidth() * (float) u;
 }
 
 void HistoryStrip::paint (juce::Graphics& g)
@@ -1223,6 +1242,19 @@ void HistoryStrip::paint (juce::Graphics& g)
     const int lanes = 3;
     const float lane = area.getHeight() / (float) lanes;
 
+    // Faint time marks, to read the compressed scale
+    g.setFont (uiFont (9.0f));
+
+    for (const auto& mark : { std::make_pair (5.0, "5 s"), std::make_pair (15.0, "15 s"), std::make_pair (30.0, "30 s"),
+                              std::make_pair (60.0, "1 min"), std::make_pair (120.0, "2 min") })
+    {
+        const float x = xForAge (mark.first, area);
+        g.setColour (juce::Colours::white.withAlpha (0.07f));
+        g.fillRect (x, area.getY(), 1.0f, area.getHeight());
+        g.setColour (juce::Colour (0xff5a5a5a));
+        g.drawText (mark.second, juce::Rectangle<float> (x - 30.0f, area.getBottom() - 1.0f, 60.0f, 6.0f), juce::Justification::centred);
+    }
+
     g.setFont (uiFont (10.5f));
 
     for (int i = 0; i < lanes; ++i)
@@ -1231,18 +1263,23 @@ void HistoryStrip::paint (juce::Graphics& g)
         g.setColour (theme::dimText);
         g.drawText (names[i], juce::Rectangle<float> (4.0f, row.getY() - 2.0f, area.getX() - 10.0f, row.getHeight() + 4.0f),
                     juce::Justification::centredRight);
-        g.setColour (juce::Colour (0xff1c1c1c).withAlpha (0.45f));      // see-through: the waveform shows behind
+        g.setColour (juce::Colour (0xff1c1c1c));
         g.fillRect (row);
 
         if (samples.empty())
             continue;
 
-        const float width = row.getWidth() / (float) columns;
+        const size_t count = samples.size();
 
-        for (int c = 0; c < columns; ++c)
+        for (size_t j = 0; j <= count; ++j)     // j = 0: the column being gathered, then the newest finished one
         {
-            const auto& s = samples[(writePos + (size_t) c) % samples.size()];
-            const float x = row.getX() + width * (float) c;
+            const bool live = j == 0;
+            const auto& s = live ? inProgress : samples[(writePos + count - j) % count];
+            const double age = live ? 0.0 : (double) (j - 1) * secondsPerColumn + columnPhase;
+            const float x1 = xForAge (age, area), x0 = xForAge (live ? columnPhase : age + secondsPerColumn, area);
+
+            if (x1 - x0 <= 0.0f)
+                continue;
 
             if (i == 1)
             {
@@ -1254,8 +1291,8 @@ void HistoryStrip::paint (juce::Graphics& g)
                 const auto red = juce::Colour (0xffe53935), orange = juce::Colour (0xffff9800), green = juce::Colour (0xff43a047);
                 const auto colour = s.score < 0.5f ? red.interpolatedWith (orange, s.score / 0.5f)
                                                    : orange.interpolatedWith (green, (s.score - 0.5f) / 0.5f);
-                g.setColour (colour.withAlpha (0.55f));
-                g.fillRect (x, row.getY(), width + 0.5f, row.getHeight());
+                g.setColour (colour.withAlpha (0.80f));
+                g.fillRect (x0, row.getY(), x1 - x0 + 0.5f, row.getHeight());
                 continue;
             }
 
@@ -1265,56 +1302,63 @@ void HistoryStrip::paint (juce::Graphics& g)
 
             if (value > 0.02f)
             {
-                g.setColour (colour.withAlpha (juce::jlimit (0.0f, 1.0f, 0.10f + 0.50f * value)));
-                g.fillRect (x, row.getY(), width + 0.5f, row.getHeight());
+                g.setColour (colour.withAlpha (juce::jlimit (0.0f, 1.0f, 0.15f + 0.85f * value)));
+                g.fillRect (x0, row.getY(), x1 - x0 + 0.5f, row.getHeight());
             }
         }
     }
 
-    // Over the lanes: what was played, as a DAW draws it. Signed peaks make
-    // the outline, the RMS a brighter core. Linear amplitude, zoomed so the
-    // loudest peak in view fills the height (never more than 40 dB of zoom).
+    // Over the lanes: the level of what was played, a single glowing white
+    // line. Peak level in dB, the loudest in view at the top, 48 dB down at
+    // the bottom.
     if (! wave.empty())
     {
-        const int n = (int) wave.size();
-        float loudest = 0.01f;
+        const size_t count = wave.size();
+        float loudest = 1e-6f;
 
         for (const auto& p : wave)
             loudest = juce::jmax (loudest, std::abs (p.lo), std::abs (p.hi));
 
-        const float mid = area.getCentreY(), half = area.getHeight() * 0.48f / loudest;
-        const float step = area.getWidth() / (float) n;
-        juce::Path peaks, core;
+        const double topDb = 20.0 * std::log10 ((double) loudest), rangeDb = 48.0;
+        const float top = area.getY() + 2.0f, bottom = area.getBottom() - 2.0f;
+        juce::Path line;
+        juce::Point<float> newest;
 
-        for (int pass = 0; pass < 2; ++pass)
+        for (size_t k = 0; k <= waveFilled; ++k)    // k = 0: the point being gathered, at now; nothing before the first sound
         {
-            auto& path = pass == 0 ? peaks : core;
+            // The point being gathered may hold only a few milliseconds yet: it
+            // starts from the last finished one, so the line never dips at now
+            auto p = k == 0 ? waveInProgress : wave[(waveWritePos + count - k) % count];
 
-            for (int i = 0; i < n; ++i)
+            if (k == 0 && waveFilled > 0)
             {
-                const auto& p = wave[(waveWritePos + (size_t) i) % wave.size()];
-                const float x = area.getX() + step * ((float) i + 0.5f);
-                const float y = mid - half * (pass == 0 ? p.hi : p.rms);
-
-                if (i == 0)     path.startNewSubPath (x, y);
-                else            path.lineTo (x, y);
+                const auto& last = wave[(waveWritePos + count - 1) % count];
+                p.lo = juce::jmin (p.lo, last.lo);
+                p.hi = juce::jmax (p.hi, last.hi);
             }
 
-            for (int i = n - 1; i >= 0; --i)
-            {
-                const auto& p = wave[(waveWritePos + (size_t) i) % wave.size()];
-                path.lineTo (area.getX() + step * ((float) i + 0.5f), mid - half * (pass == 0 ? p.lo : -p.rms));
-            }
+            const double age = k == 0 ? 0.0 : ((double) k - 0.5) * secondsPerWavePoint + wavePhase;
+            const double db = 20.0 * std::log10 (juce::jmax (1e-10, (double) juce::jmax (std::abs (p.lo), std::abs (p.hi))));
+            const float level = (float) juce::jlimit (0.0, 1.0, (db - (topDb - rangeDb)) / rangeDb);
+            const juce::Point<float> point (xForAge (age, area), bottom - (bottom - top) * level);
 
-            path.closeSubPath();
+            if (k == 0)     { line.startNewSubPath (point); newest = point; }
+            else            line.lineTo (point);
         }
 
-        g.setColour (juce::Colours::white.withAlpha (0.72f));
-        g.fillPath (peaks);
-        g.setColour (juce::Colours::white.withAlpha (0.18f));
-        g.fillPath (core);
-        g.setColour (juce::Colours::white.withAlpha (0.18f));
-        g.fillRect (area.getX(), mid - 0.5f, area.getWidth(), 1.0f);       // the zero line
+        const auto smooth = line.createPathWithRoundedCorners (6.0f);
+        const auto stroke = [&] (float width, float alpha)
+        {
+            g.setColour (juce::Colours::white.withAlpha (alpha));
+            g.strokePath (smooth, juce::PathStrokeType (width, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        };
+
+        stroke (7.0f, 0.06f);       // glow
+        stroke (3.5f, 0.14f);
+        stroke (1.4f, 0.95f);       // the line
+
+        g.setColour (juce::Colours::white);
+        g.fillEllipse (newest.x - 2.5f, newest.y - 2.5f, 5.0f, 5.0f);       // now
     }
 
     g.setColour (juce::Colour (0xff777777));

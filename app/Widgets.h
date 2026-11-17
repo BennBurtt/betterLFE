@@ -254,8 +254,15 @@ public:
     static constexpr double secondsPerWavePoint = secondsPerColumn / wavePointsPerColumn;
     struct WavePoint { float lo = 0.0f, hi = 0.0f, rms = 0.0f; };
 
+    // The time scale is compressed into the past: the last seconds take most
+    // of the width, older ones settle towards the left (logarithmic, scale 15 s).
+    static constexpr double timeScaleSeconds = 15.0;
+
     void push (const Sample&);
     void pushWave (const WavePoint&);
+
+    /** Time since the last column and the last waveform point, so the strip scrolls smoothly. */
+    void setClock (double sinceColumn, double sinceWavePoint, const Sample& current, const WavePoint& currentWave);
     void clear();
     void paint (juce::Graphics&) override;
 
@@ -263,7 +270,12 @@ private:
     std::vector<Sample> samples;
     size_t writePos = 0;
     std::vector<WavePoint> wave;
-    size_t waveWritePos = 0;
+    size_t waveWritePos = 0, waveFilled = 0;
+    double columnPhase = 0.0, wavePhase = 0.0;
+    Sample inProgress;              // the column being gathered, drawn from now back to columnPhase
+    WavePoint waveInProgress;
+
+    static float xForAge (double ageSeconds, juce::Rectangle<float> area);
 };
 
 } // namespace subguard

@@ -1004,7 +1004,7 @@ void MainComponent::timerCallback()
 
     if (historyClock >= HistoryStrip::secondsPerColumn)
     {
-        historyClock = 0.0;
+        historyClock -= HistoryStrip::secondsPerColumn;
         history.push (historySample);
         historySample = {};
     }
@@ -1020,6 +1020,12 @@ void MainComponent::timerCallback()
                 flash = 1.0;
     }
 
+    {
+        HistoryStrip::WavePoint live;
+        live.lo = (float) waveMin;
+        live.hi = (float) waveMax;
+        history.setClock (historyClock, waveClock, historySample, live);
+    }
     snapshot.events.clear();        // each event is shown once
     transientStrip.advance (dt);
     SpeakerIndicator* speakers[] = { &header.left, &header.centre, &header.right };

@@ -526,7 +526,13 @@ temps la valeur reste du même côté de ce qui est affiché :
 Mesuré : une valeur qui oscille entre 0,1 et 0,9 dix fois par seconde fait
 bouger l'affichage de 0,03 ; un saut de 1 à 2 est suivi à 90 % en 0,7 s.
 
-La frise du bas montre les 2 min 30 dernières (une colonne par demi-seconde).
+La frise du bas montre les 2 min 30 dernières (une colonne par demi-seconde),
+sur une échelle de temps compressée vers le passé (logarithmique, échelle
+15 s) : les dernières secondes défilent vite à droite et prennent la plus
+grande part de la largeur, les plus anciennes se tassent vers la gauche. Une
+ligne blanche lumineuse, par-dessus les lignes d'alerte, y trace le niveau
+crête joué (4 points par colonne, en dB, la plus forte crête visible en haut,
+48 dB de dynamique).
 Sa ligne « Robustness » est toujours colorée tant qu'il y a du grave : vert
 pour un score de 100, orange à 50, rouge à 0, en dégradé continu.
 
