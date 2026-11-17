@@ -26,7 +26,7 @@ public:
             channelIndex[i].store (indices[i]);
     }
 
-    /** Reads up to maxFrames interleaved frames of frameSize samples. Message thread only. */
+    /** Reads up to maxFrames interleaved frames of frameSize samples. One reader only: the analysis thread. */
     int read (float* dest, int maxFrames)
     {
         const auto scope = fifo.read (juce::jmin (maxFrames, fifo.getNumReady()));

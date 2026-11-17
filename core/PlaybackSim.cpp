@@ -128,6 +128,18 @@ double PlaybackSimulator::iso226Phon (double hz, double splDb)
     return inner > 0.0 ? 40.0 * std::log10 (inner) : -100.0;      // far below the threshold of hearing
 }
 
+double PlaybackSimulator::hearingThresholdDb (double hz)
+{
+    return iso226At (hz).tf;
+}
+
+double PlaybackSimulator::audibleShare (double hz, double splDb, double spreadDb)
+{
+    // Normal distribution of thresholds: the share whose threshold lies under splDb
+    const double z = (splDb - hearingThresholdDb (hz)) / std::max (spreadDb, 0.1);
+    return 0.5 * std::erfc (-z / std::sqrt (2.0));
+}
+
 //==============================================================================
 Translation PlaybackSimulator::compute (const Analysis& a, Level level, double lfeGainDb) const
 {
@@ -207,7 +219,7 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
     // is logarithmic, so each point stands for a width proportional to its
     // frequency.
     double reference[numBands] = {}, referenceTotal = 0.0, weightTotal = 0.0, bandWeight[numBands] = {};
-    double audible[numBands] = {};      // reference bass weighted by how much a small system would render it
+    double smallSystems[numBands] = {};     // reference bass weighted by how much a small system would render it
     double screenTotal = 0.0, lfeTotal = 0.0;
 
     for (size_t g = 0; g < n; ++g)
@@ -222,7 +234,7 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
         const double power = std::max (0.0, m.pF[g] + lfe + 2.0 * std::sqrt (lfeGain2) * cFL[g].real());
         reference[b] += hz * power;
         bandWeight[b] += hz;
-        audible[b] += hz * power * stereoRelevance (hz);
+        smallSystems[b] += hz * power * stereoRelevance (hz);
         referenceTotal += hz * power;
         weightTotal += hz;
         screenTotal += hz * m.pF[g];
@@ -245,12 +257,26 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
     // from 20 to 90 phon: the level is kept within 20..80 for that step.
     double doubling[numBands];
 
+    // Sound pressure level of a band from its summed power (same units as reference[b])
+    const auto splOf = [&] (int b, double bandPower)
+    {
+        const double meanPower = bandWeight[b] > 0.0 ? bandPower / bandWeight[b] : 0.0;
+        const double rms = meanPower * (bandLimits[b + 1] - bandLimits[b]) * a.windowSeconds / 3.0;    // Hann window
+        return tuning.listeningLevelDbC + (10.0 * std::log10 (rms + 1e-30) - referenceDbfs);
+    };
+
+    // Share of listeners who hear a band at a given level; 1 when audibility is off.
+    // Each rating band is narrower than about one auditory filter (ERB, Glasberg
+    // & Moore 1990: 27 Hz at 25 Hz, 36 Hz at 100 Hz), so its whole power is
+    // compared with the pure-tone threshold at its centre.
+    const auto audible = [&] (int b, double splDb)
+    {
+        return tuning.audibility ? audibleShare (bandCentreHz[b], splDb, tuning.thresholdSpreadDb) : 1.0;
+    };
+
     for (int b = 0; b < numBands; ++b)
     {
-        const double meanPower = bandWeight[b] > 0.0 ? reference[b] / bandWeight[b] : 0.0;
-        const double rms = meanPower * (bandLimits[b + 1] - bandLimits[b]) * a.windowSeconds / 3.0;    // Hann window
-        const double dbfs = 10.0 * std::log10 (rms + 1e-30);
-        const double spl = tuning.listeningLevelDbC + (dbfs - referenceDbfs);
+        const double spl = splOf (b, reference[b]);
         const double phon = iso226Phon (bandCentreHz[b], spl);
         const double at = std::clamp (phon, 20.0, 80.0);
 
@@ -258,6 +284,19 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
         t.bandSplDb[(size_t) b] = spl;
         t.bandPhon[(size_t) b] = phon;
         t.bandDoublingDb[(size_t) b] = doubling[b];
+        t.bandAudible[(size_t) b] = audible (b, spl);
+    }
+
+    // What is heard of the reference: each band weighted by the share of
+    // listeners who hear it, and how many hear the bass at all (its most
+    // audible band). A system is then rated on the bass that is heard.
+    double heardReference[numBands] = {}, heardTotal = 0.0, heardAtAll = 0.0;
+
+    for (int b = 0; b < numBands; ++b)
+    {
+        heardReference[b] = reference[b] * t.bandAudible[(size_t) b];
+        heardTotal += heardReference[b];
+        heardAtAll = std::max (heardAtAll, t.bandAudible[(size_t) b]);
     }
 
     // Each system against the reference, band by band
@@ -317,11 +356,12 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
 
             chain.bandChangeDb[(size_t) b] = limited ((band[b] + 1e-60) / (reference[b] + 1e-60));
 
-            // What the band is worth: its share of the reference bass, or of
-            // this system's bass when the system has some where the reference
-            // had almost none.
-            const double share = std::max (reference[b] / (referenceTotal + 1e-60),
-                                           band[b] / (std::max (total, referenceTotal) + 1e-60));
+            // What the band is worth: its share of the heard reference bass, or
+            // of this system's heard bass when the system has some where the
+            // reference had almost none (inaudible bass made audible by a boost)
+            const double heardBand = band[b] * audible (b, splOf (b, band[b]));
+            const double share = std::max (heardReference[b] / (heardTotal + 1e-60),
+                                           heardBand / (std::max (heardTotal, heardBand) + 1e-60));
             // 0 up to the tolerance, 1 at a doubling of loudness (the tolerance stays under it)
             const double allowed = std::min (tolerance, doubling[b] - 0.5);
             const double rated = std::clamp ((std::abs (chain.bandChangeDb[(size_t) b]) - allowed)
@@ -330,11 +370,12 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
             // In a stereo downmix, the very bottom of the spectrum does not
             // count: it is felt in a cinema, not heard on the systems a
             // downmix is played on.
-            const double relevance = isStereo && reference[b] > 0.0 ? audible[b] / reference[b] : 1.0;
+            const double relevance = isStereo && reference[b] > 0.0 ? smallSystems[b] / reference[b] : 1.0;
             chain.penalty += share * rated * relevance;
         }
 
-        chain.penalty = std::min (chain.penalty, 1.0);
+        // Scaled by how many listeners hear the bass at all
+        chain.penalty = std::min (chain.penalty, 1.0) * heardAtAll;
 
         if (isStereo)
         {
@@ -365,15 +406,18 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
                     continue;
 
                 const double now = std::max (unrelated + crossPart[b], 0.0);
+                const double moved = std::max (screenPart[b] + gain * gain * lfePart[b] + gain * crossPart[b], 0.0);
+                const double heard = audible (b, splOf (b, std::max (now, moved)));
                 const double expected = limited ((screenPart[b] + gain * gain * lfePart[b] + 1e-60) / (unrelated + 1e-60));
                 const double actual = limited ((std::max (screenPart[b] + gain * gain * lfePart[b] + gain * crossPart[b], 0.0) + 1e-60)
                                                  / (now + 1e-60));
 
-                if (std::abs (actual - expected) > std::abs (worstBand))
-                    worstBand = actual - expected;
+                if (heard * std::abs (actual - expected) > std::abs (worstBand))
+                    worstBand = heard * (actual - expected);
             }
 
             levelSum += levelStepWeight[v] * std::abs (worstBand);
+            ++t.levelScenarios;
             levelWeightSum += levelStepWeight[v];
 
             if (levelStepWeight[v] * std::abs (worstBand) > std::abs (levelMax))

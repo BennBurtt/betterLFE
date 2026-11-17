@@ -94,19 +94,9 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
         speaker->setTooltip ("Click: solo. Option-click: mute.");
     }
 
-    // Demo signal: LFE made of low tones; L shares its 28-50 Hz part in phase,
-    // R its 70-110 Hz part with flipped polarity, C is unrelated.
-    juce::Random random (42);
-
-    for (double f = 21.0; f < 115.0; f += 1.3)
-        demoTones.push_back ({ { f, random.nextDouble() * juce::MathConstants<double>::twoPi, 0.0 } });
-
-    for (double f = 22.0; f < 150.0; f += 1.7)
-        demoTones.push_back ({ { f, random.nextDouble() * juce::MathConstants<double>::twoPi, 1.0 } });
-
     loadState();
     applyFormat();
-    rebuildEngine (preferredSampleRate);
+    analysis.start (options.demoSignal, preferredSampleRate, windowSeconds());
 
     if (! options.demoSignal)
     {
@@ -142,6 +132,7 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
 MainComponent::~MainComponent()
 {
     stopTimer();
+    analysis.stop();
     saveState();
     deviceManager.removeAudioCallback (&input);
     deviceManager.removeChangeListener (this);
@@ -193,7 +184,7 @@ void MainComponent::buildCards()
     windowBox.addItem (juce::String::fromUTF8 ("Normal (1 s \xc2\xb7 2 Hz)"), 2);
     windowBox.addItem (juce::String::fromUTF8 ("Ultra (2 s \xc2\xb7 1 Hz)"), 3);
     windowBox.setSelectedId (2, juce::dontSendNotification);
-    windowBox.onChange = [this] { rebuildEngine (engineRate); };
+    windowBox.onChange = [this] { analysis.setWindow (windowSeconds()); };
 
     for (int db : { 72, 96, 120, 144 })
         rangeBox.addItem ("0 to -" + juce::String (db) + " dB", db);
@@ -320,13 +311,17 @@ void MainComponent::buildCards()
         slowScore = -1.0;
         displayedScore = -1;
 
-        if (engine != nullptr)
-        {
-            engine->resetCorrelation();
-            engine->resetGlobal();
-        }
+        analysis.requestReset();
+        shownFacade.clear();
+        shownLfe.clear();
     };
     addAndMakeVisible (resetButton);
+
+    listeningButton.setTooltip ("Listening level: the sound pressure a screen channel gives with the calibration signal at -20 dBFS RMS "
+                                "(85 dB(C) in a cinema). It sets what is audible and how loud the bass is heard, which the score follows.");
+    listeningButton.onClick = [this] { showListeningMenu(); };
+    setListeningLevel (listeningDbC);
+    addAndMakeVisible (listeningButton);
 
     // What each card holds, its size and how it lays its content out
     const auto populate = [this] (int cardIndex, int width, int height, std::initializer_list<juce::Component*> children,
@@ -418,18 +413,13 @@ void MainComponent::buildCards()
         dTolSoft.format = dTolMedium.format = dTolStrong.format = dLevelRed.format = db;
         dLate.format = dEarly.format = dCeiling.format = dInfraWeight.format = dLevelWeight.format = plain;
         dInfraLo.format = dInfraHi.format = hz;
-        dListening.format = [] (double v) { return juce::String ((int) v) + " dB(C)"; };
-        dListening.setHighlight (76.0, 85.0);
-        dListening.setTooltip ("The sound pressure level a screen channel gives with the calibration signal at -20 dBFS RMS. "
-                               "85 dB(C) is the cinema calibration; 76 to 85 (lighter) are the levels used on dubbing stages.\n"
-                               "It sets how loud the bass is heard, hence how many dB double its loudness (ISO 226).");
         devLoudnessLabel.setFont (uiFont (11.5f));
         devLoudnessLabel.setColour (juce::Label::textColourId, theme::dimText);
         devLoudnessLabel.setJustificationType (juce::Justification::topLeft);
         devLoudnessLabel.setMinimumHorizontalScale (1.0f);
 
         dTolSoft.setTooltip ("How many dB a band may change on a playback system before it starts to count, at each level.");
-        dCeiling.setTooltip ("How much of the score a bass entirely in the LFE can take away. 0.89 puts 'LFE alone' near 21.");
+        dCeiling.setTooltip ("How much of the score a bass entirely in the LFE can take away. 0.83 puts 'LFE alone' near 21.");
         dInfraWeight.setTooltip ("What bass under the 'infra-bass up to' frequency still counts for in the LFE dependence; it rises to 1 at 'full weight from'.");
         dLevelWeight.setTooltip ("The most the LFE level dependence can take off the score.");
         dLevelRed.setTooltip ("Mean difference from the expected bass at which the LFE level dependence box is fully red.");
@@ -454,7 +444,6 @@ void MainComponent::buildCards()
             dInfraHi.setValue (d.infraHiHz);
             dLevelWeight.setValue (d.levelDependenceWeight);
             dLevelRed.setValue (d.levelRedDb);
-            dListening.setValue (d.listeningLevelDbC);
         };
 
         auto& card = cards[(size_t) devCard];
@@ -536,6 +525,8 @@ void MainComponent::resized()
     auto bar = area.removeFromTop (barHeight).reduced (10, 6);
     const int widths[numCards] = { 90, 90, 104, 100, 140, 60 };
     resetButton.setBounds (bar.removeFromRight (80));
+    bar.removeFromRight (6);
+    listeningButton.setBounds (bar.removeFromRight (170));
 
     for (int i = 0; i < numCards; ++i)
     {
@@ -682,74 +673,54 @@ void MainComponent::applyTransientSettings()
     t.searchMs = tSearch.value();
     t.minMatch = tMatch.value();
 
-    if (engine != nullptr)
-        engine->setTransientSettings (t);
+    analysis.setTransientSettings (t);
 
     transientStrip.setActive (t.enabled);
     transientStrip.setMinMatch (t.minMatch);
     transientStrip.setHoldSeconds (tHold.value());
 }
 
-void MainComponent::rebuildEngine (double sampleRate)
+double MainComponent::windowSeconds() const
 {
     const double windows[] = { 0.5, 1.0, 2.0 };
-    engineRate = sampleRate;
-    engine = std::make_unique<LfeEngine> (sampleRate, windows[juce::jlimit (0, 2, windowBox.getSelectedId() - 1)]);
-    applyTransientSettings();
-    alerts.reset (engine->result().grid.size());
+    return windows[juce::jlimit (0, 2, windowBox.getSelectedId() - 1)];
 }
 
-void MainComponent::feedDemoSignal (int numFrames)
+void MainComponent::setListeningLevel (double dbC)
 {
-    scratch.assign ((size_t) numFrames * frame, 0.0f);
+    listeningDbC = juce::jlimit (70.0, 90.0, std::round (dbC));
+    listeningButton.setButtonText ("Listening " + juce::String ((int) listeningDbC) + " dB(C)");
+    simulator.tuning.listeningLevelDbC = listeningDbC;
+}
 
-    for (int i = 0; i < numFrames; ++i)
+void MainComponent::showListeningMenu()
+{
+    // 76 to 85 dB(C), the levels of dubbing stages, stand out; the rest is dimmed
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Listening level: a screen channel at -20 dBFS RMS gives");
+
+    for (int db = 90; db >= 70; --db)
     {
-        double lfe = 0.0, shared = 0.0, flipped = 0.0, other = 0.0;
-        const double t = demoTime + i / engineRate;
-
-        for (const auto& tone : demoTones)
-        {
-            const double v = 0.012 * std::sin (juce::MathConstants<double>::twoPi * tone[0] * t + tone[1]);
-
-            if (tone[2] > 0.5)      { other += v; continue; }
-
-            lfe += v;
-
-            if (tone[0] > 28.0 && tone[0] < 50.0)    shared += v;
-            if (tone[0] > 70.0 && tone[0] < 110.0)   flipped -= v;
-        }
-
-        // A kick in the centre channel every 1.5 s, repeated 12 ms late in the LFE
-        const auto kick = [] (double u)
-        {
-            if (u < 0.0)
-                return 0.0;
-
-            const double phase = juce::MathConstants<double>::twoPi * (45.0 * u + 75.0 * 0.03 * (1.0 - std::exp (-u / 0.03)));
-            return 0.5 * std::sin (phase) * std::exp (-u / 0.09) * (1.0 - std::exp (-u / 0.002));
-        };
-
-        const double sinceKick = std::fmod (t, 1.5);
-        other += kick (sinceKick);
-        lfe += kick (sinceKick - 0.012);
-
-        float* out = scratch.data() + (size_t) i * frame;
-        out[chL] = (float) (1.4 * shared);
-        out[chC] = (float) other;
-        out[chR] = (float) (1.4 * flipped);
-        out[chLFE] = (float) lfe;
+        juce::PopupMenu::Item item (juce::String (db) + " dB(C)" + (db == 85 ? "   cinema calibration" : ""));
+        item.itemID = db;
+        item.isTicked = db == (int) listeningDbC;
+        item.colour = (db >= 76 && db <= 85) ? juce::Colours::white : juce::Colour (0xff8a8a8a);
+        menu.addItem (item);
     }
 
-    demoTime += numFrames / engineRate;
-    engine->push (scratch.data(), numFrames);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&listeningButton),
+                        [safe = juce::Component::SafePointer<MainComponent> (this)] (int chosen)
+                        {
+                            if (safe != nullptr && chosen > 0)
+                                safe->setListeningLevel (chosen);
+                        });
 }
 
 //==============================================================================
 std::vector<LabelledSlider*> MainComponent::devSliders()
 {
     return { &dTolSoft, &dTolMedium, &dTolStrong, &dLate, &dEarly, &dCeiling,
-             &dInfraWeight, &dInfraLo, &dInfraHi, &dLevelWeight, &dLevelRed, &dListening };
+             &dInfraWeight, &dInfraLo, &dInfraHi, &dLevelWeight, &dLevelRed };
 }
 
 void MainComponent::applyDevSettings()
@@ -764,7 +735,7 @@ void MainComponent::applyDevSettings()
     t.infraHiHz = dInfraHi.value();
     t.levelDependenceWeight = dLevelWeight.value();
     t.levelRedDb = dLevelRed.value();
-    t.listeningLevelDbC = dListening.value();
+    t.listeningLevelDbC = listeningDbC;
 }
 
 void MainComponent::updateSpeakers()
@@ -781,89 +752,61 @@ void MainComponent::updateSpeakers()
     }
 }
 
-void MainComponent::meterChannels (const float* interleaved, int numFrames)
-{
-    const int index[3] = { chL, chC, chR };
-
-    // Everything under 200 Hz, all four channels, the LFE as it is played: two one-pole low-passes
-    const double lfePlayedGain = lfeGainToggle.getToggleState() ? 3.162 : 1.0;
-    const double coeff = 1.0 - std::exp (-juce::MathConstants<double>::twoPi * 200.0 / juce::jmax (8000.0, engineRate));
-
-    for (int i = 0; i < numFrames; ++i)
-    {
-        const float* in = interleaved + i * frame;
-
-        for (size_t c = 0; c < 3; ++c)
-            framePeak[c] = juce::jmax (framePeak[c], (double) std::abs (in[index[c]]));
-
-        anyFramePeak = juce::jmax (anyFramePeak, (double) std::abs (in[chLFE]));
-
-        const double sum = (double) in[chL] + in[chC] + in[chR] + lfePlayedGain * in[chLFE];
-        bassState[0] += coeff * (sum - bassState[0]);
-        bassState[1] += coeff * (bassState[0] - bassState[1]);
-        bassFramePeak = juce::jmax (bassFramePeak, std::abs (bassState[1]));
-    }
-}
-
 void MainComponent::timerCallback()
 {
     const double nowSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
     const double dt = juce::jlimit (0.001, 0.25, nowSeconds - lastTick);
     lastTick = nowSeconds;
-    double level = 0.0;
 
-    if (options.demoSignal)
+    // Settings for the analysis thread: they apply from its next 20 ms step.
+    // The spectrum is measured with a fixed 150 ms average; the Inertia
+    // slider only smooths what is displayed.
+    engineSettings.lfeGainDb = lfeGainToggle.getToggleState() ? lfeInBandGainDb : 0.0;
+    engineSettings.tauSpectrum = 0.15;
+    engineSettings.tauCorrelation = integration.value();
+    analysis.setSettings (engineSettings);
+
+    // A new analysis (other device rate, other window): the display starts afresh
+    if (analysis.generation() != runnerGeneration)
     {
-        const int numFrames = (int) std::lround (engineRate * dt);
-        feedDemoSignal (numFrames);
-        meterChannels (scratch.data(), numFrames);
-        level = 0.6;
-    }
-    else if (input.isRunning())
-    {
-        // A (re)started device may run at another rate: start from a clean engine
-        if (input.generation() != inputGeneration || std::abs (input.sampleRate() - engineRate) > 0.5)
-        {
-            inputGeneration = input.generation();
-            scratch.resize ((size_t) 4096 * frame);
+        runnerGeneration = analysis.generation();
+        haveData = false;
+        alerts.reset (0);
+        shownFacade.clear();
+        shownLfe.clear();
 
-            while (input.read (scratch.data(), 4096) > 0) {}
+        for (auto& channel : curveInertia)
+            channel.clear();
 
-            rebuildEngine (input.sampleRate());
-            updateStatus();
-        }
-
-        scratch.resize ((size_t) 4096 * frame);
-
-        for (int n; (n = input.read (scratch.data(), 4096)) > 0;)
-        {
-            engine->push (scratch.data(), n);
-            meterChannels (scratch.data(), n);
-        }
-
-        level = juce::jlimit (0.0, 1.0, (juce::Decibels::gainToDecibels ((double) input.level(), -200.0) + 60.0) / 60.0);
-    }
-    else
-    {
-        // No device: feed silence so the display settles instead of freezing
-        scratch.assign ((size_t) std::lround (engineRate * dt) * frame, 0.0f);
-        engine->push (scratch.data(), (int) scratch.size() / frame);
+        updateStatus();
     }
 
+    // The latest state the analysis published, and what accumulated since
+    const auto runner = analysis.runner();
+    const bool fresh = runner != nullptr && runner->take (snapshot);
+    haveData = haveData || fresh;
+
+    if (fresh)
+    {
+        framePeak = snapshot.screenPeak;
+        anyFramePeak = juce::jmax (snapshot.lfePeak, snapshot.screenPeak[0], snapshot.screenPeak[1], snapshot.screenPeak[2]);
+        bassFramePeak = snapshot.bassPeak;
+    }
+
+    const double level = options.demoSignal ? 0.6
+                       : input.isRunning() ? juce::jlimit (0.0, 1.0, (juce::Decibels::gainToDecibels ((double) input.level(), -200.0) + 60.0) / 60.0)
+                                           : 0.0;
     header.setLevel (level);
 
     // Waveform of the history strip: the loudest peak of the column, -60 .. 0 dBFS
-    anyFramePeak = juce::jmax (anyFramePeak, framePeak[0], framePeak[1], framePeak[2]);
     historySample.level = juce::jmax (historySample.level,
                                       (float) juce::jlimit (0.0, 1.0, (juce::Decibels::gainToDecibels (anyFramePeak, -200.0) + 60.0) / 60.0));
-    anyFramePeak = 0.0;
 
-    // Bass under 200 Hz against the loudest of the last seconds: the background pulses at any level
-    bassRecentPeak = juce::jmax (bassFramePeak, bassRecentPeak * std::exp (-dt / 4.0));
+    // Bass under 200 Hz against the loudest of the last seconds: the background follows it, slowly
+    bassRecentPeak = juce::jmax (bassFramePeak, bassRecentPeak * std::exp (-dt / 6.0));
     {
         const double target = bassRecentPeak > 1e-6 ? std::pow (bassFramePeak / bassRecentPeak, 1.5) : 0.0;
-        bassDrive += (target > bassDrive ? 1.0 - std::exp (-dt / 0.012) : 1.0 - std::exp (-dt / 0.18)) * (target - bassDrive);
-        bassFramePeak = 0.0;
+        bassDrive += (target > bassDrive ? 1.0 - std::exp (-dt / 0.35) : 1.0 - std::exp (-dt / 1.6)) * (target - bassDrive);
     }
 
     header.setBass (bassDrive);
@@ -878,30 +821,51 @@ void MainComponent::timerCallback()
             const double target = recentPeak[c] > 1e-6 ? framePeak[c] / recentPeak[c] : 0.0;     // under -120 dBFS: still
             coneDrive[c] += (target > coneDrive[c] ? 1.0 - std::exp (-dt / 0.015) : 1.0 - std::exp (-dt / 0.12)) * (target - coneDrive[c]);
             cones[c]->setDrive (coneDrive[c]);
-            framePeak[c] = 0.0;
         }
     }
 
-    engineSettings.lfeGainDb = lfeGainToggle.getToggleState() ? lfeInBandGainDb : 0.0;
-    engineSettings.tauSpectrum = 0.010 * std::pow (60.0, inertia.value() / 100.0);    // 10 ms .. 600 ms
-    engineSettings.tauCorrelation = integration.value();
-
     const auto alerting = alertOptions();
 
-    if (engine->analyze (engineSettings))
+    if (haveData)
     {
+        const auto& measured = snapshot.analysis;
+
         // Nothing in the LFE any more: the engine has cleared what it measured
         // against it, so the display starts from a clean slate too.
-        if (engine->takeAutoReset())
+        if (snapshot.autoReset)
         {
-            alerts.reset (engine->result().grid.size());
+            snapshot.autoReset = false;
+            alerts.reset (measured.grid.size());
 
             for (auto& channel : curveInertia)
                 channel.clear();
         }
 
-        alerts.update (engine->result(), alerting, dt);
-        spectrum.update (engine->result(), alerts, dt);
+        alerts.update (measured, alerting, dt);
+
+        // Spectrum as displayed: the measured one, smoothed by the Inertia slider (10 to 600 ms)
+        {
+            const double tau = 0.010 * std::pow (60.0, inertia.value() / 100.0);
+            const double k = 1.0 - std::exp (-dt / tau);
+            const auto smooth = [k] (std::vector<double>& shown, const std::vector<double>& now)
+            {
+                if (shown.size() != now.size())
+                {
+                    shown = now;
+                    return;
+                }
+
+                for (size_t i = 0; i < now.size(); ++i)
+                    shown[i] += k * (now[i] - shown[i]);
+            };
+
+            smooth (shownFacade, measured.facadeDb);
+            smooth (shownLfe, measured.lfeDb);
+            auto shown = measured;
+            shown.facadeDb = shownFacade;
+            shown.lfeDb = shownLfe;
+            spectrum.update (shown, alerts, dt);
+        }
 
         // Everything shown as a curve or a number goes through the display
         // inertia: flicker is averaged out, real changes are followed quickly.
@@ -916,13 +880,13 @@ void MainComponent::timerCallback()
                 shownAlerts.curves[c][i] = filters[i].update (alerts.curves[c][i], dt);
         }
 
-        correlation.update (engine->result(), shownAlerts, alerting.threshold, alerting.outOfPhaseOnly);
+        correlation.update (measured, shownAlerts, alerting.threshold, alerting.outOfPhaseOnly);
 
         // Playback chains, robustness, LFE dependence, overlap
         ChainsInfo info;
-        info.translation = simulator.compute (engine->result(), currentLevel(), lfeGainToggle.getToggleState() ? lfeInBandGainDb : 0.0);
-        info.sessionCorrelation = { { engine->globalCorrelation (0), engine->globalCorrelation (1), engine->globalCorrelation (2) } };
-        info.sessionSeconds = engine->globalSeconds();
+        info.translation = simulator.compute (measured, currentLevel(), lfeGainToggle.getToggleState() ? lfeInBandGainDb : 0.0);
+        info.sessionCorrelation = snapshot.globalCorrelation;
+        info.sessionSeconds = snapshot.globalSeconds;
         auto& t = info.translation;
 
         if (! t.hasBass)
@@ -1025,7 +989,7 @@ void MainComponent::timerCallback()
     }
 
     // Transient engine: one event per attack of the mix
-    for (const auto& event : engine->takeTransientEvents())
+    for (const auto& event : snapshot.events)
     {
         transientStrip.show (event);
 
@@ -1035,6 +999,7 @@ void MainComponent::timerCallback()
                 flash = 1.0;
     }
 
+    snapshot.events.clear();        // each event is shown once
     transientStrip.advance (dt);
     SpeakerIndicator* speakers[] = { &header.left, &header.centre, &header.right };
 
@@ -1073,7 +1038,7 @@ void MainComponent::loadState()
 
     {
         const char* keys[] = { "devTolSoft", "devTolMedium", "devTolStrong", "devLate", "devEarly", "devCeiling",
-                               "devInfraWeight", "devInfraLo", "devInfraHi", "devLevelWeight", "devLevelRed", "devListening" };
+                               "devInfraWeight", "devInfraLo", "devInfraHi", "devLevelWeight", "devLevelRed" };
         int index = 0;
 
         for (auto* slider : devSliders())
@@ -1088,11 +1053,12 @@ void MainComponent::loadState()
     }
     animationToggle.setToggleState (settings->getBoolValue ("animation", true), juce::dontSendNotification);
     header.setAnimationEnabled (animationToggle.getToggleState());
-    inertia.setValue (settings->getDoubleValue ("inertia", 70.0));
+    inertia.setValue (settings->getDoubleValue ("inertia", 50.0));
     integration.setValue (settings->getDoubleValue ("integration", 2.0));
     levelButtons[(size_t) juce::jlimit (0, 2, settings->getIntValue ("alertSensitivity", 3) - 1)].setToggleState (true, juce::dontSendNotification);
     decay.setValue (settings->getDoubleValue ("decay", 1.0));
     scoreSpeed.setValue (settings->getDoubleValue ("scoreSpeed", 0.0));
+    setListeningLevel (settings->getDoubleValue ("listeningLevel", settings->getDoubleValue ("devListening", 85.0)));
     transientToggle.setToggleState (settings->getBoolValue ("transientCheck", false), juce::dontSendNotification);
     tAttack.setValue (settings->getDoubleValue ("transientAttack", 40.0));
     tHoldProfile.setValue (settings->getDoubleValue ("transientHoldProfile", 25.0));
@@ -1127,7 +1093,7 @@ void MainComponent::saveState()
 
     {
         const char* keys[] = { "devTolSoft", "devTolMedium", "devTolStrong", "devLate", "devEarly", "devCeiling",
-                               "devInfraWeight", "devInfraLo", "devInfraHi", "devLevelWeight", "devLevelRed", "devListening" };
+                               "devInfraWeight", "devInfraLo", "devInfraHi", "devLevelWeight", "devLevelRed" };
         int index = 0;
 
         for (auto* slider : devSliders())
@@ -1139,6 +1105,7 @@ void MainComponent::saveState()
     settings->setValue ("alertSensitivity", (int) currentLevel() + 1);
     settings->setValue ("decay", decay.value());
     settings->setValue ("scoreSpeed", scoreSpeed.value());
+    settings->setValue ("listeningLevel", listeningDbC);
     settings->setValue ("transientCheck", transientToggle.getToggleState());
     settings->setValue ("transientAttack", tAttack.value());
     settings->setValue ("transientHoldProfile", tHoldProfile.value());

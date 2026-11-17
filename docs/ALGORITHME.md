@@ -230,8 +230,9 @@ fort ou deux fois plus faible.** C'est le fondement chiffré de la règle « plu
 de 6 dB, c'est grave ».
 
 **Niveau d'écoute.** La conversion n'est plus figée à 80 phones : elle suit le
-niveau réel du grave et le niveau d'écoute choisi (panneau Dev, 70 à 90 dB(C) ;
-76 à 85, en plus clair, sont les niveaux des auditoriums de mixage).
+niveau réel du grave et le niveau d'écoute choisi (bouton « Listening » à
+gauche de Reset, toujours affiché : 70 à 90 dB(C) ; 76 à 85, en clair, sont les
+niveaux des auditoriums de mixage).
 
 1. Le niveau d'écoute est le niveau de pression qu'un canal d'écran produit
    avec le signal de calibrage à −20 dBFS RMS : 85 dB(C) en salle [9].
@@ -250,10 +251,47 @@ niveau réel du grave et le niveau d'écoute choisi (panneau Dev, 70 à 90 dB(C)
 
 En pratique ce nombre varie peu : à 25 Hz, de 5,9 dB vers 20 phones à 5,0 dB
 à partir de 60 phones ; à 100 Hz, de 8,4 à 6,9 dB. Le niveau d'écoute change
-donc peu le score ; il change surtout ce qui est audible. Limites : la norme
-vaut pour des sons purs, de face, en champ libre, alors qu'on juge ici des
-bandes de bruit en salle ; et la lecture en dB(C) du bruit de calibrage est
-prise égale à son niveau de pression.
+donc peu la conversion ; il change surtout ce qui est audible (ci-dessous).
+Limites : la norme vaut pour des sons purs, de face, en champ libre, alors
+qu'on juge ici des bandes de bruit en salle ; et la lecture en dB(C) du bruit
+de calibrage est prise égale à son niveau de pression.
+
+**Audibilité.** Un grave que personne n'entend ne compte pas ; un grave au
+seuil compte pour la part des spectateurs qui l'entendent.
+
+1. Seuil : le seuil d'audition d'ISO 226:2003 [14] (colonne `Tf` : 78,5 dB SPL
+   à 20 Hz, 68,7 à 25 Hz, 51,1 à 40 Hz, 37,5 à 63 Hz, 26,5 à 100 Hz). C'est
+   le seuil médian de jeunes auditeurs otologiquement normaux, en champ libre
+   et binaural ; il est identique à celui d'ISO 389-7 [28], et de 20 à 250 Hz
+   le seuil en champ diffus (une salle) est le même qu'en champ libre [27].
+2. Bandes de bruit et sons purs : chaque bande de notation (20–30, 30–60,
+   60–90, 90–120 Hz) est à peu près aussi étroite qu'un filtre auditif (ERB de
+   Glasberg & Moore [29] : 24,7·(4,37·f/1000 + 1), soit 27 Hz à 25 Hz, 29 Hz à
+   40 Hz, 32 Hz à 70 Hz, 36 Hz à 100 Hz). Toute sa puissance est donc comparée
+   au seuil du son pur à son centre.
+3. Dispersion entre auditeurs : les seuils individuels se répartissent autour
+   de la valeur de la norme ; ISO 28961 [27] en donne les centiles, et la
+   littérature sur les basses fréquences cite un écart-type de l'ordre de
+   5 dB [25][30]. La part d'auditeurs qui entendent une bande de niveau `L`
+   est `Φ((L − Tf) / 5 dB)`, Φ étant la loi normale : 50 % au seuil, 98 % à
+   10 dB au-dessus, 2 % à 10 dB en dessous.
+4. Dans le score : chaque bande pèse selon le grave **entendu** (sa puissance
+   × la part qui l'entend), et la note d'un système est multipliée par la part
+   d'auditeurs qui entendent le grave tout court (celle de sa bande la plus
+   audible). Une bande inaudible rendue audible par un boost compte aussi. La
+   dépendance au niveau du sub ne retient que les écarts entendus.
+
+Conséquence : le même mix, joué plus bas, ou écouté à un niveau de calibrage
+plus faible, perd les problèmes devenus inaudibles. Mesuré : un LFE identique
+à la façade vaut 0 à −20 dBFS et 100 à −86 dBFS (inaudible à 85 dB(C)) ; à
+−54 dBFS, 27 à 85 dB(C) et 100 à 70 dB(C). La croissance très rapide de la
+sonie juste au-dessus du seuil dans le grave [25] justifie qu'une bande
+nettement au-dessus du seuil compte entièrement.
+
+Limites : le masquage par le reste du mix n'est pas modélisé, seul le seuil
+absolu l'est ; et le seuil vaut pour de jeunes auditeurs, il est plus haut chez
+la plupart des adultes. L'audibilité se désactive dans le code
+(`tuning.audibility`) si besoin.
 
 ### 3.3 Référence
 
@@ -330,8 +368,8 @@ il survit.
 | Cinéma, sub en avance (−5 et −2,5 ms) | 0,25 |
 | Bass management (les six cas) | 1 |
 
-**Dépendance** : `0,89 × pénalité de la stéréo sans LFE`, c'est-à-dire de ce que
-le grave perd partout où le LFE manque ou est mal réglé. Le plafond de 0,89
+**Dépendance** : `0,83 × pénalité de la stéréo sans LFE`, c'est-à-dire de ce que
+le grave perd partout où le LFE manque ou est mal réglé. Le plafond de 0,83
 place un grave large bande entièrement dans le LFE vers 22 : grave (la salle
 seule en décide) sans valoir une annulation.
 
@@ -344,12 +382,12 @@ pour rien.
 
 | Grave présent uniquement dans le LFE | Dépendance | Score |
 |---|---|---|
-| Sinusoïde à 20 Hz | 0,22 | 78 |
-| 30 Hz | 0,37 | 63 |
-| 40 Hz | 0,59 | 41 |
-| 50 Hz | 0,76 | 24 |
-| 70 Hz et plus | 0,89 | 11 |
-| Bruit large bande 20–120 Hz | — | 21 |
+| Sinusoïde à 20 Hz | 0,21 | 79 |
+| 30 Hz | 0,34 | 66 |
+| 40 Hz | 0,55 | 45 |
+| 50 Hz | 0,71 | 29 |
+| 70 Hz et plus | 0,83 | 17 (9 à 100 Hz) |
+| Bruit large bande 20–120 Hz | — | 20 |
 
 Les bornes viennent de trois constats (voir 3.8 bis) : le seuil d'audition
 monte très vite vers le bas (78,5 dB SPL à 20 Hz, 68,7 dB à 25 Hz, 37,5 dB à
@@ -373,8 +411,8 @@ seuil de l'alerte de phase et la tolérance `T` du score :
 
 Strong est le réglage d'origine de l'app, et le niveau par défaut.
 
-Les repères ne dépendent pas du niveau : LFE identique à la façade 0, LFE seul
-vers 22.
+Les repères ne dépendent pas du niveau de sévérité : LFE identique à la façade 0, LFE seul
+vers 20 (21 à 26 selon que l'infra-grave est audible ou non).
 
 ### 3.7 Lecture du score et valeurs de référence
 
@@ -385,19 +423,19 @@ vers 22.
 | 20–25 | Tout le grave est dans le LFE : la salle seule en décide |
 | 0 | Un système plausible annule le grave, ou le rend deux fois plus fort |
 
-Vérifiées par les tests, sur bruit large bande, au niveau Strong :
+Vérifiées par les tests, sur bruit blanc à −20 dBFS, au niveau Strong, écoute à 85 dB(C) avec audibilité (dans ce bruit, la bande 20–30 Hz est sous le seuil et ne compte pas) :
 
 | Mix | Robustesse |
 |---|---|
 | Façade seule, LFE muet | 100 |
 | LFE sans rapport avec la façade, 10 dB sous elle à l'écoute | 100 |
-| LFE 10 dB sous la façade, à 30 % copié sur elle | 93 |
-| LFE sans rapport, aussi fort que la façade | 60 |
-| LFE 10 dB sous la façade, à 60 % copié sur elle | 57 |
-| LFE seul | 21 |
+| LFE 10 dB sous la façade, à 30 % copié sur elle | 95 |
+| LFE sans rapport, aussi fort que la façade | 65 |
+| LFE 10 dB sous la façade, à 60 % copié sur elle | 62 |
+| LFE seul | 20 |
 | LFE sans rapport, 6 dB au-dessus de la façade | 21 |
-| LFE aussi fort que la façade, à 60 % copié sur elle | 18 |
-| LFE 10 dB sous la façade, entièrement copié sur elle | 7 |
+| LFE aussi fort que la façade, à 60 % copié sur elle | 25 |
+| LFE 10 dB sous la façade, entièrement copié sur elle | 21 |
 | LFE identique à la façade | 0 |
 | LFE identique mais en retard de 5 ms | 0 |
 
@@ -410,11 +448,13 @@ grave de près de 6 dB entre un sub en polarité et un sub inversé.
 |---|---|
 | LFE à +10 dB, omission du LFE en downmix, rôle d'appoint du LFE | Normes [9][12][13] |
 | Conversion dB → sensation (5,0 à 6,9 dB par doublement) | Calculé depuis ISO 226:2003 [14] |
+| Seuil d'audition par bande | ISO 226:2003 [14] / ISO 389-7 [28] ; bandes de la largeur d'un filtre auditif [29] |
+| Dispersion des seuils (écart-type 5 dB) | Ordre de grandeur publié [25][30] ; ISO 28961 [27] en donne la distribution exacte (non consultée, payante) |
 | Tolérances des trois niveaux (3 ; 2 ; 1 dB) | Choix ; 1 dB est l'ordre de grandeur admis du plus petit écart audible [16] |
 | Filtres de bass management (Linkwitz-Riley 24 dB/oct) | Modèle courant, variable selon les appareils |
 | Filtre d'encodeur (Butterworth 8ᵉ ordre à 120 Hz) | Modèle : le filtre LFE de Dolby Digital Plus n'est pas public |
 | Étendue des défauts de salle (±5 ms, polarité) | **Hypothèse.** Le rapport SMPTE constate de larges écarts mais ses chiffres ne sont pas publics |
-| Pertinences des systèmes, plafond de dépendance (0,89), bornes et poids de l'infra-grave (25 et 60 Hz, un quart), poids de la dépendance au niveau (15 %) | **Hypothèse** d'ingénierie, suivant la consigne (0 ms ×2, avance ×0,5 ; LFE seul vers 20–25). Aucune statistique publiée sur la fréquence de ces défauts |
+| Pertinences des systèmes, plafond de dépendance (0,83), bornes et poids de l'infra-grave (25 et 60 Hz, un quart), poids de la dépendance au niveau (15 %) | **Hypothèse** d'ingénierie, suivant la consigne (0 ms ×2, avance ×0,5 ; LFE seul vers 20–25). Aucune statistique publiée sur la fréquence de ces défauts |
 | Acoustique de la salle (modes, places) | Non simulée |
 
 ### 3.8 bis Dépendance au LFE : ce que dit la littérature
@@ -435,7 +475,7 @@ Les premières vont dans le même sens : ce qui n'existe que dans le LFE peut ma
 Mesurer la dépendance par ce que perd la stéréo sans LFE est donc la traduction
 directe de ces textes. Aucune ne donne de seuil chiffré (« à partir de quelle
 part le LFE porte trop »), ni de statistique sur la proportion de spectateurs
-écoutant sans caisson : le plafond de 0,89 reste un choix.
+écoutant sans caisson : le plafond de 0,83 reste un choix.
 
 Le repli manuel décrit par Netflix n'est pas simulé : à −10 dB, le LFE y arrive
 20 dB sous son niveau de salle, ce qui change peu le résultat.
@@ -451,7 +491,28 @@ score ; il est la raison d'être de ce témoin.
 60–90, 90–120 Hz). Les marques sous le spectre se réchauffent quand les deux
 jouent à moins de 10 dB l'un de l'autre dans 60–120 Hz.
 
-## 4. Inertie d'affichage
+## 4. Cadence d'analyse et inertie d'affichage
+
+**Cadence.** L'analyse tourne dans son propre fil, à la cadence de l'audio : le
+moteur reçoit chaque échantillon et s'analyse toutes les 20 ms d'audio
+exactement, quelle que soit la taille des blocs de la carte son et quelle que
+soit la fréquence d'affichage. Avec une fenêtre de Hann de 0,5, 1 ou 2 s, deux
+analyses successives se recouvrent de 96, 98 ou 99 %. Tous les filtres et
+calculs sont en double précision ; la carte son fournit du 32 bits flottant.
+L'affichage (30 ou 60 Hz) ne touche jamais à l'audio : il lit le dernier état
+complet publié par l'analyse, plus ce qui s'est accumulé depuis sa dernière
+lecture (transitoires, crêtes des vumètres). Vérifié par les tests : même
+résultat au bit près avec des blocs de 1, 517 ou 4 096 échantillons, et aucune
+analyse perdue si l'affichage cesse de lire pendant 2 s.
+
+**Mesure et affichage.** La mesure garde ses moyennes propres (Welch) : 150 ms
+pour le spectre, 0,2 s pour les systèmes de lecture et le score, « Integration »
+pour la corrélation. Tout le reste est de l'affichage et s'applique en aval,
+sans toucher aux valeurs mesurées : le curseur « Inertia » (lissage du spectre
+affiché, 10 à 600 ms), le filtre décrit ci-dessous, « Score speed », la
+décroissance de l'alerte et le maintien des crêtes.
+
+### Inertie d'affichage
 
 Les chiffres et les courbes affichés (score, tableau des systèmes, niveaux,
 courbes de corrélation) passent par un filtre qui regarde depuis combien de
@@ -589,6 +650,18 @@ du son) : bruit blanc ou rose, aucune ; grondement grave (sous 90 Hz), 1 à 3.
     *Noise & Health*, vol. 6, 2004.
 26. RTINGS, méthodes de mesure « Low-Frequency Extension » des téléviseurs et
     barres de son.
+27. ISO 28961:2012, *Acoustics — Statistical distribution of hearing
+    thresholds of otologically normal persons in the age range from 18 years
+    to 25 years under free-field listening conditions*.
+28. ISO 389-7:2019, *Acoustics — Reference zero for the calibration of
+    audiometric equipment — Part 7: Reference threshold of hearing under
+    free-field and diffuse-field listening conditions*.
+29. B. R. Glasberg, B. C. J. Moore, « Derivation of auditory filter shapes from
+    notched-noise data », *Hearing Research*, vol. 47, 1990.
+30. Pedersen & Marquardt, 2009 : écart-type des seuils d'audition de l'ordre
+    de 5 dB aux basses fréquences. Relevé par une recherche, texte non
+    consulté (source secondaire).
+
 
 ## Niveau du LFE et réglages
 

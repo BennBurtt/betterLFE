@@ -45,7 +45,7 @@
 //                   bass-managed systems. The worst case, not an average: a
 //                   mix that cancels on one plausible system is not made safe
 //                   by the systems where it survives.
-//     dependence  = 0.89 x the penalty of the stereo downmix without LFE, i.e.
+//     dependence  = 0.83 x the penalty of the stereo downmix without LFE, i.e.
 //                   of what the bass loses wherever the LFE is missing or
 //                   wrongly set. Infra-bass is left out of it: below 25 Hz
 //                   it counts for a quarter, from 60 Hz up it counts fully.
@@ -118,9 +118,14 @@ struct Translation
     // double it there. This is what turns a level change into a sensation.
     std::array<double, ChainResult::numBands> bandSplDb {}, bandPhon {}, bandDoublingDb {};
 
+    // Share of listeners who hear the reference bass of each band, 0..1 (see
+    // PlaybackSimulator::audibleShare): 1 when audibility is switched off.
+    std::array<double, ChainResult::numBands> bandAudible { { 1.0, 1.0, 1.0, 1.0 } };
+
     double levelDependence = 0.0;       // 0..1, drives the warning and the score: the mean against the "red" value
     double levelMeanDb = 0.0;           // mean of that difference over every system and subwoofer level, in dB
     double levelDeviationDb = 0.0;      // the largest one, signed: negative when the bass falls short
+    int levelScenarios = 0;             // how many system x subwoofer-level cases were rated
 
     // LFE as heard (+10 dB) against the screen channels, 20-120 Hz
     double lfeBalanceDb = 0.0;          // positive: the LFE is the louder of the two
@@ -203,7 +208,7 @@ public:
     // With all the bass in the LFE, spread over 20-120 Hz, the score stops at
     // about 22: bad, since the room alone then decides the bass, but not as bad
     // as a cancellation. (The infra-bass part of it is not counted.)
-    static constexpr double dependenceCeiling = 0.89;
+    static constexpr double dependenceCeiling = 0.83;
 
     static constexpr double speedOfSound = 343.0;       // m/s: a subwoofer 1.7 m further away is 5 ms late
 
@@ -223,6 +228,12 @@ public:
         // cinema calibration (SMPTE RP 200); dubbing stages and smaller
         // rooms work between 76 and 85.
         double listeningLevelDbC = 85.0;
+
+        // Audibility: bass under the threshold of hearing at the listening
+        // level counts for nothing; around the threshold it counts for the
+        // share of listeners who hear it.
+        bool audibility = true;
+        double thresholdSpreadDb = 5.0;     // spread (1 sigma) of individual thresholds at low frequencies
     };
 
     static constexpr double referenceDbfs = -20.0;      // RMS level of the calibration signal
@@ -231,6 +242,13 @@ public:
     /** ISO 226:2003: sound pressure level of a pure tone at `hz` (20..125) heard at `phon`, and the reverse. */
     static double iso226Spl (double hz, double phon);
     static double iso226Phon (double hz, double splDb);
+
+    /** ISO 226:2003 threshold of hearing (Tf), free field, binaural, 18-25 years: the median listener. */
+    static double hearingThresholdDb (double hz);
+
+    /** Share of listeners for whom a band at `splDb`, centred on `hz`, is above threshold:
+        thresholds spread normally around the ISO 226 value with `spreadDb` (1 sigma). */
+    static double audibleShare (double hz, double splDb, double spreadDb);
 
     Tuning tuning;
 

@@ -249,8 +249,8 @@ void HeaderBar::advance (double seconds)
     if (! animated)
         return;
 
-    // Always moving; a little faster when something plays
-    phase += seconds * (1.0 + 0.6 * level);
+    // Always moving, slowly: a quarter of the former pace, hardly faster when something plays
+    phase += seconds * 0.25 * (1.0 + 0.2 * level);
     repaint();
 }
 

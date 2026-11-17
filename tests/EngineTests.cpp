@@ -2,6 +2,7 @@
 // Plain executable: exits with 0 when every check passes.
 
 #include "../core/AlertTracker.h"
+#include "../core/AnalysisRunner.h"
 #include "../core/Inertia.h"
 #include "../core/LfeEngine.h"
 #include "../core/PlaybackSim.h"
@@ -1339,6 +1340,50 @@ static void testPlaybackChains()
                "listening level: 9 dB lower is heard much quieter in the bass", a85.bandPhon[1] - a76.bandPhon[1]);
     }
     {
+        // Audibility (ISO 226:2003 threshold, listeners spread by 5 dB)
+        check (std::abs (PlaybackSimulator::hearingThresholdDb (20.0) - 78.5) < 1e-9
+                 && std::abs (PlaybackSimulator::hearingThresholdDb (63.0) - 37.5) < 1e-9, "threshold of hearing: ISO 226 values", 0.0);
+        check (std::abs (PlaybackSimulator::audibleShare (40.0, PlaybackSimulator::hearingThresholdDb (40.0), 5.0) - 0.5) < 1e-9,
+               "at the threshold, half the listeners hear it", 0.0);
+        check (PlaybackSimulator::audibleShare (40.0, PlaybackSimulator::hearingThresholdDb (40.0) + 10.0, 5.0) > 0.97
+                 && PlaybackSimulator::audibleShare (40.0, PlaybackSimulator::hearingThresholdDb (40.0) - 10.0, 5.0) < 0.03,
+               "two sigma above: nearly all hear it; two below: nearly none", 0.0);
+
+        // The same LFE-identical-to-screen mix, played loud and played very quietly
+        const auto identical = [] (double gain)
+        {
+            const auto bass = scaled (noise (8.0, 95), gain);
+            LfeEngine e (sampleRate, 1.0, 0.0);
+            Scene s;
+            s.c = bass;
+            s.lfe = scaled (bass, std::pow (10.0, -10.0 / 20.0));
+            run (e, s);
+            return e.result();
+        };
+
+        PlaybackSimulator sim, off, quietRoom;
+        off.tuning.audibility = false;
+        quietRoom.tuning.listeningLevelDbC = 70.0;
+        const auto loud = identical (1.0), faint = identical (0.0005);     // white noise at -20 and at -86 dBFS
+        const double loudScore = sim.compute (loud).robustness, faintScore = sim.compute (faint).robustness;
+        std::printf ("  identical LFE: robustness %.0f at -20 dBFS, %.0f at -86 dBFS (inaudible at 85 dB(C)), %.0f with audibility off\n",
+                     loudScore, faintScore, off.compute (faint).robustness);
+        check (loudScore < 1.0, "identical LFE, audible: 0", loudScore);
+        check (faintScore > 99.0, "identical LFE, under the threshold of hearing: nothing heard changes, 100", faintScore);
+        check (off.compute (faint).robustness < 1.0, "audibility off: level does not matter", off.compute (faint).robustness);
+
+        // A level that a quieter room no longer hears
+        const auto middle = identical (0.02);      // -54 dBFS
+        std::printf ("  identical LFE at -54 dBFS: robustness %.0f at 85 dB(C), %.0f at 70 dB(C)\n",
+                     sim.compute (middle).robustness, quietRoom.compute (middle).robustness);
+        check (quietRoom.compute (middle).robustness > sim.compute (middle).robustness + 20.0,
+               "a quieter listening level hears less of the bass", quietRoom.compute (middle).robustness);
+
+        // LFE level dependence: every cinema and bass-managed system, at every subwoofer level
+        check (sim.compute (loud).levelScenarios == 16 * PlaybackSimulator::numLevelSteps,
+               "level dependence rated for each of the 16 systems at each subwoofer level", sim.compute (loud).levelScenarios);
+    }
+    {
         // The bass in L and R, a quieter centre, and an LFE that is the centre
         // inverted: against the centre alone it cancels, against the whole
         // screen it is small. Correlation says -1; the level-weighted value
@@ -1532,6 +1577,87 @@ static void testInertiaAndAutoReset()
     }
 }
 
+static void testRunner()
+{
+    std::printf ("analysis at the pace of the audio (20 ms steps)\n");
+
+    // Kicks in C, the same 12 ms late in the LFE, over a bed of noise
+    Scene s;
+    s.c = sum (noise (6.0, 61), sine (45.0, -12.0, 6.0));
+    s.lfe = sum (scaled (noise (6.0, 61), 0.5), noise (6.0, 62));
+    const auto data = s.interleaved();
+    const int frames = (int) s.length();
+
+    struct Result { Snapshot last; long long steps = 0; int reads = 0; };
+
+    // Feed in blocks of `block` frames and read every `readEvery` frames, as a display would
+    const auto runWith = [&] (int block, int readEvery)
+    {
+        AnalysisRunner runner (sampleRate, 1.0);
+        Result r;
+        int sinceRead = 0;
+
+        for (int pos = 0; pos < frames; pos += block)
+        {
+            const int n = std::min (block, frames - pos);
+            runner.feed (data.data() + (size_t) pos * numChannels, n);
+            sinceRead += n;
+
+            if (sinceRead >= readEvery)
+            {
+                sinceRead = 0;
+                Snapshot snap;
+
+                if (runner.take (snap))
+                {
+                    ++r.reads;
+                    r.last = snap;
+                }
+            }
+        }
+
+        Snapshot snap;
+
+        if (runner.take (snap))
+            r.last = snap;
+
+        r.steps = r.last.step;
+        return r;
+    };
+
+    const auto a = runWith (1, 800), b = runWith (517, 800), c = runWith (4096, 96000);
+
+    const long long expected = frames / (int) std::lround (AnalysisRunner::hopSeconds * sampleRate);
+    check (a.steps == expected && b.steps == expected && c.steps == expected, "one analysis every 20 ms of audio, whatever the blocks",
+           (double) c.steps);
+
+    double worst = 0.0;
+
+    for (size_t i = 0; i < a.last.analysis.facadeDb.size(); ++i)
+        worst = std::max ({ worst, std::abs (a.last.analysis.facadeDb[i] - b.last.analysis.facadeDb[i]),
+                            std::abs (a.last.analysis.facadeDb[i] - c.last.analysis.facadeDb[i]) });
+
+    for (size_t g = 0; g < a.last.analysis.grid.size(); ++g)
+        worst = std::max ({ worst, std::abs (a.last.analysis.correlation[chC][g] - b.last.analysis.correlation[chC][g]),
+                            std::abs (a.last.analysis.correlation[chC][g] - c.last.analysis.correlation[chC][g]) });
+
+    check (worst < 1e-9, "same result whatever the block size and however often it is read", worst);
+
+    // A display that stops looking for 2 s loses nothing: the next read sees it all
+    check (c.reads >= 1 && c.steps == expected, "a stalled reader misses no step", (double) c.reads);
+
+    // Peaks accumulate between reads
+    {
+        AnalysisRunner runner (sampleRate, 1.0);
+        std::vector<float> click (4 * 2000, 0.0f);
+        click[(size_t) 1000 * 4 + chC] = 0.5f;
+        runner.feed (click.data(), 2000);
+        Snapshot snap;
+        check (runner.take (snap) && std::abs (snap.screenPeak[1] - 0.5) < 1e-9, "a peak between two reads is kept", snap.screenPeak[1]);
+        check (! runner.take (snap), "nothing new: nothing to read", 0.0);
+    }
+}
+
 int main()
 {
     testFilterDesign();
@@ -1543,6 +1669,7 @@ int main()
     testBlockSizeIndependence();
     testLowLevelAndLowFrequency();
     testTransients();
+    testRunner();
     testPlaybackChains();
     testInertiaAndAutoReset();
 

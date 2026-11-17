@@ -3,6 +3,7 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "AnalysisThread.h"
 #include "AudioInput.h"
 #include "ChannelFormats.h"
 #include "Widgets.h"
@@ -69,8 +70,7 @@ private:
     void selectDevice (const juce::String& name);
     void refreshDeviceList();
     void updateStatus (const juce::String& error = {});
-    void rebuildEngine (double sampleRate);
-    void feedDemoSignal (int numFrames);
+    double windowSeconds() const;
     void loadState();
     void saveState();
 
@@ -85,7 +85,11 @@ private:
 
     juce::AudioDeviceManager deviceManager;
     AudioInput input;
-    std::unique_ptr<LfeEngine> engine;
+    AnalysisThread analysis { input };     // reads the audio and analyses it, 20 ms at a time
+    Snapshot snapshot;                     // the latest state it published
+    bool haveData = false;
+    int runnerGeneration = -1;
+    std::vector<double> shownFacade, shownLfe;     // spectrum as displayed (Inertia applies here only)
     AlertTracker alerts;
     PlaybackSimulator simulator;
     Settings engineSettings;
@@ -110,7 +114,7 @@ private:
     juce::ToggleButton lfeGainToggle { "LFE +10 dB (theatre level)" }, animationToggle { "Background animation" },
                        peakHoldToggle { "Peak hold" }, tiltToggle { "Bass tilt (old display)" },
                        levelWeightToggle { "Weigh by level balance" };
-    LabelledSlider inertia { "Inertia:", 0, 100, 1, 70 }, integration { "Integration:", 0.5, 5.0, 0.1, 2.0 },
+    LabelledSlider inertia { "Inertia:", 0, 100, 1, 50 }, integration { "Integration:", 0.5, 5.0, 0.1, 2.0 },
                    decay { "Decay:", 0.1, 4.0, 0.05, 1.0 };
     juce::ToggleButton transientToggle { "Transient check on" };
     LabelledSlider tAttack { "Attack:", 0, 100, 1, 40 }, tHoldProfile { "Hold:", 0, 100, 1, 25 },
@@ -126,20 +130,25 @@ private:
     LabelledSlider dTolSoft { "Tolerance, Soft:", 0.5, 4.5, 0.1, 3 }, dTolMedium { "Tolerance, Medium:", 0.5, 4.5, 0.1, 2 },
                    dTolStrong { "Tolerance, Strong:", 0.5, 4.5, 0.1, 1 },
                    dLate { "Weight, cinema sub late:", 0, 1, 0.05, 0.5 }, dEarly { "Weight, cinema sub early:", 0, 1, 0.05, 0.25 },
-                   dCeiling { "LFE dependence, ceiling:", 0, 1, 0.01, 0.89 }, dInfraWeight { "Infra-bass weight:", 0, 1, 0.05, 0.25 },
+                   dCeiling { "LFE dependence, ceiling:", 0, 1, 0.01, 0.83 }, dInfraWeight { "Infra-bass weight:", 0, 1, 0.05, 0.25 },
                    dInfraLo { "Infra-bass up to:", 10, 40, 1, 25 }, dInfraHi { "Full weight from:", 40, 100, 1, 60 },
                    dLevelWeight { "LFE level dependence, weight in score:", 0, 0.5, 0.01, 0.15 },
                    dLevelRed { "LFE level dependence, red at a mean of:", 0.5, 12, 0.1, 3 };
-    LabelledSlider dListening { "Listening level:", 70, 90, 1, 85 };
     juce::Label devLoudnessLabel;       // what the listening level makes of the bass playing now
     juce::TextButton devDefaultsButton { "Defaults" };
     std::vector<LabelledSlider*> devSliders();
     void applyDevSettings();
     juce::TextButton resetButton { "Reset" };
+
+    // Listening level, left of Reset: always shown, a click opens the choice
+    juce::TextButton listeningButton;
+    double listeningDbC = 85.0;
+    void setListeningLevel (double dbC);
+    void showListeningMenu();
     double slowScore = -1.0;        // the score after the extra "Score speed" smoothing; negative: not started
     void updateSpeakers();
 
-    double lastTick = 0.0, engineRate = 0.0, demoTime = 0.0;
+    double lastTick = 0.0;
     double historyClock = 0.0;
     int displayedScore = -1;
 
@@ -152,14 +161,11 @@ private:
 
     // How hard each screen channel plays, for the cones: this frame's peak
     // against the loudest of the last few seconds, so that it shows at any level
-    void meterChannels (const float* interleaved, int numFrames);
     std::array<double, 3> framePeak { { 0.0, 0.0, 0.0 } }, recentPeak { { 0.0, 0.0, 0.0 } }, coneDrive { { 0.0, 0.0, 0.0 } };
-    double bassState[2] = { 0.0, 0.0 }, bassFramePeak = 0.0, bassRecentPeak = 0.0, bassDrive = 0.0;
+    double bassFramePeak = 0.0, bassRecentPeak = 0.0, bassDrive = 0.0;
     double anyFramePeak = 0.0;      // loudest sample of the frame over the four channels, for the waveform of the history
-    int inputGeneration = -1, framesShown = 0;
+    int framesShown = 0;
     bool restoring = false;
-    std::vector<float> scratch;
-    std::vector<std::array<double, 3>> demoTones;   // frequency, phase, group
 };
 
 } // namespace subguard
