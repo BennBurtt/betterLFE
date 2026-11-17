@@ -416,8 +416,42 @@ void MainComponent::buildCards()
                   transientDefaultsButton.setBounds (r.removeFromTop (24).removeFromRight (90));
               });
 
-    populate (chainsCard, 600, 404, { &chainsView },
-              [this] (juce::Rectangle<int> r) { chainsView.setBounds (r); });
+    // Rooms of the Room Sim that count in the score
+    roomTicksLabel.setText ("Rooms in the score (modal simulation, see the Room Sim tab):", juce::dontSendNotification);
+    roomTicksLabel.setFont (uiFont (12.0f, true));
+    roomTicksLabel.setColour (juce::Label::textColourId, theme::dimText);
+
+    {
+        const auto specs = RoomSimulator::defaultRooms();
+
+        for (size_t i = 0; i < specs.size(); ++i)
+        {
+            auto tick = std::make_unique<juce::ToggleButton> (juce::String (specs[i].shortName));
+            tick->setTooltip (juce::String (specs[i].name) + ": " + juce::String (specs[i].length, 0) + " x " + juce::String (specs[i].width, 0)
+                              + " x " + juce::String (specs[i].height, 1) + " m, RT60 " + juce::String (specs[i].rt60, 2) + " s");
+            tick->setToggleState (roomSelected[i], juce::dontSendNotification);
+            tick->onClick = [this, i] { setRoomSelected ((int) i, roomTicks[i]->getToggleState()); };
+            roomTicks.push_back (std::move (tick));
+        }
+    }
+
+    roomView.onToggle = [this] (int room) { setRoomSelected (room, ! roomSelected[(size_t) room]); };
+    roomView.setSelection (roomSelected);
+
+    populate (chainsCard, 600, 456, { &chainsView, &roomTicksLabel },
+              [this] (juce::Rectangle<int> r)
+              {
+                  auto ticks = r.removeFromBottom (3 * 24);
+                  roomTicksLabel.setBounds (r.removeFromBottom (22));
+                  chainsView.setBounds (r);
+                  const int width = ticks.getWidth() / 5;
+
+                  for (size_t i = 0; i < roomTicks.size(); ++i)
+                      roomTicks[i]->setBounds (ticks.getX() + width * (int) (i % 5), ticks.getY() + 24 * (int) (i / 5), width, 24);
+              });
+
+    for (auto& tick : roomTicks)
+        cards[(size_t) chainsCard].addAndMakeVisible (tick.get());
 
     // Dev panel
     {
@@ -425,8 +459,6 @@ void MainComponent::buildCards()
         const auto plain = [] (double v) { return juce::String (v, 2); };
         const auto hz = [] (double v) { return juce::String ((int) v) + " Hz"; };
         dTolSoft.format = dTolMedium.format = dTolStrong.format = dLevelRed.format = db;
-        dSeat.format = plain;
-        dSeat.setTooltip ("How much the seat-to-seat scenarios (worst and best 10 % of seats) count in the score.");
         dLate.format = dEarly.format = dCeiling.format = dInfraWeight.format = dLevelWeight.format = plain;
         dInfraLo.format = dInfraHi.format = hz;
         devLoudnessLabel.setFont (uiFont (11.5f));
@@ -460,7 +492,6 @@ void MainComponent::buildCards()
             dInfraHi.setValue (d.infraHiHz);
             dLevelWeight.setValue (d.levelDependenceWeight);
             dLevelRed.setValue (d.levelRedDb);
-            dSeat.setValue (d.seatRelevance);
         };
 
         auto& card = cards[(size_t) devCard];
@@ -745,7 +776,7 @@ void MainComponent::showListeningMenu()
 std::vector<LabelledSlider*> MainComponent::devSliders()
 {
     return { &dTolSoft, &dTolMedium, &dTolStrong, &dLate, &dEarly, &dCeiling,
-             &dInfraWeight, &dInfraLo, &dInfraHi, &dLevelWeight, &dLevelRed, &dSeat };
+             &dInfraWeight, &dInfraLo, &dInfraHi, &dLevelWeight, &dLevelRed };
 }
 
 void MainComponent::applyDevSettings()
@@ -753,7 +784,6 @@ void MainComponent::applyDevSettings()
     auto& t = simulator.tuning;
     t.toleranceDb = { { dTolSoft.value(), dTolMedium.value(), dTolStrong.value() } };
     t.lateRelevance = dLate.value();
-    t.seatRelevance = dSeat.value();
     t.earlyRelevance = dEarly.value();
     t.dependenceCeiling = dCeiling.value();
     t.infraWeight = dInfraWeight.value();
@@ -762,6 +792,16 @@ void MainComponent::applyDevSettings()
     t.levelDependenceWeight = dLevelWeight.value();
     t.levelRedDb = dLevelRed.value();
     t.listeningLevelDbC = listeningDbC;
+}
+
+void MainComponent::setRoomSelected (int room, bool on)
+{
+    if (room < 0 || (size_t) room >= roomSelected.size())
+        return;
+
+    roomSelected[(size_t) room] = on;
+    roomTicks[(size_t) room]->setToggleState (on, juce::dontSendNotification);
+    roomView.setSelection (roomSelected);
 }
 
 void MainComponent::updateSpeakers()
@@ -930,9 +970,13 @@ void MainComponent::timerCallback()
         // Playback chains, robustness, LFE dependence, overlap
         ChainsInfo info;
         info.translation = simulator.compute (measured, currentLevel(), lfeGainToggle.getToggleState() ? lfeInBandGainDb : 0.0);
-        if (roomMode)
+        // Room Sim: computed when shown or when ticked rooms count in the score
+        if (roomMode || std::find (roomSelected.begin(), roomSelected.end(), true) != roomSelected.end())
+        {
             roomResult = roomSim.compute (measured, info.translation, simulator.tuning.toleranceDb[(size_t) currentLevel()],
                                           lfeGainToggle.getToggleState() ? lfeInBandGainDb : 0.0);
+            RoomSimulator::applyToScore (info.translation, roomResult, roomSelected, simulator.tuning.levelDependenceWeight);
+        }
 
         info.sessionCorrelation = snapshot.globalCorrelation;
         info.sessionSeconds = snapshot.globalSeconds;
@@ -1096,7 +1140,7 @@ void MainComponent::loadState()
 
     {
         const char* keys[] = { "devTolSoft", "devTolMedium", "devTolStrong", "devLate", "devEarly", "devCeiling",
-                               "devInfraWeight", "devInfraLo", "devInfraHi", "devLevelWeight", "devLevelRed", "devSeat" };
+                               "devInfraWeight", "devInfraLo", "devInfraHi", "devLevelWeight", "devLevelRed" };
         int index = 0;
 
         for (auto* slider : devSliders())
@@ -1116,6 +1160,14 @@ void MainComponent::loadState()
     levelButtons[(size_t) juce::jlimit (0, 2, settings->getIntValue ("alertSensitivity", 3) - 1)].setToggleState (true, juce::dontSendNotification);
     decay.setValue (settings->getDoubleValue ("decay", 1.0));
     scoreSpeed.setValue (settings->getDoubleValue ("scoreSpeed", 0.0));
+
+    {
+        const auto saved = settings->getValue ("roomSelection");
+
+        if (saved.length() == (int) roomSelected.size())
+            for (int i = 0; i < saved.length(); ++i)
+                setRoomSelected (i, saved[i] == '1');
+    }
     setListeningLevel (settings->getDoubleValue ("listeningLevel", settings->getDoubleValue ("devListening", 85.0)));
     transientToggle.setToggleState (settings->getBoolValue ("transientCheck", false), juce::dontSendNotification);
     tAttack.setValue (settings->getDoubleValue ("transientAttack", 40.0));
@@ -1151,7 +1203,7 @@ void MainComponent::saveState()
 
     {
         const char* keys[] = { "devTolSoft", "devTolMedium", "devTolStrong", "devLate", "devEarly", "devCeiling",
-                               "devInfraWeight", "devInfraLo", "devInfraHi", "devLevelWeight", "devLevelRed", "devSeat" };
+                               "devInfraWeight", "devInfraLo", "devInfraHi", "devLevelWeight", "devLevelRed" };
         int index = 0;
 
         for (auto* slider : devSliders())
@@ -1163,6 +1215,15 @@ void MainComponent::saveState()
     settings->setValue ("alertSensitivity", (int) currentLevel() + 1);
     settings->setValue ("decay", decay.value());
     settings->setValue ("scoreSpeed", scoreSpeed.value());
+
+    {
+        juce::String rooms;
+
+        for (bool on : roomSelected)
+            rooms << (on ? "1" : "0");
+
+        settings->setValue ("roomSelection", rooms);
+    }
     settings->setValue ("listeningLevel", listeningDbC);
     settings->setValue ("transientCheck", transientToggle.getToggleState());
     settings->setValue ("transientAttack", tAttack.value());

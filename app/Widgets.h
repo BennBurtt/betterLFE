@@ -239,9 +239,16 @@ class RoomSimView : public juce::Component
 public:
     void update (const RoomSimResult&, double robustness, bool hasScore);
     void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+
+    /** Which rooms count in the score; a click on a row toggles it. */
+    void setSelection (const std::vector<bool>& on)     { selected = on; repaint(); }
+    std::function<void (int room)> onToggle;
 
 private:
     RoomSimResult result;
+    std::vector<bool> selected;
+    std::vector<juce::Rectangle<float>> rowAreas;
     std::vector<double> shownRoom;      // room scores, smoothed for display
     double robustness = 100.0;
     bool hasScore = false;

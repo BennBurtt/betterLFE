@@ -314,26 +314,7 @@ en interaction.
 |---|---|---|
 | Cinéma | sub trop près ou trop loin de 0,9 m et 1,7 m (soit ±2,5 et ±5 ms à 343 m/s), ou en place × polarité normale ou inversée | 10 |
 | Bass management | canaux d'écran croisés vers le sub (Linkwitz-Riley 4ᵉ ordre) à 60, 80, 100 Hz, LFE passe-bas 120 Hz ; avec et sans passe-bas raide à 120 Hz tenant lieu de filtre d'encodeur | 6 |
-| Place à place | dans une salle réverbérante, la phase entre sub et écran change d'une place à l'autre ; avec une phase répartie au hasard, les 10 % de places les pires, la place médiane et les 10 % les meilleures | 3 |
 | Stéréo | le mix sans son LFE, comme dans tout downmix deux canaux. Seul le LFE est retiré : la façade reste sommée comme dans la référence, pour que la façon dont L, C et R se replient (qui ne dépend pas du LFE) ne compte pas comme une perte | 1 |
-
-**Place à place.** Au-delà des premiers mètres, le son du sub et celui de
-l'écran arrivent à chaque place avec un écart de phase qui change d'une place à
-l'autre. Dans une salle réverbérante, au-dessus de la fréquence de Schroeder
-(`f ≈ 2000·√(TR60/V)` : environ 30 Hz pour un auditorium de 2 000 m³ à 0,4 s,
-70 Hz pour une régie de 240 m³ à 0,3 s), cet écart est pratiquement aléatoire
-[31]. Avec une phase φ uniforme, le terme croisé vaut `2·|Sfl|·cos φ` : les
-10 % de places les pires ont `cos φ ≤ −0,951`, la place médiane 0, les 10 % les
-meilleures `cos φ ≥ +0,951` (`cos φ = −cos(π·p)` pour le centile p). Ces trois
-places sont notées comme les autres systèmes (pertinence 1, réglable dans
-Dev).
-
-C'est la justification physique de la décorrélation : un LFE corrélé à la
-façade fait varier le grave d'une place à l'autre (mesuré, LFE aussi fort que
-la façade et identique : 16 dB d'écart entre les 10 % pires et les 10 %
-meilleures), un LFE décorrélé s'additionne de la même façon partout (écart
-mesuré 0,03 dB). Limite : sous la fréquence de Schroeder, ce sont les modes
-d'une salle donnée qui décident, et ils ne sont pas simulés ici.
 
 **Dépendance au niveau du sub (« LFE level dependence »).** Un avertissement,
 qui retire aussi jusqu'à 15 % du score. Chacun des 16 systèmes cinéma et bass management est recalculé avec son
@@ -346,7 +327,7 @@ portant au moins 20 % du grave) :
 `écart = variation réelle − variation attendue d'un LFE sans rapport`
 
 La valeur affichée est la **moyenne** de cet écart sur tous les cas calculés
-(19 systèmes × 8 niveaux, la bande la plus touchée de chaque cas), avec le
+(16 systèmes × 8 niveaux, la bande la plus touchée de chaque cas), avec le
 **maximum** entre parenthèses.
 
 Un écart négatif est une annulation qui s'installe, un écart positif un grave
@@ -512,8 +493,15 @@ jouent à moins de 10 dB l'un de l'autre dans 60–120 Hz.
 
 ## 3 bis. Room Sim : quinze salles, place par place
 
-Un indicateur à part, hors score principal (onglet « Room Sim », qui remplace
-l'analyseur ; le score et la frise restent).
+Onglet « Room Sim » (il remplace l'analyseur ; le score et la frise restent),
+et salles cochées dans le score.
+
+**Dans le score.** Les salles cochées (dans Playback chains ou en cliquant une
+ligne de Room Sim) comptent comme des systèmes de lecture de plus : une salle
+pèse la pénalité de sa place moyenne (1 − score de la salle / 100), et le score
+garde le pire cas, comme pour les autres systèmes. Par défaut, cinq salles du
+milieu de gamme sont cochées : multiplexes de 150, 200 et 300 places, grande
+salle de 400 places, grand format premium.
 
 **Modèle.** Chaque salle est une boîte rectangulaire aux parois rigides,
 uniformément amorties. La pression en une place r due à une source r0 est la
@@ -547,12 +535,12 @@ typiques), pas des salles mesurées : du couloir vif (18 × 6 × 5 m, 0,9 s) à
 l'IMAX traitée (30 × 22 × 16 m, 0,4 s).
 
 **Ce que le modèle apprend.** Les caissons et l'écran étant sur le même mur,
-leur écart de phase varie bien moins d'une place à l'autre que ne le suppose
-le scénario statistique « place à place » (§ 3.4). Avec un LFE identique à la
+leur écart de phase varie peu d'une place à l'autre. Avec un LFE identique à la
 façade et aussi fort, la plupart des places perdent 1 à 4 dB par rapport au
-gain « en phase » entendu en régie, avec 1 à 2 dB d'écart entre places, là où
-le scénario statistique annonce 16 dB d'écart. Ce scénario est donc pessimiste
-pour des caissons placés sous l'écran ; son poids est réglable dans Dev.
+gain « en phase » entendu en régie, avec 1 à 2 dB d'écart entre places. Un
+premier modèle statistique (phase au hasard d'une place à l'autre) annonçait
+16 dB d'écart : trop pessimiste pour des caissons sous l'écran, il a été retiré
+au profit de cette simulation.
 
 **Limites.** Les salles réelles ne sont pas des boîtes (sol en gradins, murs
 évasés, absorption variable avec la fréquence, caissons multiples réglés en
@@ -748,5 +736,4 @@ d'écran, comme en salle [9]. Décochée, il est pris tel qu'enregistré.
 **Panneau « Dev ».** Tout ce qui est un choix et non une mesure y est
 réglable : tolérances des trois niveaux, poids d'un sub en retard ou en avance,
 plafond de la dépendance au LFE, poids et bornes de l'infra-grave, poids de la
-dépendance au niveau dans le score et moyenne à laquelle sa case est rouge,
-poids des places (place à place).
+dépendance au niveau dans le score et moyenne à laquelle sa case est rouge.

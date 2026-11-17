@@ -1106,7 +1106,7 @@ static void testPlaybackChains()
         for (const auto& c : t.chains)
             worst = std::max (worst, std::abs (c.changeDb));
 
-        check (t.chains.size() == 20, "20 systems: 10 cinema, 6 bass managed, 3 seat to seat, stereo", (double) t.chains.size());
+        check (t.chains.size() == 17, "17 systems: 10 cinema, 6 bass managed, stereo", (double) t.chains.size());
         check (cinema (t, 0.0, false).weight == 1.0 && cinema (t, 0.0, true).weight == 1.0, "on time counts fully, either polarity", 0.0);
         check (home (t, 80.0, false).weight == 1.0, "bass managed counts fully", home (t, 80.0, false).weight);
         check (worst < 0.05, "screen alone: every system within 0.05 dB of the reference", worst);
@@ -1382,41 +1382,8 @@ static void testPlaybackChains()
                "a quieter listening level hears less of the bass", quietRoom.compute (middle).robustness);
 
         // LFE level dependence: every cinema and bass-managed system, at every subwoofer level
-        check (sim.compute (loud).levelScenarios == 19 * PlaybackSimulator::numLevelSteps,
-               "level dependence rated for each of the 19 cinema, home and seat systems at each subwoofer level", sim.compute (loud).levelScenarios);
-    }
-    {
-        // Seat to seat: an LFE correlated with the screen sounds different from
-        // seat to seat; a decorrelated one sounds the same everywhere
-        const auto seats = [] (const Translation& t, double percentile)
-        {
-            for (const auto& c : t.chains)
-                if (c.kind == ChainResult::Kind::seats && std::abs (c.seatPercentile - percentile) < 1e-9)
-                    return c;
-
-            return ChainResult {};
-        };
-
-        const auto scene = [] (double shared)
-        {
-            const auto n = noise (8.0, 97), other = noise (8.0, 98);
-            LfeEngine e (sampleRate, 1.0, 0.0);
-            Scene s;
-            s.c = n;
-            s.lfe = scaled (sum (scaled (n, shared), scaled (other, std::sqrt (1.0 - shared * shared))), std::pow (10.0, -10.0 / 20.0));
-            run (e, s);
-            return e.result();
-        };
-
-        PlaybackSimulator sim;
-        const auto shared = sim.compute (scene (1.0)), apart = sim.compute (scene (0.0));
-        const double spreadShared = seats (shared, 0.9).changeDb - seats (shared, 0.1).changeDb;
-        const double spreadApart = seats (apart, 0.9).changeDb - seats (apart, 0.1).changeDb;
-        std::printf ("  seat to seat, LFE as loud as the screen: worst 10 %% %+.1f dB, best 10 %% %+.1f dB if shared; %.2f dB apart if decorrelated\n",
-                     seats (shared, 0.1).changeDb, seats (shared, 0.9).changeDb, spreadApart);
-        check (spreadShared > 10.0, "correlated LFE: the bass changes a lot from seat to seat", spreadShared);
-        check (std::abs (spreadApart) < 0.5, "decorrelated LFE: the same bass at every seat", spreadApart);
-        check (std::abs (seats (apart, 0.5).changeDb) < 0.3, "decorrelated LFE: the median seat hears the mix as approved", seats (apart, 0.5).changeDb);
+        check (sim.compute (loud).levelScenarios == 16 * PlaybackSimulator::numLevelSteps,
+               "level dependence rated for each of the 16 cinema and home systems at each subwoofer level", sim.compute (loud).levelScenarios);
     }
     {
         // The bass in L and R, a quieter centre, and an LFE that is the centre
@@ -1699,7 +1666,7 @@ static void testRooms()
 
     // The first axial mode of a 10 m long room sits at c / 2L = 17.15 Hz
     {
-        const RoomSpec room { "test", 10.0, 6.0, 4.0, 0.5 };
+        const RoomSpec room { "test", "test", 10.0, 6.0, 4.0, 0.5 };
         const std::array<double, 3> front { { 0.1, 3.0, 2.0 } }, back { { 9.9, 3.0, 2.0 } };
         const auto peakBetween = [&] (double lo, double hi)
         {
@@ -1774,6 +1741,43 @@ static void testRooms()
     check (meanShared < 85.0 && thinner >= 12,
            "LFE identical to the screen and as loud: in most rooms the seats lose the in-phase gain heard on the stage", meanShared);
     check (shared.rooms[0].combinedScore <= sim.compute (sharedAnalysis).robustness + 1e-9, "room result = robustness x room score", 0.0);
+
+    // Ticked rooms enter the score as further systems: the worst one counts
+    {
+        const auto selection = RoomSimulator::defaultSelection();
+        int ticked = 0;
+
+        for (bool on : selection)
+            ticked += on;
+
+        check (ticked == 5 && ! selection.front() && ! selection.back(), "five middle rooms ticked by default", ticked);
+
+        auto withRooms = sim.compute (sharedAnalysis);
+        const double before = withRooms.robustness;
+        RoomSimulator::applyToScore (withRooms, shared, std::vector<bool> (15, true), sim.tuning.levelDependenceWeight);
+        check (withRooms.robustness <= before + 1e-9, "ticked rooms can only lower the score", withRooms.robustness);
+
+        auto apartScore = sim.compute (apartAnalysis);
+        const double apartBefore = apartScore.robustness;
+        RoomSimulator::applyToScore (apartScore, apart, std::vector<bool> (15, true), sim.tuning.levelDependenceWeight);
+        check (std::abs (apartScore.robustness - apartBefore) < 1e-9 && apartScore.worstRoom.empty(),
+               "decorrelated LFE: the rooms change nothing", apartScore.robustness);
+
+        // A room whose average seat loses more than every electrical system becomes the worst case
+        Translation t;
+        t.hasBass = true;
+        t.interaction = 0.1;
+        RoomSimResult r;
+        r.hasBass = true;
+        RoomResult bad;
+        bad.spec.name = "test room";
+        bad.roomScore = 40.0;
+        r.rooms.push_back (bad);
+        RoomSimulator::applyToScore (t, r, { true }, 0.15);
+        check (std::abs (t.interaction - 0.6) < 1e-9 && t.worstRoom == "test room" && std::abs (t.robustness - 40.0) < 1e-9,
+               "a ticked room scoring 40 sets the interaction to 0.6", t.robustness);
+        RoomSimulator::applyToScore (t, r, { false }, 0.15);
+    }
 }
 
 int main()

@@ -1003,15 +1003,6 @@ void ChainsView::paint (juce::Graphics& g)
         return nullptr;
     };
 
-    const auto seat = [&t] (double percentile) -> const ChainResult*
-    {
-        for (const auto& c : t.chains)
-            if (c.kind == ChainResult::Kind::seats && std::abs (c.seatPercentile - percentile) < 1e-9)
-                return &c;
-
-        return nullptr;
-    };
-
     const auto stereo = [&t] () -> const ChainResult*
     {
         return ! t.chains.empty() && t.chains.back().kind == ChainResult::Kind::stereo ? &t.chains.back() : nullptr;
@@ -1100,10 +1091,6 @@ void ChainsView::paint (juce::Graphics& g)
            [&] (int r, int c) { return c < 3 ? home (corners[c], r == 1) : stereo(); },
            [] (int r, int c) { return c < 3 || r == 0; });
 
-    // Seat to seat: the relative phase of subwoofer and screen changes over the seats
-    const double percentiles[] = { 0.1, 0.5, 0.9 };
-    table ({ "Worst 10 % of seats", "Median seat", "Best 10 % of seats" }, { "Cinema, seat to seat" },
-           [&] (int, int column) { return seat (percentiles[column]); });
 
     // Read-outs
     const auto line = [&] (const juce::String& label, const juce::String& value, bool warn)
@@ -1120,7 +1107,11 @@ void ChainsView::paint (juce::Graphics& g)
     const juce::String none = juce::String::fromUTF8 ("\xe2\x80\x94");
     juce::String worst;
 
-    if (t.hasBass && t.worstChain >= 0 && t.interaction > 0.02)
+    if (t.hasBass && ! t.worstRoom.empty() && t.interaction > 0.02)
+    {
+        worst = "     worst: room " + juce::String (t.worstRoom) + " (room score " + juce::String (juce::roundToInt (100.0 * (1.0 - t.interaction))) + ")";
+    }
+    else if (t.hasBass && t.worstChain >= 0 && t.interaction > 0.02)
     {
         const auto& c = t.chains[(size_t) t.worstChain];
         worst = "     worst system: " + juce::String (c.name) + " (" + (c.changeDb >= 0.0 ? "+" : "") + juce::String (c.changeDb, 1) + " dB)";
@@ -1191,8 +1182,8 @@ void ChainsView::paint (juce::Graphics& g)
     area.removeFromTop (6.0f);
     g.setColour (theme::dimText.withAlpha (0.8f));
     g.setFont (uiFont (11.0f));
-    g.drawFittedText ("Electrical models: delay, polarity, filters and level; seat to seat is a statistical model of a reverberant room. "
-                      "The modes of a given room are not simulated: a score of 100 does not protect against a room's own faults.",
+    g.drawFittedText ("Electrical models: delay, polarity, filters and level, plus the rooms ticked below (modal simulation, Room Sim tab). "
+                      "Real rooms are not boxes: a score of 100 does not protect against a given room's own faults.",
                       area.removeFromTop (30.0f).toNearestInt(), juce::Justification::topLeft, 2);
 }
 
@@ -1219,8 +1210,16 @@ void RoomSimView::update (const RoomSimResult& r, double robustnessNow, bool sco
     repaint();
 }
 
+void RoomSimView::mouseDown (const juce::MouseEvent& e)
+{
+    for (size_t i = 0; i < rowAreas.size(); ++i)
+        if (rowAreas[i].contains (e.position) && onToggle)
+            onToggle ((int) i);
+}
+
 void RoomSimView::paint (juce::Graphics& g)
 {
+    rowAreas.clear();
     g.fillAll (theme::plot);
     auto area = getLocalBounds().toFloat().reduced (16.0f, 10.0f);
 
@@ -1240,7 +1239,8 @@ void RoomSimView::paint (juce::Graphics& g)
         g.setFont (uiFont (11.5f));
         g.drawFittedText ("Fifteen rooms, twenty seats each (rectangular rooms, modal sum). Each dot is a seat: what the LFE / screen "
                           "interaction does to its bass, against the mix as approved. The room's own colour is left out: a "
-                          "decorrelated LFE puts every dot on 0. Result = bass robustness x room score.",
+                          "decorrelated LFE puts every dot on 0. Ticked rooms count in the score (click a row). "
+                          "Result = bass robustness x room score.",
                           top.toNearestInt(), juce::Justification::centredLeft, 3);
     }
 
@@ -1274,6 +1274,8 @@ void RoomSimView::paint (juce::Graphics& g)
     {
         const auto& room = result.rooms[i];
         auto row = area.removeFromTop (rowHeight);
+        rowAreas.push_back (row);
+        const bool counted = i < selected.size() && selected[i];
 
         if (i % 2 == 0)
         {
@@ -1281,10 +1283,27 @@ void RoomSimView::paint (juce::Graphics& g)
             g.fillRect (row);
         }
 
+        // Tick box: does this room count in the score?
+        {
+            auto box = row.removeFromLeft (24.0f).withSizeKeepingCentre (13.0f, 13.0f);
+            g.setColour (counted ? juce::Colour (0xff3a9be0) : juce::Colour (0xff3a3a3a));
+            g.fillRoundedRectangle (box, 3.0f);
+
+            if (counted)
+            {
+                juce::Path tick;
+                tick.startNewSubPath (box.getX() + 3.0f, box.getCentreY());
+                tick.lineTo (box.getX() + 5.5f, box.getBottom() - 3.0f);
+                tick.lineTo (box.getRight() - 2.5f, box.getY() + 3.0f);
+                g.setColour (juce::Colours::white);
+                g.strokePath (tick, juce::PathStrokeType (1.8f));
+            }
+        }
+
         // Name and size
-        auto name = row.removeFromLeft (nameWidth);
-        g.setColour (theme::text);
-        g.setFont (uiFont (12.5f));
+        auto name = row.removeFromLeft (nameWidth - 24.0f);
+        g.setColour (counted ? theme::text : theme::dimText);
+        g.setFont (uiFont (12.5f, counted));
         g.drawText (juce::String (room.spec.name), name.removeFromTop (row.getHeight() * 0.55f), juce::Justification::bottomLeft);
         g.setColour (theme::dimText);
         g.setFont (uiFont (10.0f));

@@ -52,7 +52,7 @@ namespace subguard
 
 struct RoomSpec
 {
-    std::string name;
+    std::string name, shortName;
     double length = 20.0, width = 12.0, height = 7.0;     // m
     double rt60 = 0.5;                                    // s
 };
@@ -90,6 +90,14 @@ public:
     /** Modal transfer function from a source to a receiver (positions in metres), at `hz`. */
     static std::complex<double> response (const RoomSpec&, const std::array<double, 3>& source,
                                           const std::array<double, 3>& receiver, double hz);
+
+    /** The rooms ticked by default: five of the middle of the range, neither the worst nor the best. */
+    static std::vector<bool> defaultSelection();
+
+    /** Folds the ticked rooms into the score, as further playback systems: a room
+        counts with the penalty of its average seat (1 - room score / 100), and
+        the score keeps the worst case, as for the other systems. */
+    static void applyToScore (Translation&, const RoomSimResult&, const std::vector<bool>& selected, double levelDependenceWeight);
 
     /** `translation` is the playback simulation of the same analysis (its band loudness and audibility). */
     RoomSimResult compute (const Analysis&, const Translation& translation, double toleranceDb, double lfeGainDb);

@@ -81,22 +81,55 @@ std::vector<RoomSpec> RoomSimulator::defaultRooms()
     // Representative rooms, not measured ones: sizes and reverberation times
     // typical of each kind. From the worst kind to the best.
     return {
-        { "Corridor room, live",                18.0,  6.0,  5.0, 0.90 },
-        { "Small multiplex, live",              14.0,  8.0,  5.0, 0.80 },
-        { "Old cinema, near-cubic, live",       16.0, 15.0, 12.0, 1.00 },
-        { "Narrow 120 seats",                   20.0,  9.0,  6.0, 0.70 },
-        { "Small screening room",               10.0,  6.0,  3.5, 0.60 },
-        { "Multiplex 150 seats",                16.0, 11.0,  6.0, 0.60 },
-        { "Multiplex 200 seats",                20.0, 13.0,  7.0, 0.55 },
-        { "Multiplex 300 seats",                24.0, 15.0,  8.0, 0.60 },
-        { "Large 400 seats",                    28.0, 18.0, 10.0, 0.60 },
-        { "Mix room (240 m3)",                  10.0,  6.0,  4.0, 0.30 },
-        { "Dubbing stage",                      18.0, 12.0,  7.0, 0.35 },
-        { "Premium large format",               30.0, 20.0, 12.0, 0.50 },
-        { "Large 400 seats, treated",           28.0, 18.0, 10.0, 0.40 },
-        { "IMAX",                               30.0, 22.0, 16.0, 0.60 },
-        { "IMAX, treated",                      30.0, 22.0, 16.0, 0.40 },
+        { "Corridor room, live",             "Corridor",          18.0,  6.0,  5.0, 0.90 },
+        { "Small multiplex, live",           "Small multiplex",   14.0,  8.0,  5.0, 0.80 },
+        { "Old cinema, near-cubic, live",    "Old cinema",        16.0, 15.0, 12.0, 1.00 },
+        { "Narrow 120 seats",                "Narrow 120",        20.0,  9.0,  6.0, 0.70 },
+        { "Small screening room",            "Screening room",    10.0,  6.0,  3.5, 0.60 },
+        { "Multiplex 150 seats",             "Multiplex 150",     16.0, 11.0,  6.0, 0.60 },
+        { "Multiplex 200 seats",             "Multiplex 200",     20.0, 13.0,  7.0, 0.55 },
+        { "Multiplex 300 seats",             "Multiplex 300",     24.0, 15.0,  8.0, 0.60 },
+        { "Large 400 seats",                 "Large 400",         28.0, 18.0, 10.0, 0.60 },
+        { "Mix room (240 m3)",               "Mix room",          10.0,  6.0,  4.0, 0.30 },
+        { "Dubbing stage",                   "Dubbing stage",     18.0, 12.0,  7.0, 0.35 },
+        { "Premium large format",            "Premium large",     30.0, 20.0, 12.0, 0.50 },
+        { "Large 400 seats, treated",        "Large 400 treated", 28.0, 18.0, 10.0, 0.40 },
+        { "IMAX",                            "IMAX",              30.0, 22.0, 16.0, 0.60 },
+        { "IMAX, treated",                   "IMAX treated",      30.0, 22.0, 16.0, 0.40 },
     };
+}
+
+std::vector<bool> RoomSimulator::defaultSelection()
+{
+    // Multiplex 150, 200 and 300 seats, large 400 seats, premium large format
+    std::vector<bool> on (defaultRooms().size(), false);
+
+    for (size_t i : { 5u, 6u, 7u, 8u, 11u })
+        on[i] = true;
+
+    return on;
+}
+
+void RoomSimulator::applyToScore (Translation& t, const RoomSimResult& rooms, const std::vector<bool>& selected, double levelDependenceWeight)
+{
+    if (! t.hasBass || ! rooms.hasBass)
+        return;
+
+    for (size_t i = 0; i < rooms.rooms.size() && i < selected.size(); ++i)
+    {
+        if (! selected[i])
+            continue;
+
+        const double penalty = std::clamp (1.0 - rooms.rooms[i].roomScore / 100.0, 0.0, 1.0);
+
+        if (penalty > t.interaction)
+        {
+            t.interaction = penalty;
+            t.worstRoom = rooms.rooms[i].spec.name;
+        }
+    }
+
+    t.robustness = 100.0 * (1.0 - t.interaction) * (1.0 - t.dependence) * (1.0 - levelDependenceWeight * t.levelDependence);
 }
 
 cd RoomSimulator::response (const RoomSpec& r, const Point& source, const Point& receiver, double hz)

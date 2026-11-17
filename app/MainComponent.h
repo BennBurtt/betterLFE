@@ -107,6 +107,12 @@ private:
     juce::TextButton roomButton { "Room Sim" };
     bool roomMode = false;
 
+    // Rooms that count in the score: ticked in Playback chains or in Room Sim
+    std::vector<bool> roomSelected = RoomSimulator::defaultSelection();
+    std::vector<std::unique_ptr<juce::ToggleButton>> roomTicks;
+    juce::Label roomTicksLabel;
+    void setRoomSelected (int room, bool on);
+
     // One button per panel; a panel opens over the analyzer, one at a time
     std::array<juce::TextButton, numCards> cardButtons;
     std::array<Card, numCards> cards { { Card ("Source & Format"), Card ("Spectrum"), Card ("Phase Alert"),
@@ -140,8 +146,7 @@ private:
                    dCeiling { "LFE dependence, ceiling:", 0, 1, 0.01, 0.83 }, dInfraWeight { "Infra-bass weight:", 0, 1, 0.05, 0.25 },
                    dInfraLo { "Infra-bass up to:", 10, 40, 1, 25 }, dInfraHi { "Full weight from:", 40, 100, 1, 60 },
                    dLevelWeight { "LFE level dependence, weight in score:", 0, 0.5, 0.01, 0.15 },
-                   dLevelRed { "LFE level dependence, red at a mean of:", 0.5, 12, 0.1, 3 },
-                   dSeat { "Weight, seat to seat:", 0, 1, 0.05, 1 };
+                   dLevelRed { "LFE level dependence, red at a mean of:", 0.5, 12, 0.1, 3 };
     juce::Label devLoudnessLabel;       // what the listening level makes of the bass playing now
     juce::TextButton devDefaultsButton { "Defaults" };
     std::vector<LabelledSlider*> devSliders();
