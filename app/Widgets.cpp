@@ -1193,10 +1193,21 @@ void HistoryStrip::push (const Sample& sample)
     repaint();
 }
 
+void HistoryStrip::pushWave (const WavePoint& point)
+{
+    if (wave.empty())
+        wave.resize ((size_t) columns * wavePointsPerColumn);
+
+    wave[waveWritePos] = point;
+    waveWritePos = (waveWritePos + 1) % wave.size();
+}
+
 void HistoryStrip::clear()
 {
     samples.clear();
     writePos = 0;
+    wave.clear();
+    waveWritePos = 0;
     repaint();
 }
 
@@ -1211,21 +1222,6 @@ void HistoryStrip::paint (juce::Graphics& g)
     const char* names[] = { "Alert", "Robustness", "LFE-dependent" };
     const int lanes = 3;
     const float lane = area.getHeight() / (float) lanes;
-
-    // Behind the lanes: the level of what was played, as a white waveform
-    if (! samples.empty())
-    {
-        const float width = area.getWidth() / (float) columns, mid = area.getCentreY(), half = area.getHeight() / 2.0f;
-        g.setColour (juce::Colours::white.withAlpha (0.30f));
-
-        for (int c = 0; c < columns; ++c)
-        {
-            const float level = samples[(writePos + (size_t) c) % samples.size()].level;
-
-            if (level > 0.01f)
-                g.fillRect (area.getX() + width * (float) c, mid - half * level, juce::jmax (1.0f, width - 0.6f), 2.0f * half * level);
-        }
-    }
 
     g.setFont (uiFont (10.5f));
 
@@ -1258,7 +1254,7 @@ void HistoryStrip::paint (juce::Graphics& g)
                 const auto red = juce::Colour (0xffe53935), orange = juce::Colour (0xffff9800), green = juce::Colour (0xff43a047);
                 const auto colour = s.score < 0.5f ? red.interpolatedWith (orange, s.score / 0.5f)
                                                    : orange.interpolatedWith (green, (s.score - 0.5f) / 0.5f);
-                g.setColour (colour.withAlpha (0.80f));
+                g.setColour (colour.withAlpha (0.55f));
                 g.fillRect (x, row.getY(), width + 0.5f, row.getHeight());
                 continue;
             }
@@ -1269,10 +1265,56 @@ void HistoryStrip::paint (juce::Graphics& g)
 
             if (value > 0.02f)
             {
-                g.setColour (colour.withAlpha (juce::jlimit (0.0f, 1.0f, 0.15f + 0.85f * value)));
+                g.setColour (colour.withAlpha (juce::jlimit (0.0f, 1.0f, 0.10f + 0.50f * value)));
                 g.fillRect (x, row.getY(), width + 0.5f, row.getHeight());
             }
         }
+    }
+
+    // Over the lanes: what was played, as a DAW draws it. Signed peaks make
+    // the outline, the RMS a brighter core. Linear amplitude, zoomed so the
+    // loudest peak in view fills the height (never more than 40 dB of zoom).
+    if (! wave.empty())
+    {
+        const int n = (int) wave.size();
+        float loudest = 0.01f;
+
+        for (const auto& p : wave)
+            loudest = juce::jmax (loudest, std::abs (p.lo), std::abs (p.hi));
+
+        const float mid = area.getCentreY(), half = area.getHeight() * 0.48f / loudest;
+        const float step = area.getWidth() / (float) n;
+        juce::Path peaks, core;
+
+        for (int pass = 0; pass < 2; ++pass)
+        {
+            auto& path = pass == 0 ? peaks : core;
+
+            for (int i = 0; i < n; ++i)
+            {
+                const auto& p = wave[(waveWritePos + (size_t) i) % wave.size()];
+                const float x = area.getX() + step * ((float) i + 0.5f);
+                const float y = mid - half * (pass == 0 ? p.hi : p.rms);
+
+                if (i == 0)     path.startNewSubPath (x, y);
+                else            path.lineTo (x, y);
+            }
+
+            for (int i = n - 1; i >= 0; --i)
+            {
+                const auto& p = wave[(waveWritePos + (size_t) i) % wave.size()];
+                path.lineTo (area.getX() + step * ((float) i + 0.5f), mid - half * (pass == 0 ? p.lo : -p.rms));
+            }
+
+            path.closeSubPath();
+        }
+
+        g.setColour (juce::Colours::white.withAlpha (0.72f));
+        g.fillPath (peaks);
+        g.setColour (juce::Colours::white.withAlpha (0.18f));
+        g.fillPath (core);
+        g.setColour (juce::Colours::white.withAlpha (0.18f));
+        g.fillRect (area.getX(), mid - 0.5f, area.getWidth(), 1.0f);       // the zero line
     }
 
     g.setColour (juce::Colour (0xff777777));

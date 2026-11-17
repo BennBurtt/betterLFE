@@ -301,6 +301,8 @@ void MainComponent::buildCards()
     resetButton.onClick = [this]
     {
         history.clear();
+        waveClock = waveMin = waveMax = waveSumSquares = 0.0;
+        waveCount = 0;
         historySample = {};
         historyClock = 0.0;
 
@@ -791,6 +793,25 @@ void MainComponent::timerCallback()
         framePeak = snapshot.screenPeak;
         anyFramePeak = juce::jmax (snapshot.lfePeak, snapshot.screenPeak[0], snapshot.screenPeak[1], snapshot.screenPeak[2]);
         bassFramePeak = snapshot.bassPeak;
+        waveMin = juce::jmin (waveMin, snapshot.waveMin);
+        waveMax = juce::jmax (waveMax, snapshot.waveMax);
+        waveSumSquares += snapshot.waveSumSquares;
+        waveCount += snapshot.waveCount;
+    }
+
+    // Waveform of the history strip: one point every 125 ms
+    waveClock += dt;
+
+    if (waveClock >= HistoryStrip::secondsPerWavePoint)
+    {
+        waveClock -= HistoryStrip::secondsPerWavePoint;
+        HistoryStrip::WavePoint point;
+        point.lo = (float) waveMin;
+        point.hi = (float) waveMax;
+        point.rms = waveCount > 0 ? (float) std::sqrt (waveSumSquares / (double) waveCount) : 0.0f;
+        history.pushWave (point);
+        waveMin = waveMax = waveSumSquares = 0.0;
+        waveCount = 0;
     }
 
     const double level = options.demoSignal ? 0.6
@@ -1009,7 +1030,7 @@ void MainComponent::timerCallback()
         speakers[c]->setLevel (juce::jmax (alerts.speakerLevel[c], transientFlash[c]));
     }
 
-    if (options.snapshotFile != juce::File() && ++framesShown == 240)
+    if (options.snapshotFile != juce::File() && ++framesShown == snapshotFrames)
     {
         const auto image = createComponentSnapshot (getLocalBounds());
         options.snapshotFile.deleteFile();

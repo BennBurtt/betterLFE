@@ -46,6 +46,16 @@ void AnalysisRunner::meter (const float* in, int numFrames)
         screenPeak[2] = std::max (screenPeak[2], (double) std::abs (in[chR]));
         lfePeak = std::max (lfePeak, (double) std::abs (in[chLFE]));
 
+        for (int c = 0; c < numChannels; ++c)
+        {
+            const double v = in[c];
+            waveMin = std::min (waveMin, v);
+            waveMax = std::max (waveMax, v);
+            waveSumSquares += v * v;
+        }
+
+        waveCount += numChannels;
+
         const double sum = (double) in[chL] + in[chC] + in[chR] + lfeGain * in[chLFE];
         bassState[0] += bassCoeff * (sum - bassState[0]);
         bassState[1] += bassCoeff * (bassState[0] - bassState[1]);
@@ -117,9 +127,15 @@ void AnalysisRunner::step()
     published.lfePeak = std::max (published.lfePeak, lfePeak);
     published.bassPeak = std::max (published.bassPeak, bassPeak);
     published.audioSeconds += hop / rate;
+    published.waveMin = std::min (published.waveMin, waveMin);
+    published.waveMax = std::max (published.waveMax, waveMax);
+    published.waveSumSquares += waveSumSquares;
+    published.waveCount += waveCount;
 
     screenPeak = {};
     lfePeak = bassPeak = 0.0;
+    waveMin = waveMax = waveSumSquares = 0.0;
+    waveCount = 0;
 }
 
 bool AnalysisRunner::take (Snapshot& out)
@@ -142,11 +158,17 @@ bool AnalysisRunner::take (Snapshot& out)
     out.lfePeak = published.lfePeak;
     out.bassPeak = published.bassPeak;
     out.audioSeconds = published.audioSeconds;
+    out.waveMin = published.waveMin;
+    out.waveMax = published.waveMax;
+    out.waveSumSquares = published.waveSumSquares;
+    out.waveCount = published.waveCount;
 
     published.autoReset = false;
     published.screenPeak = {};
     published.lfePeak = published.bassPeak = 0.0;
     published.audioSeconds = 0.0;
+    published.waveMin = published.waveMax = published.waveSumSquares = 0.0;
+    published.waveCount = 0;
     return true;
 }
 

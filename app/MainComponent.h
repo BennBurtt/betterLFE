@@ -163,8 +163,11 @@ private:
     // against the loudest of the last few seconds, so that it shows at any level
     std::array<double, 3> framePeak { { 0.0, 0.0, 0.0 } }, recentPeak { { 0.0, 0.0, 0.0 } }, coneDrive { { 0.0, 0.0, 0.0 } };
     double bassFramePeak = 0.0, bassRecentPeak = 0.0, bassDrive = 0.0;
+    double waveClock = 0.0, waveMin = 0.0, waveMax = 0.0, waveSumSquares = 0.0;
+    long long waveCount = 0;
     double anyFramePeak = 0.0;      // loudest sample of the frame over the four channels, for the waveform of the history
     int framesShown = 0;
+    const int snapshotFrames = juce::jmax (60, juce::SystemStats::getEnvironmentVariable ("SUBGUARD_SNAPSHOT_FRAMES", "240").getIntValue());
     bool restoring = false;
 };
 

@@ -249,13 +249,21 @@ public:
     static constexpr double secondsPerColumn = 0.5;
     static constexpr int columns = 300;                 // two and a half minutes
 
+    // Waveform behind the lanes, as in a DAW: signed peaks and RMS, four points per column
+    static constexpr int wavePointsPerColumn = 4;
+    static constexpr double secondsPerWavePoint = secondsPerColumn / wavePointsPerColumn;
+    struct WavePoint { float lo = 0.0f, hi = 0.0f, rms = 0.0f; };
+
     void push (const Sample&);
+    void pushWave (const WavePoint&);
     void clear();
     void paint (juce::Graphics&) override;
 
 private:
     std::vector<Sample> samples;
     size_t writePos = 0;
+    std::vector<WavePoint> wave;
+    size_t waveWritePos = 0;
 };
 
 } // namespace subguard

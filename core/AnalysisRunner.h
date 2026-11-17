@@ -37,6 +37,10 @@ struct Snapshot
     double lfePeak = 0.0;
     double bassPeak = 0.0;                  // all four channels under 200 Hz, LFE as played
     double audioSeconds = 0.0;              // audio covered
+
+    // Waveform since the last read: signed extremes over the four channels, and their energy
+    double waveMin = 0.0, waveMax = 0.0, waveSumSquares = 0.0;
+    long long waveCount = 0;
 };
 
 class AnalysisRunner
@@ -82,6 +86,8 @@ private:
     double bassState[2] = { 0.0, 0.0 }, bassCoeff = 0.0;
     std::array<double, 3> screenPeak {};
     double lfePeak = 0.0, bassPeak = 0.0;
+    double waveMin = 0.0, waveMax = 0.0, waveSumSquares = 0.0;
+    long long waveCount = 0;
 
     // What the reader gets
     std::mutex publishLock;
