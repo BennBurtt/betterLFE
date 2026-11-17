@@ -404,7 +404,7 @@ void MainComponent::buildCards()
                   transientDefaultsButton.setBounds (r.removeFromTop (24).removeFromRight (90));
               });
 
-    populate (chainsCard, 600, 356, { &chainsView },
+    populate (chainsCard, 600, 404, { &chainsView },
               [this] (juce::Rectangle<int> r) { chainsView.setBounds (r); });
 
     // Dev panel
@@ -413,6 +413,8 @@ void MainComponent::buildCards()
         const auto plain = [] (double v) { return juce::String (v, 2); };
         const auto hz = [] (double v) { return juce::String ((int) v) + " Hz"; };
         dTolSoft.format = dTolMedium.format = dTolStrong.format = dLevelRed.format = db;
+        dSeat.format = plain;
+        dSeat.setTooltip ("How much the seat-to-seat scenarios (worst and best 10 % of seats) count in the score.");
         dLate.format = dEarly.format = dCeiling.format = dInfraWeight.format = dLevelWeight.format = plain;
         dInfraLo.format = dInfraHi.format = hz;
         devLoudnessLabel.setFont (uiFont (11.5f));
@@ -446,6 +448,7 @@ void MainComponent::buildCards()
             dInfraHi.setValue (d.infraHiHz);
             dLevelWeight.setValue (d.levelDependenceWeight);
             dLevelRed.setValue (d.levelRedDb);
+            dSeat.setValue (d.seatRelevance);
         };
 
         auto& card = cards[(size_t) devCard];
@@ -722,7 +725,7 @@ void MainComponent::showListeningMenu()
 std::vector<LabelledSlider*> MainComponent::devSliders()
 {
     return { &dTolSoft, &dTolMedium, &dTolStrong, &dLate, &dEarly, &dCeiling,
-             &dInfraWeight, &dInfraLo, &dInfraHi, &dLevelWeight, &dLevelRed };
+             &dInfraWeight, &dInfraLo, &dInfraHi, &dLevelWeight, &dLevelRed, &dSeat };
 }
 
 void MainComponent::applyDevSettings()
@@ -730,6 +733,7 @@ void MainComponent::applyDevSettings()
     auto& t = simulator.tuning;
     t.toleranceDb = { { dTolSoft.value(), dTolMedium.value(), dTolStrong.value() } };
     t.lateRelevance = dLate.value();
+    t.seatRelevance = dSeat.value();
     t.earlyRelevance = dEarly.value();
     t.dependenceCeiling = dCeiling.value();
     t.infraWeight = dInfraWeight.value();
@@ -1065,7 +1069,7 @@ void MainComponent::loadState()
 
     {
         const char* keys[] = { "devTolSoft", "devTolMedium", "devTolStrong", "devLate", "devEarly", "devCeiling",
-                               "devInfraWeight", "devInfraLo", "devInfraHi", "devLevelWeight", "devLevelRed" };
+                               "devInfraWeight", "devInfraLo", "devInfraHi", "devLevelWeight", "devLevelRed", "devSeat" };
         int index = 0;
 
         for (auto* slider : devSliders())
@@ -1120,7 +1124,7 @@ void MainComponent::saveState()
 
     {
         const char* keys[] = { "devTolSoft", "devTolMedium", "devTolStrong", "devLate", "devEarly", "devCeiling",
-                               "devInfraWeight", "devInfraLo", "devInfraHi", "devLevelWeight", "devLevelRed" };
+                               "devInfraWeight", "devInfraLo", "devInfraHi", "devLevelWeight", "devLevelRed", "devSeat" };
         int index = 0;
 
         for (auto* slider : devSliders())

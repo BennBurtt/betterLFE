@@ -1003,6 +1003,15 @@ void ChainsView::paint (juce::Graphics& g)
         return nullptr;
     };
 
+    const auto seat = [&t] (double percentile) -> const ChainResult*
+    {
+        for (const auto& c : t.chains)
+            if (c.kind == ChainResult::Kind::seats && std::abs (c.seatPercentile - percentile) < 1e-9)
+                return &c;
+
+        return nullptr;
+    };
+
     const auto stereo = [&t] () -> const ChainResult*
     {
         return ! t.chains.empty() && t.chains.back().kind == ChainResult::Kind::stereo ? &t.chains.back() : nullptr;
@@ -1091,6 +1100,11 @@ void ChainsView::paint (juce::Graphics& g)
            [&] (int r, int c) { return c < 3 ? home (corners[c], r == 1) : stereo(); },
            [] (int r, int c) { return c < 3 || r == 0; });
 
+    // Seat to seat: the relative phase of subwoofer and screen changes over the seats
+    const double percentiles[] = { 0.1, 0.5, 0.9 };
+    table ({ "Worst 10 % of seats", "Median seat", "Best 10 % of seats" }, { "Cinema, seat to seat" },
+           [&] (int, int column) { return seat (percentiles[column]); });
+
     // Read-outs
     const auto line = [&] (const juce::String& label, const juce::String& value, bool warn)
     {
@@ -1177,8 +1191,8 @@ void ChainsView::paint (juce::Graphics& g)
     area.removeFromTop (6.0f);
     g.setColour (theme::dimText.withAlpha (0.8f));
     g.setFont (uiFont (11.0f));
-    g.drawFittedText ("Electrical models: delay, polarity, filters and level. Room acoustics (modes, seats) are not simulated: "
-                      "a score of 100 does not protect against a room's own faults.",
+    g.drawFittedText ("Electrical models: delay, polarity, filters and level; seat to seat is a statistical model of a reverberant room. "
+                      "The modes of a given room are not simulated: a score of 100 does not protect against a room's own faults.",
                       area.removeFromTop (30.0f).toNearestInt(), juce::Justification::topLeft, 2);
 }
 

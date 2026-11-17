@@ -314,7 +314,26 @@ en interaction.
 |---|---|---|
 | Cinéma | sub trop près ou trop loin de 0,9 m et 1,7 m (soit ±2,5 et ±5 ms à 343 m/s), ou en place × polarité normale ou inversée | 10 |
 | Bass management | canaux d'écran croisés vers le sub (Linkwitz-Riley 4ᵉ ordre) à 60, 80, 100 Hz, LFE passe-bas 120 Hz ; avec et sans passe-bas raide à 120 Hz tenant lieu de filtre d'encodeur | 6 |
+| Place à place | dans une salle réverbérante, la phase entre sub et écran change d'une place à l'autre ; avec une phase répartie au hasard, les 10 % de places les pires, la place médiane et les 10 % les meilleures | 3 |
 | Stéréo | le mix sans son LFE, comme dans tout downmix deux canaux. Seul le LFE est retiré : la façade reste sommée comme dans la référence, pour que la façon dont L, C et R se replient (qui ne dépend pas du LFE) ne compte pas comme une perte | 1 |
+
+**Place à place.** Au-delà des premiers mètres, le son du sub et celui de
+l'écran arrivent à chaque place avec un écart de phase qui change d'une place à
+l'autre. Dans une salle réverbérante, au-dessus de la fréquence de Schroeder
+(`f ≈ 2000·√(TR60/V)` : environ 30 Hz pour un auditorium de 2 000 m³ à 0,4 s,
+70 Hz pour une régie de 240 m³ à 0,3 s), cet écart est pratiquement aléatoire
+[31]. Avec une phase φ uniforme, le terme croisé vaut `2·|Sfl|·cos φ` : les
+10 % de places les pires ont `cos φ ≤ −0,951`, la place médiane 0, les 10 % les
+meilleures `cos φ ≥ +0,951` (`cos φ = −cos(π·p)` pour le centile p). Ces trois
+places sont notées comme les autres systèmes (pertinence 1, réglable dans
+Dev).
+
+C'est la justification physique de la décorrélation : un LFE corrélé à la
+façade fait varier le grave d'une place à l'autre (mesuré, LFE aussi fort que
+la façade et identique : 16 dB d'écart entre les 10 % pires et les 10 %
+meilleures), un LFE décorrélé s'additionne de la même façon partout (écart
+mesuré 0,03 dB). Limite : sous la fréquence de Schroeder, ce sont les modes
+d'une salle donnée qui décident, et ils ne sont pas simulés ici.
 
 **Dépendance au niveau du sub (« LFE level dependence »).** Un avertissement,
 qui retire aussi jusqu'à 15 % du score. Chacun des 16 systèmes cinéma et bass management est recalculé avec son
@@ -327,7 +346,7 @@ portant au moins 20 % du grave) :
 `écart = variation réelle − variation attendue d'un LFE sans rapport`
 
 La valeur affichée est la **moyenne** de cet écart sur tous les cas calculés
-(16 systèmes × 8 niveaux, la bande la plus touchée de chaque cas), avec le
+(19 systèmes × 8 niveaux, la bande la plus touchée de chaque cas), avec le
 **maximum** entre parenthèses.
 
 Un écart négatif est une annulation qui s'installe, un écart positif un grave
@@ -668,6 +687,8 @@ du son) : bruit blanc ou rose, aucune ; grondement grave (sous 90 Hz), 1 à 3.
 30. Pedersen & Marquardt, 2009 : écart-type des seuils d'audition de l'ordre
     de 5 dB aux basses fréquences. Relevé par une recherche, texte non
     consulté (source secondaire).
+31. H. Kuttruff, *Room Acoustics*, CRC Press (fréquence de Schroeder,
+    statistique du champ réverbéré, somme des modes).
 
 
 ## Niveau du LFE et réglages
@@ -679,4 +700,5 @@ d'écran, comme en salle [9]. Décochée, il est pris tel qu'enregistré.
 **Panneau « Dev ».** Tout ce qui est un choix et non une mesure y est
 réglable : tolérances des trois niveaux, poids d'un sub en retard ou en avance,
 plafond de la dépendance au LFE, poids et bornes de l'infra-grave, poids de la
-dépendance au niveau dans le score et moyenne à laquelle sa case est rouge.
+dépendance au niveau dans le score et moyenne à laquelle sa case est rouge,
+poids des places (place à place).

@@ -21,6 +21,15 @@
 //                  (4th-order Linkwitz-Riley at 60, 80 or 100 Hz), LFE low-passed
 //                  at 120 Hz; with and without a steep 120 Hz low-pass standing
 //                  in for an encoder's LFE filter (a model, not Dolby's filter).
+//   Seat to seat   in a cinema, past the first metres the subwoofer and the
+//                  screen reach each seat with a phase difference that
+//                  changes from seat to seat, practically at random in a
+//                  reverberant room (above the Schroeder frequency, about
+//                  30 Hz in a cinema). With a uniformly random phase, the
+//                  cross term is 2.|Sfl|.cos(phi): the worst 10 % of seats
+//                  get cos <= -0.951, the median seat 0, the best 10 %
+//                  cos >= +0.951. An LFE decorrelated from the screen has
+//                  no cross term and sounds the same at every seat.
 //   Stereo         the mix with its LFE left out, as in the Dolby and ITU-R
 //                  BS.775 two-channel downmixes. Only the LFE is removed: the
 //                  screen channels stay summed as in the reference.
@@ -81,7 +90,7 @@ namespace subguard
 
 struct ChainResult
 {
-    enum class Kind { cinema, bassManaged, stereo };
+    enum class Kind { cinema, bassManaged, seats, stereo };
 
     Kind kind = Kind::cinema;
     std::string name;
@@ -89,6 +98,7 @@ struct ChainResult
     bool inverted = false;      // cinema: subwoofer polarity
     double crossoverHz = 0.0;   // bass managed
     bool encoderFilter = false; // bass managed: LFE through the encoder low-pass model
+    double seatPercentile = 0.5;    // seats: which seat of the room, 0.1 = the worst 10 %, 0.9 = the best 10 %
 
     static constexpr int numBands = 4;
     double changeDb = 0.0;                          // bass against the reference, 20-120 Hz
@@ -217,6 +227,7 @@ public:
     {
         std::array<double, 3> toleranceDb { { 3.0, 2.0, 1.0 } };    // Soft, Medium, Strong
         double lateRelevance = 0.5, earlyRelevance = 0.25;          // cinema subwoofer late / early, against 1 on time
+        double seatRelevance = 1.0;                                 // seat to seat: the worst and best 10 % of seats
         double dependenceCeiling = PlaybackSimulator::dependenceCeiling;
         double infraLoHz = PlaybackSimulator::infraLoHz, infraHiHz = PlaybackSimulator::infraHiHz;
         double infraWeight = PlaybackSimulator::infraWeight;

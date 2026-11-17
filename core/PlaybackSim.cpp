@@ -207,6 +207,17 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
             t.chains.push_back (c);
         }
 
+    // Seat to seat: the worst 10 %, the median and the best 10 % of the seats
+    for (double percentile : { 0.1, 0.5, 0.9 })
+    {
+        ChainResult c;
+        c.kind = ChainResult::Kind::seats;
+        c.seatPercentile = percentile;
+        c.weight = tuning.seatRelevance;
+        c.name = percentile < 0.3 ? "cinema, worst 10 % of seats" : (percentile > 0.7 ? "cinema, best 10 % of seats" : "cinema, median seat");
+        t.chains.push_back (c);
+    }
+
     {
         ChainResult c;
         c.kind = ChainResult::Kind::stereo;
@@ -333,7 +344,20 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
             }
             else
             {
-                const auto gain = gainsFor (chain, hz, lfeGain);
+                auto gain = Gains { 1.0, 0.0 };
+
+                if (chain.kind == ChainResult::Kind::seats)
+                {
+                    // Relative phase phi uniform over the seats: the seat at this
+                    // percentile has cos (phi) = -cos (pi . percentile). The LFE is
+                    // turned so that the cross term is exactly that share of |Sfl|.
+                    const double seatCos = -std::cos (pi * chain.seatPercentile);
+                    gain.lfe = lfeGain * std::polar (1.0, std::arg (cFL[g]) - std::acos (std::clamp (seatCos, -1.0, 1.0)));
+                }
+                else
+                {
+                    gain = gainsFor (chain, hz, lfeGain);
+                }
                 const double screen = std::norm (gain.screen) * m.pF[g], lfe = std::norm (gain.lfe) * m.pLfe[g];
                 const double cross = 2.0 * (gain.screen * std::conj (gain.lfe) * cFL[g]).real();
                 power = screen + lfe + cross;
