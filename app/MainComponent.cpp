@@ -12,7 +12,6 @@ namespace
     constexpr double preferredSampleRate = 48000.0;
     constexpr double lfeInBandGainDb = 10.0;    // cinema B-chain: LFE plays 10 dB above a screen channel
     constexpr int headerHeight = 170, barHeight = 38;
-    constexpr int frame = AudioInput::frameSize;
 }
 
 //==============================================================================
@@ -86,6 +85,16 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
     addAndMakeVisible (transientStrip);
     addAndMakeVisible (correlation);
     addAndMakeVisible (history);
+    addChildComponent (roomView);
+
+    roomButton.setClickingTogglesState (true);
+    roomButton.setTooltip ("Room Sim: the bass seat by seat in fifteen cinema rooms, from a live corridor room to a treated IMAX.");
+    roomButton.onClick = [this]
+    {
+        roomMode = roomButton.getToggleState();
+        resized();
+    };
+    addAndMakeVisible (roomButton);
     buildCards();
 
     for (auto* speaker : { &header.left, &header.centre, &header.right })
@@ -124,6 +133,9 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
 
     const juce::StringArray cardNames { "source", "spectrum", "alert", "transients", "chains", "dev" };
     showCard (cardNames.indexOf (options.openCard));
+
+    if (options.openCard == "rooms")
+        roomButton.setToggleState (true, juce::sendNotificationSync);
 
     lastTick = juce::Time::getMillisecondCounterHiRes() * 0.001;
     startTimerHz (fpsBox.getSelectedId());
@@ -542,7 +554,15 @@ void MainComponent::resized()
         bar.removeFromLeft (6);
     }
 
+    bar.removeFromLeft (14);
+    roomButton.setBounds (bar.removeFromLeft (100));
+
     history.setBounds (area.removeFromBottom (48));
+    roomView.setBounds (area);
+    roomView.setVisible (roomMode);
+    spectrum.setVisible (! roomMode);
+    transientStrip.setVisible (! roomMode);
+    correlation.setVisible (! roomMode);
     correlation.setBounds (area.removeFromBottom (juce::jmax (150, area.getHeight() * 2 / 7)));
     transientStrip.setBounds (area.removeFromBottom (68));
     spectrum.setBounds (area);
@@ -910,6 +930,10 @@ void MainComponent::timerCallback()
         // Playback chains, robustness, LFE dependence, overlap
         ChainsInfo info;
         info.translation = simulator.compute (measured, currentLevel(), lfeGainToggle.getToggleState() ? lfeInBandGainDb : 0.0);
+        if (roomMode)
+            roomResult = roomSim.compute (measured, info.translation, simulator.tuning.toleranceDb[(size_t) currentLevel()],
+                                          lfeGainToggle.getToggleState() ? lfeInBandGainDb : 0.0);
+
         info.sessionCorrelation = snapshot.globalCorrelation;
         info.sessionSeconds = snapshot.globalSeconds;
         auto& t = info.translation;
@@ -975,6 +999,9 @@ void MainComponent::timerCallback()
         }
 
         spectrum.setScore ((double) displayedScore);
+
+        if (roomMode)
+            roomView.update (roomResult, (double) displayedScore, t.hasBass && displayedScore >= 0);
         spectrum.setOverlap ({ { t.overlap[0].amount, t.overlap[1].amount, t.overlap[2].amount } });
 
         // History: the strongest value of each indicator over the column

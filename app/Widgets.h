@@ -7,6 +7,7 @@
 #include "../core/AlertTracker.h"
 #include "../core/LfeEngine.h"
 #include "../core/PlaybackSim.h"
+#include "../core/RoomSim.h"
 
 namespace subguard
 {
@@ -230,6 +231,20 @@ public:
 
 private:
     ChainsInfo info;
+};
+
+/** Room Sim: the fifteen rooms, seat by seat. */
+class RoomSimView : public juce::Component
+{
+public:
+    void update (const RoomSimResult&, double robustness, bool hasScore);
+    void paint (juce::Graphics&) override;
+
+private:
+    RoomSimResult result;
+    std::vector<double> shownRoom;      // room scores, smoothed for display
+    double robustness = 100.0;
+    bool hasScore = false;
 };
 
 /** Scrolling record of the last minutes: one thin lane per indicator. */

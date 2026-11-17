@@ -6,6 +6,8 @@
 #include "../core/Inertia.h"
 #include "../core/LfeEngine.h"
 #include "../core/PlaybackSim.h"
+#include "../core/RoomSim.h"
+#include <chrono>
 
 #include <algorithm>
 #include <cmath>
@@ -1691,6 +1693,89 @@ static void testRunner()
     }
 }
 
+static void testRooms()
+{
+    std::printf ("room simulation (modal sum, fifteen rooms)\n");
+
+    // The first axial mode of a 10 m long room sits at c / 2L = 17.15 Hz
+    {
+        const RoomSpec room { "test", 10.0, 6.0, 4.0, 0.5 };
+        const std::array<double, 3> front { { 0.1, 3.0, 2.0 } }, back { { 9.9, 3.0, 2.0 } };
+        const auto peakBetween = [&] (double lo, double hi)
+        {
+            double best = lo, value = 0.0;
+
+            for (double f = lo; f <= hi; f += 0.05)
+                if (std::abs (RoomSimulator::response (room, front, back, f)) > value)
+                {
+                    value = std::abs (RoomSimulator::response (room, front, back, f));
+                    best = f;
+                }
+
+            return best;
+        };
+
+        check (std::abs (peakBetween (13.0, 22.0) - RoomSimulator::speedOfSound / 20.0) < 0.5, "first axial mode at c / 2L = 17.15 Hz", peakBetween (13.0, 22.0));
+        check (std::abs (peakBetween (30.0, 37.0) - RoomSimulator::speedOfSound / 10.0) < 0.6, "second axial mode at c / L = 34.3 Hz", peakBetween (30.0, 37.0));
+    }
+
+    const auto scene = [] (double shared)
+    {
+        const auto n = noise (8.0, 101), other = noise (8.0, 102);
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        Scene s;
+        s.c = n;
+        s.lfe = scaled (sum (scaled (n, shared), scaled (other, std::sqrt (1.0 - shared * shared))), std::pow (10.0, -10.0 / 20.0));
+        run (e, s);
+        return e.result();
+    };
+
+    PlaybackSimulator sim;
+    RoomSimulator rooms;
+
+    const auto apartAnalysis = scene (0.0), sharedAnalysis = scene (1.0);
+    const auto started = std::chrono::steady_clock::now();
+    const auto apart = rooms.compute (apartAnalysis, sim.compute (apartAnalysis), 1.0, 10.0);
+    const double prepareSeconds = std::chrono::duration<double> (std::chrono::steady_clock::now() - started).count();
+    const auto again = std::chrono::steady_clock::now();
+    const auto shared = rooms.compute (sharedAnalysis, sim.compute (sharedAnalysis), 1.0, 10.0);
+    const double updateMs = 1000.0 * std::chrono::duration<double> (std::chrono::steady_clock::now() - again).count();
+    std::printf ("  fifteen rooms: prepared in %.2f s, then %.2f ms per update\n", prepareSeconds, updateMs);
+
+    check (apart.rooms.size() == 15 && shared.rooms.size() == 15, "fifteen rooms", (double) apart.rooms.size());
+
+    double worstApart = 0.0, lowestApart = 100.0;
+
+    for (const auto& r : apart.rooms)
+    {
+        lowestApart = std::min (lowestApart, r.roomScore);
+
+        for (double d : r.seatChangeDb)
+            worstApart = std::max (worstApart, std::abs (d));
+    }
+
+    check (worstApart < 0.5 && lowestApart > 99.0, "decorrelated LFE: the interaction adds nothing at any seat of any room", worstApart);
+
+    for (const auto& r : shared.rooms)
+        std::printf ("    %-30s room %5.1f  seats %+5.1f .. %+5.1f dB (median %+5.1f)\n", r.spec.name.c_str(), r.roomScore,
+                     *std::min_element (r.seatChangeDb.begin(), r.seatChangeDb.end()), *std::max_element (r.seatChangeDb.begin(), r.seatChangeDb.end()),
+                     r.medianDb);
+
+    double meanShared = 0.0;
+
+    for (const auto& r : shared.rooms)
+        meanShared += r.roomScore / 15.0;
+
+    int thinner = 0;
+
+    for (const auto& r : shared.rooms)
+        thinner += r.medianDb < -0.5;
+
+    check (meanShared < 85.0 && thinner >= 12,
+           "LFE identical to the screen and as loud: in most rooms the seats lose the in-phase gain heard on the stage", meanShared);
+    check (shared.rooms[0].combinedScore <= sim.compute (sharedAnalysis).robustness + 1e-9, "room result = robustness x room score", 0.0);
+}
+
 int main()
 {
     testFilterDesign();
@@ -1703,6 +1788,7 @@ int main()
     testLowLevelAndLowFrequency();
     testTransients();
     testRunner();
+    testRooms();
     testPlaybackChains();
     testInertiaAndAutoReset();
 

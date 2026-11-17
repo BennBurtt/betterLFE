@@ -510,6 +510,54 @@ score ; il est la raison d'être de ce témoin.
 60–90, 90–120 Hz). Les marques sous le spectre se réchauffent quand les deux
 jouent à moins de 10 dB l'un de l'autre dans 60–120 Hz.
 
+## 3 bis. Room Sim : quinze salles, place par place
+
+Un indicateur à part, hors score principal (onglet « Room Sim », qui remplace
+l'analyseur ; le score et la frise restent).
+
+**Modèle.** Chaque salle est une boîte rectangulaire aux parois rigides,
+uniformément amorties. La pression en une place r due à une source r0 est la
+somme des modes propres [31] :
+
+`H(r, r0, ω) = Σ ψn(r)·ψn(r0) / (Λn·(ωn² − ω² + 2j·δ·ω))`
+
+avec `ψn = cos(nx·π·x/L)·cos(ny·π·y/W)·cos(nz·π·z/H)`, les fréquences propres de
+Rayleigh `fn = (c/2)·√((nx/L)² + (ny/W)² + (nz/H)²)`, `Λn` le produit de 1
+(indice nul) ou 1/2, et `δ = 6,91/TR60`. Les modes jusqu'à 200 Hz sont sommés
+pour la bande 20–120 Hz. L'écran : trois sources derrière la toile (L, C, R, la
+somme d'écran partagée à parts égales) ; le LFE : deux caissons au pied du mur
+avant ; vingt places (5 × 4) dans la zone des sièges, à 1,2 m. Vérifié : le
+premier mode axial d'une salle de 10 m tombe bien à c/2L = 17,15 Hz, le
+deuxième à 34,3 Hz. Calcul des quinze salles : 0,4 s une fois, puis 0,3 ms
+par mise à jour.
+
+**Ce qui est mesuré.** La couleur propre de la salle touche n'importe quel mix
+et n'est pas comptée. On garde ce que l'interaction LFE / façade ajoute à
+chaque place, par rapport au mix approuvé :
+
+`écart (dB) = 10·log10 [ (P place / P place en puissance) / (P approuvé / P approuvé en puissance) ]`
+
+Un LFE décorrélé donne 0 dB à toutes les places de toutes les salles (vérifié).
+Chaque place est notée comme un système de lecture (tolérance, doublement de
+sonie ISO 226, audibilité) ; score de la salle = 100 × (1 − pénalité moyenne
+des places) ; **résultat = robustesse du grave × score de la salle / 100**.
+
+**Les quinze salles** sont des exemples représentatifs (dimensions et TR60
+typiques), pas des salles mesurées : du couloir vif (18 × 6 × 5 m, 0,9 s) à
+l'IMAX traitée (30 × 22 × 16 m, 0,4 s).
+
+**Ce que le modèle apprend.** Les caissons et l'écran étant sur le même mur,
+leur écart de phase varie bien moins d'une place à l'autre que ne le suppose
+le scénario statistique « place à place » (§ 3.4). Avec un LFE identique à la
+façade et aussi fort, la plupart des places perdent 1 à 4 dB par rapport au
+gain « en phase » entendu en régie, avec 1 à 2 dB d'écart entre places, là où
+le scénario statistique annonce 16 dB d'écart. Ce scénario est donc pessimiste
+pour des caissons placés sous l'écran ; son poids est réglable dans Dev.
+
+**Limites.** Les salles réelles ne sont pas des boîtes (sol en gradins, murs
+évasés, absorption variable avec la fréquence, caissons multiples réglés en
+délai par l'installateur).
+
 ## 4. Cadence d'analyse et inertie d'affichage
 
 **Cadence.** L'analyse tourne dans son propre fil, à la cadence de l'audio : le

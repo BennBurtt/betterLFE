@@ -100,6 +100,13 @@ private:
     CorrelationPlot correlation;
     HistoryStrip history;
 
+    // Room Sim: replaces the analyzer views (the score and the history strip stay)
+    RoomSimulator roomSim;
+    RoomSimView roomView;
+    RoomSimResult roomResult;
+    juce::TextButton roomButton { "Room Sim" };
+    bool roomMode = false;
+
     // One button per panel; a panel opens over the analyzer, one at a time
     std::array<juce::TextButton, numCards> cardButtons;
     std::array<Card, numCards> cards { { Card ("Source & Format"), Card ("Spectrum"), Card ("Phase Alert"),

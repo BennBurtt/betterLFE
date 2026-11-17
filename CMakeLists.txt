@@ -14,7 +14,7 @@ endif()
 
 # ----------------------------------------------------------------- engine
 # Portable analysis engine, no dependencies.
-add_library(subguard_core STATIC core/LfeEngine.cpp core/TransientDetector.cpp core/PlaybackSim.cpp core/AnalysisRunner.cpp)
+add_library(subguard_core STATIC core/LfeEngine.cpp core/TransientDetector.cpp core/PlaybackSim.cpp core/AnalysisRunner.cpp core/RoomSim.cpp)
 target_include_directories(subguard_core PUBLIC core)
 
 enable_testing()

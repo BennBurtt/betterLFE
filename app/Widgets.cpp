@@ -1197,6 +1197,144 @@ void ChainsView::paint (juce::Graphics& g)
 }
 
 //==============================================================================
+void RoomSimView::update (const RoomSimResult& r, double robustnessNow, bool scored)
+{
+    result = r;
+    robustness = robustnessNow;
+    hasScore = scored && r.hasBass;
+
+    if (shownRoom.size() != r.rooms.size())
+    {
+        shownRoom.clear();
+
+        for (const auto& room : r.rooms)
+            shownRoom.push_back (room.roomScore);
+    }
+    else
+    {
+        for (size_t i = 0; i < r.rooms.size(); ++i)
+            shownRoom[i] += 0.08 * (r.rooms[i].roomScore - shownRoom[i]);      // display smoothing only
+    }
+
+    repaint();
+}
+
+void RoomSimView::paint (juce::Graphics& g)
+{
+    g.fillAll (theme::plot);
+    auto area = getLocalBounds().toFloat().reduced (16.0f, 10.0f);
+
+    // Header: the bass robustness, and how to read the rooms
+    {
+        auto top = area.removeFromTop (58.0f);
+        auto big = top.removeFromLeft (230.0f);
+        g.setColour (theme::dimText);
+        g.setFont (uiFont (12.0f));
+        g.drawText ("Bass robustness", big.removeFromTop (16.0f), juce::Justification::centredLeft);
+        g.setColour (hasScore ? ChainsView::colourFor (1.0 - robustness / 100.0) : theme::dimText);
+        g.setFont (uiFont (34.0f, true));
+        g.drawText (hasScore ? juce::String (juce::roundToInt (robustness)) : juce::String ("--"), big, juce::Justification::centredLeft);
+
+        top.removeFromRight (230.0f);      // room for the Soft / Medium / Strong selector
+        g.setColour (theme::dimText);
+        g.setFont (uiFont (11.5f));
+        g.drawFittedText ("Fifteen rooms, twenty seats each (rectangular rooms, modal sum). Each dot is a seat: what the LFE / screen "
+                          "interaction does to its bass, against the mix as approved. The room's own colour is left out: a "
+                          "decorrelated LFE puts every dot on 0. Result = bass robustness x room score.",
+                          top.toNearestInt(), juce::Justification::centredLeft, 3);
+    }
+
+    area.removeFromTop (6.0f);
+
+    // Column titles
+    const float nameWidth = 250.0f, scoreWidth = 70.0f, resultWidth = 80.0f;
+    {
+        auto head = area.removeFromTop (16.0f);
+        g.setColour (theme::dimText);
+        g.setFont (uiFont (11.0f));
+        g.drawText ("Room", head.removeFromLeft (nameWidth), juce::Justification::centredLeft);
+        g.drawText ("Result", head.removeFromRight (resultWidth), juce::Justification::centred);
+        g.drawText ("Room", head.removeFromRight (scoreWidth), juce::Justification::centred);
+        g.drawText ("-12 dB", head.removeFromLeft (60.0f), juce::Justification::centredLeft);
+        g.drawText ("+12 dB", head.removeFromRight (60.0f), juce::Justification::centredRight);
+        g.drawText ("seats: bass change from the LFE / screen interaction", head, juce::Justification::centred);
+    }
+
+    if (! result.hasBass || result.rooms.empty())
+    {
+        g.setColour (theme::dimText);
+        g.setFont (uiFont (13.0f));
+        g.drawText ("Waiting for bass", area, juce::Justification::centred);
+        return;
+    }
+
+    const float rowHeight = juce::jmin (46.0f, area.getHeight() / (float) result.rooms.size());
+
+    for (size_t i = 0; i < result.rooms.size(); ++i)
+    {
+        const auto& room = result.rooms[i];
+        auto row = area.removeFromTop (rowHeight);
+
+        if (i % 2 == 0)
+        {
+            g.setColour (juce::Colours::white.withAlpha (0.025f));
+            g.fillRect (row);
+        }
+
+        // Name and size
+        auto name = row.removeFromLeft (nameWidth);
+        g.setColour (theme::text);
+        g.setFont (uiFont (12.5f));
+        g.drawText (juce::String (room.spec.name), name.removeFromTop (row.getHeight() * 0.55f), juce::Justification::bottomLeft);
+        g.setColour (theme::dimText);
+        g.setFont (uiFont (10.0f));
+        g.drawText (juce::String (room.spec.length, 0) + " x " + juce::String (room.spec.width, 0) + " x " + juce::String (room.spec.height, 1)
+                      + " m,  RT60 " + juce::String (room.spec.rt60, 2) + " s",
+                    name, juce::Justification::topLeft);
+
+        // Result = robustness x room score, and the room score
+        const double roomScore = i < shownRoom.size() ? shownRoom[i] : room.roomScore;
+        const double combined = robustness * roomScore / 100.0;
+        auto resultBox = row.removeFromRight (resultWidth).reduced (6.0f, 3.0f);
+        g.setColour (ChainsView::colourFor (1.0 - combined / 100.0));
+        g.fillRoundedRectangle (resultBox, 4.0f);
+        g.setColour (juce::Colours::white);
+        g.setFont (uiFont (15.0f, true));
+        g.drawText (hasScore ? juce::String (juce::roundToInt (combined)) : juce::String ("--"), resultBox, juce::Justification::centred);
+
+        auto scoreBox = row.removeFromRight (scoreWidth);
+        g.setColour (theme::text);
+        g.setFont (uiFont (13.0f));
+        g.drawText (juce::String (juce::roundToInt (roomScore)), scoreBox, juce::Justification::centred);
+
+        // Seats on a -12 .. +12 dB scale
+        auto scale = row.reduced (6.0f, 0.0f);
+        const float mid = scale.getCentreX(), y = scale.getCentreY();
+        const auto xFor = [&] (double db) { return mid + (float) juce::jlimit (-1.0, 1.0, db / 12.0) * scale.getWidth() / 2.0f; };
+
+        g.setColour (juce::Colours::white.withAlpha (0.10f));
+        g.fillRect (scale.getX(), y, scale.getWidth(), 1.0f);
+
+        for (double db : { -6.0, -3.0, 3.0, 6.0 })
+            g.fillRect (xFor (db), y - 3.0f, 1.0f, 6.0f);
+
+        g.setColour (juce::Colours::white.withAlpha (0.35f));
+        g.fillRect (mid, y - 7.0f, 1.0f, 14.0f);
+
+        for (int s = 0; s < RoomResult::numSeats; ++s)
+        {
+            const float x = xFor (room.seatChangeDb[(size_t) s]);
+            g.setColour (ChainsView::colourFor (room.seatPenalty[(size_t) s]).brighter (0.2f));
+            g.fillEllipse (x - 3.5f, y - 3.5f, 7.0f, 7.0f);
+        }
+
+        // Median seat
+        g.setColour (juce::Colours::white);
+        g.fillRect (xFor (room.medianDb) - 1.0f, y - 8.0f, 2.0f, 16.0f);
+    }
+}
+
+//==============================================================================
 void HistoryStrip::push (const Sample& sample)
 {
     if (samples.empty())
@@ -1302,11 +1440,19 @@ void HistoryStrip::paint (juce::Graphics& g)
                 if (! s.scored)
                     continue;
 
-                const auto red = juce::Colour (0xffe53935), orange = juce::Colour (0xffff9800), green = juce::Colour (0xff43a047);
+                const auto red = juce::Colour (0xffff2d2d), orange = juce::Colour (0xffffa31a), green = juce::Colour (0xff2ee86b);
                 const auto colour = s.score < 0.5f ? red.interpolatedWith (orange, s.score / 0.5f)
                                                    : orange.interpolatedWith (green, (s.score - 0.5f) / 0.5f);
-                g.setColour (colour.withAlpha (0.80f));
+
+                // Vivid, with a soft glow spilling over the neighbouring lanes and a bright top edge
+                g.setColour (colour.withAlpha (0.10f));
+                g.fillRect (x0, row.getY() - 5.0f, x1 - x0 + 0.5f, row.getHeight() + 10.0f);
+                g.setColour (colour.withAlpha (0.18f));
+                g.fillRect (x0, row.getY() - 2.5f, x1 - x0 + 0.5f, row.getHeight() + 5.0f);
+                g.setColour (colour);
                 g.fillRect (x0, row.getY(), x1 - x0 + 0.5f, row.getHeight());
+                g.setColour (colour.brighter (0.6f).withAlpha (0.7f));
+                g.fillRect (x0, row.getY(), x1 - x0 + 0.5f, 1.0f);
                 continue;
             }
 
