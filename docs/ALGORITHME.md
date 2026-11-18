@@ -885,13 +885,15 @@ sièges, la vue 3D le marque en magenta (vérifié : 32 points de plus pour une
 salle de 20 places, pire point ≤ pire place ≤ P10). Aux fréquences du grave,
 un creux fait de 1 à 4 m de large : 0,6 m d'écart suffit à le voir.
 
-**Vue en couches.** À droite de la vue 3D, même taille et même caméra (tourner
-ou zoomer l'une fait tourner l'autre), trois couches du grave empilées dans la
-salle, chacune un maillage sur une grille régulière du sol à hauteur
+**Vue en couches.** À droite de la vue 3D, même taille, avec sa propre caméra
+(on la tourne et la zoome indépendamment), trois couches du grave empilées, chacune un maillage sur une grille régulière du sol à hauteur
 d'oreille (12 points sur le grand côté) : un boost soulève la couche, un creux
-l'abaisse (12 dB la déplacent de 11 % de la hauteur), sa couleur va du crème
+l'abaisse (12 dB la déplacent de 11 % de la hauteur de la salle), sa couleur va du crème
 (rien) au rouge (6 dB et plus). La place survolée dans la vue 3D est marquée
-par un trait vertical et ses trois valeurs. Les couches :
+par un trait vertical et ses trois valeurs. Le fader « Écart des calques »
+règle leur écartement : 1 = 30 % de la hauteur de la salle entre deux
+couches, 3 par défaut, de 0,5 à 6 ; le cadre suit la hauteur de la pile. Les
+couches :
 
 | Couche | Bande | Pourquoi ces limites |
 |---|---|---|

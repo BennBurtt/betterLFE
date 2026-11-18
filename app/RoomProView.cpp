@@ -407,6 +407,31 @@ void Room3DView::mouseDoubleClick (const juce::MouseEvent&)
 
 //==============================================================================
 // Layered view
+RoomLayerView::RoomLayerView()
+{
+    // Layer spacing: 1 is the first version (layers 30 % of the room height apart), 3 by default
+    spacing.setSliderStyle (juce::Slider::LinearHorizontal);
+    spacing.setTextBoxStyle (juce::Slider::TextBoxRight, false, 44, 18);
+    spacing.setRange (0.5, 6.0, 0.1);
+    spacing.setValue (3.0, juce::dontSendNotification);
+    spacing.setTextValueSuffix (juce::String::fromUTF8 (" \xc3\x97"));
+    spacing.setTooltip (tr ("How far apart the three layers are."));
+    spacing.onValueChange = [this] { repaint(); };
+    spacingLabel.setText (tr ("Layer spacing"), juce::dontSendNotification);
+    spacingLabel.setFont (uiFont (10.5f));
+    spacingLabel.setColour (juce::Label::textColourId, theme::dimText);
+    spacingLabel.setJustificationType (juce::Justification::centredRight);
+    addAndMakeVisible (spacing);
+    addAndMakeVisible (spacingLabel);
+}
+
+void RoomLayerView::resized()
+{
+    auto top = getLocalBounds().reduced (8, 4).removeFromTop (20);
+    spacing.setBounds (top.removeFromRight (170));
+    spacingLabel.setBounds (top.removeFromRight (110));
+}
+
 void RoomLayerView::setData (const ProRoom& r, const RoomPaths* paths, const RoomResult* result)
 {
     room = r;
@@ -430,8 +455,13 @@ void RoomLayerView::setData (const ProRoom& r, const RoomPaths* paths, const Roo
 void RoomLayerView::paint (juce::Graphics& g)
 {
     g.fillAll (juce::Colour (0xff121315));
-    const double H = room.height;
-    const auto project = [this] (double x, double y, double z) { return projectRoomPoint (room, *camera, getWidth(), getHeight(), x, y, z); };
+
+    // The layers 30 % of the room height apart times the spacing setting; the frame is as tall as the stack
+    const double roomHeight = room.height, gap = 0.3 * roomHeight * spacing.getValue();
+    const double H = 0.4 * roomHeight + 2.0 * gap;
+    ProRoom stage = room;
+    stage.height = H;
+    const auto project = [this, stage] (double x, double y, double z) { return projectRoomPoint (stage, camera, getWidth(), getHeight(), x, y, z); };
 
     // The room as a thin wireframe: its outline at the floor and the ceiling, and the corners between
     {
@@ -477,11 +507,11 @@ void RoomLayerView::paint (juce::Graphics& g)
     }
 
     // Each layer at its height (infra at the bottom), lifted where the bass is boosted, lowered where it dips
-    const double scale = 0.11 * H / 12.0;     // 12 dB move a layer by 11 % of the height
+    const double scale = 0.11 * roomHeight / 12.0;     // 12 dB move a layer by 11 % of the room height
 
     for (int l = 0; l < RoomResult::numLayers; ++l)
     {
-        const double base = H * (0.2 + 0.3 * l);
+        const double base = 0.2 * roomHeight + gap * l;
         const auto& values = layers[(size_t) l];
         bool any = false;
 
@@ -560,41 +590,32 @@ void RoomLayerView::paint (juce::Graphics& g)
     g.setFont (uiFont (10.0f));
     g.drawText (tr ("dip down, boost up:  0 dB"), legend, juce::Justification::centredRight);
     g.drawText ("6 dB", bar.translated (bar.getWidth() + 4.0f, -3.0f).withWidth (40.0f), juce::Justification::centredLeft);
-    g.drawText (tr ("Bass layers against the approved mix. Drag to turn, as the 3D view."),
+    g.drawText (tr ("Bass layers against the approved mix. Drag to turn, wheel to zoom, double-click to reset."),
                 getLocalBounds().reduced (8, 4).removeFromTop (14), juce::Justification::centredLeft);
 }
 
 void RoomLayerView::mouseDown (const juce::MouseEvent&)
 {
-    yawAtDrag = camera->yaw;
-    pitchAtDrag = camera->pitch;
+    yawAtDrag = camera.yaw;
+    pitchAtDrag = camera.pitch;
 }
 
 void RoomLayerView::mouseDrag (const juce::MouseEvent& e)
 {
-    turnCamera (*camera, yawAtDrag, pitchAtDrag, e);
+    turnCamera (camera, yawAtDrag, pitchAtDrag, e);
     repaint();
-
-    if (onCameraChanged)
-        onCameraChanged();
 }
 
 void RoomLayerView::mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel)
 {
-    zoomCamera (*camera, wheel);
+    zoomCamera (camera, wheel);
     repaint();
-
-    if (onCameraChanged)
-        onCameraChanged();
 }
 
 void RoomLayerView::mouseDoubleClick (const juce::MouseEvent&)
 {
-    *camera = ProCamera();
+    camera = ProCamera();
     repaint();
-
-    if (onCameraChanged)
-        onCameraChanged();
 }
 
 //==============================================================================
@@ -1338,9 +1359,6 @@ RoomProView::RoomProView()
     addAndMakeVisible (view3d);
     addAndMakeVisible (layerView);
     view3d.setCamera (camera);
-    layerView.setCamera (camera);
-    view3d.onCameraChanged = [this] { layerView.repaint(); };
-    layerView.onCameraChanged = [this] { view3d.repaint(); };
     view3d.onHover = [this] (int seat) { layerView.setHovered (seat); };
     editorViewport.setViewedComponent (&editor, false);
     editorViewport.setScrollBarsShown (true, false);

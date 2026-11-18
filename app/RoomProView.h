@@ -97,8 +97,8 @@ private:
 class RoomLayerView : public juce::Component
 {
 public:
-    void setCamera (std::shared_ptr<ProCamera> c)    { camera = std::move (c); }
-    std::function<void()> onCameraChanged;
+    RoomLayerView();
+    void resized() override;
 
     /** The room and its results (nothing to show when either is null). */
     void setData (const ProRoom&, const RoomPaths*, const RoomResult*);
@@ -118,8 +118,10 @@ private:
     std::vector<std::array<double, 3>> nodes, seats;
     std::array<std::vector<double>, RoomResult::numLayers> layers, seatLayers;
     int hovered = -1;
-    std::shared_ptr<ProCamera> camera = std::make_shared<ProCamera>();
+    ProCamera camera;                               // its own: turned independently of the 3D view
     double yawAtDrag = 0.0, pitchAtDrag = 0.0;
+    juce::Slider spacing;                           // how far apart the three layers are (x the room height share)
+    juce::Label spacingLabel;
 };
 
 /** Knobs in the style of a console panner: dark track, green arc, green-on-black read-out. */

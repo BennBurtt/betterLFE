@@ -315,6 +315,10 @@ namespace
             { "Room Sim Pro: how much the bass level at each seat against the stage counts (back rows losing the bass, holes, boosts). 0: only the interaction, as Room Sim.",
               "Room Sim Pro : ce que compte le niveau du grave à chaque place face à la régie (rangs du fond qui perdent le grave, trous, boosts). 0 : seulement l'interaction, comme Room Sim." },
 
+            { "How far apart the three layers are.", "Écart entre les trois calques." }, { "Layer spacing", "Écart des calques" },
+            { "Bass layers against the approved mix. Drag to turn, wheel to zoom, double-click to reset.",
+              "Couches du grave face au mix validé. Glisser pour tourner, molette pour zoomer, double-clic pour revenir." },
+
             // The fifteen cinema rooms
             { "Corridor room, live", "Salle couloir, vive" }, { "Small multiplex, live", "Petit multiplexe, vif" },
             { "Old cinema, near-cubic, live", "Ancien cinéma, presque cubique, vif" }, { "Narrow 120 seats", "Étroite 120 places" },
