@@ -1340,10 +1340,10 @@ void RoomSimView::paint (juce::Graphics& g)
         g.setColour (juce::Colours::white.withAlpha (0.35f));
         g.fillRect (mid, y - 7.0f, 1.0f, 14.0f);
 
-        for (int s = 0; s < RoomResult::numSeats; ++s)
+        for (size_t s = 0; s < room.seatChangeDb.size(); ++s)
         {
-            const float x = xFor (room.seatChangeDb[(size_t) s]);
-            g.setColour (ChainsView::colourFor (room.seatPenalty[(size_t) s]).brighter (0.2f));
+            const float x = xFor (room.seatChangeDb[s]);
+            g.setColour (ChainsView::colourFor (room.seatPenalty[s]).brighter (0.2f));
             g.fillEllipse (x - 3.5f, y - 3.5f, 7.0f, 7.0f);
         }
 

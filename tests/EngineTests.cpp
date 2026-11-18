@@ -7,6 +7,7 @@
 #include "../core/LfeEngine.h"
 #include "../core/PlaybackSim.h"
 #include "../core/RoomSim.h"
+#include "../core/RoomPro.h"
 #include <chrono>
 
 #include <algorithm>
@@ -1813,6 +1814,118 @@ static void testRooms()
     }
 }
 
+static void testRoomPro()
+{
+    std::printf ("Room Sim Pro (configured rooms, export and import)\n");
+
+    // Export / import: every field changed, written, read back, equal
+    {
+        ProRooms p = ProRooms::defaults();
+        double v = 1.0;
+        const auto next = [&v] { v += 0.37; return v; };
+
+        for (auto& r : p.rooms)
+        {
+            r.name = "Room " + std::to_string ((int) next());
+            r.counted = ! r.counted;
+            r.length = next(); r.width = next(); r.height = next(); r.rt60 = next();
+
+            const auto change = [&] (ProSpeaker& sp)
+            {
+                sp.enabled = ! sp.enabled;
+                sp.x = next(); sp.y = next(); sp.z = next(); sp.delayMs = next(); sp.gainDb = next();
+                sp.inverted = ! sp.inverted;
+                sp.feed = 1 - sp.feed;
+            };
+
+            for (auto& sp : r.lcr)      change (sp);
+            for (auto& sp : r.subs)     change (sp);
+            for (auto& sp : r.fills)    change (sp);
+
+            r.numSubs = 3; r.fillsOn = ! r.fillsOn; r.numFills = 4;
+            r.firstRow = next(); r.lastRow = next(); r.audienceWidth = next();
+            r.rows = 7; r.perRow = 9; r.earHeight = next(); r.rake = next(); r.calibration = 1;
+        }
+
+        ProRooms back;
+        const bool read = ProRooms::fromText (p.toText(), back);
+        check (read && back == p, "export then import gives back every field of the three rooms", read ? 1.0 : 0.0);
+        check (! ProRooms::fromText ("not a room file", back), "a file that is not a Room Sim Pro file is refused", 0.0);
+    }
+
+    const auto scene = [] (double shared)
+    {
+        const auto n = noise (8.0, 111), other = noise (8.0, 112);
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        Scene s;
+        s.c = n;
+        s.lfe = scaled (sum (scaled (n, shared), scaled (other, std::sqrt (1.0 - shared * shared))), std::pow (10.0, -10.0 / 20.0));
+        run (e, s);
+        return e.result();
+    };
+
+    PlaybackSimulator sim;
+    const auto sharedAnalysis = scene (1.0), apartAnalysis = scene (0.0);
+    const auto sharedT = sim.compute (sharedAnalysis), apartT = sim.compute (apartAnalysis);
+
+    // The standard multiplex 200, set up in Pro: the same answer as Room Sim
+    {
+        const auto spec = RoomSimulator::defaultRooms()[6];
+        const auto started = std::chrono::steady_clock::now();
+        const auto paths = ProRoomModel::prepare (ProRoom::fromSpec (spec), sharedAnalysis.grid);
+        const double seconds = std::chrono::duration<double> (std::chrono::steady_clock::now() - started).count();
+        const auto pro = RoomSimulator::rate (paths, sharedAnalysis, sharedT, sim.tuning, PlaybackSimulator::Level::strong, 10.0);
+
+        RoomSimulator standard;
+        const auto std15 = standard.compute (sharedAnalysis, sharedT, sim.tuning, PlaybackSimulator::Level::strong, 10.0);
+        std::printf ("  multiplex 200 in Pro: room %.1f (Room Sim %.1f), prepared in %.2f s\n", pro.roomScore, std15.rooms[6].roomScore, seconds);
+        check (std::abs (pro.roomScore - std15.rooms[6].roomScore) < 5.0, "the same room set up in Pro agrees with Room Sim", pro.roomScore);
+    }
+
+    // Fill speakers on the screen channels, a decorrelated LFE: still nothing added at any seat
+    {
+        auto room = ProRoom::fromSpec (RoomSimulator::defaultRooms()[8]);
+        room.fillsOn = true;
+        room.numFills = 4;
+        const auto paths = ProRoomModel::prepare (room, apartAnalysis.grid);
+        const auto r = RoomSimulator::rate (paths, apartAnalysis, apartT, sim.tuning, PlaybackSimulator::Level::strong, 10.0);
+        double worst = 0.0;
+
+        for (double d : r.seatChangeDb)
+            worst = std::max (worst, std::abs (d));
+
+        check (worst < 0.5 && r.roomScore > 99.0, "fill speakers, decorrelated LFE: nothing added at any seat", worst);
+    }
+
+    // A subwoofer set 6 dB too loud is not calibrated away
+    {
+        auto room = ProRoom::fromSpec (RoomSimulator::defaultRooms()[6]);
+        const auto even = RoomSimulator::rate (ProRoomModel::prepare (room, sharedAnalysis.grid), sharedAnalysis, sharedT, sim.tuning,
+                                               PlaybackSimulator::Level::strong, 10.0);
+        room.subs[0].gainDb = room.subs[1].gainDb = 6.0;
+        const auto loud = RoomSimulator::rate (ProRoomModel::prepare (room, sharedAnalysis.grid), sharedAnalysis, sharedT, sim.tuning,
+                                               PlaybackSimulator::Level::strong, 10.0);
+        std::printf ("  subwoofers 6 dB too loud, LFE identical to the screen: room %.1f -> %.1f, median seat %+.1f -> %+.1f dB\n",
+                     even.roomScore, loud.roomScore, even.medianDb, loud.medianDb);
+        check (std::abs (loud.medianDb - even.medianDb) > 0.5, "a subwoofer level offset stays after calibration", loud.medianDb);
+    }
+
+    // A large configured room: prepared in reasonable time
+    {
+        auto room = ProRoom::fromSpec (RoomSimulator::defaultRooms()[14]);
+        room.rows = 8;
+        room.perRow = 12;
+        room.fillsOn = true;
+        room.numFills = 4;
+        room.numSubs = 4;
+        const auto started = std::chrono::steady_clock::now();
+        const auto paths = ProRoomModel::prepare (room, sharedAnalysis.grid);
+        const double seconds = std::chrono::duration<double> (std::chrono::steady_clock::now() - started).count();
+        std::printf ("  IMAX, 96 seats, 11 speakers: prepared in %.2f s\n", seconds);
+        check (paths.seats == 96 && seconds < 20.0, "the largest Pro room is computed", seconds);
+    }
+}
+
 int main()
 {
     testFilterDesign();
@@ -1826,6 +1939,7 @@ int main()
     testTransients();
     testRunner();
     testRooms();
+    testRoomPro();
     testPlaybackChains();
     testInertiaAndAutoReset();
 

@@ -62,14 +62,28 @@ struct RoomSpec
 
 struct RoomResult
 {
-    static constexpr int numSeats = 20;
+    static constexpr int numSeats = 20;         // seats of the fifteen standard rooms
 
     RoomSpec spec;
-    std::array<double, numSeats> seatChangeDb {};     // 20-120 Hz, interaction against the approved one
-    std::array<double, numSeats> seatPenalty {};      // 0..1
+    std::vector<double> seatChangeDb;           // per seat, 20-120 Hz, interaction against the approved one
+    std::vector<double> seatPenalty;            // per seat, 0..1
     double worstDb = 0.0, medianDb = 0.0, bestDb = 0.0;   // seats sorted by change
     double roomScore = 100.0;                             // 0..100
     double combinedScore = 100.0;                         // bass robustness x room score / 100
+};
+
+/** Calibrated transfer functions of a room: screen path and LFE path, per seat and grid point. */
+struct RoomPaths
+{
+    RoomSpec spec;
+    int seats = 0;
+    std::vector<int> points;                                // grid indices inside 20-120 Hz
+    std::vector<std::complex<double>> screen, sub;          // [seat * points.size() + i]
+
+    // The room as set up normally (no level offsets), calibrated: what each seat
+    // is measured against, so that the room's own colour is left out but a
+    // speaker set off its level is not. Empty: the same as screen and sub.
+    std::vector<std::complex<double>> screenNominal, subNominal;
 };
 
 struct RoomSimResult
@@ -102,23 +116,33 @@ public:
         the score keeps the worst case, as for the other systems. */
     static void applyToScore (Translation&, const RoomSimResult&, const std::vector<bool>& selected, double levelDependenceWeight);
 
+    /** Grid indices the rooms are computed on (20-120 Hz). */
+    static std::vector<int> bandPoints (const std::vector<double>& grid);
+
+    /** Calibration: scales the screen and LFE paths so that their level, averaged over the given seats
+        (all when empty), equals the stage's. */
+    static void calibrate (RoomPaths&, const std::vector<double>& grid, const std::vector<int>& seats = {});
+
+    /** Rates one room seat by seat (the interaction against the mix as approved, with audibility
+        and loudness at each seat's own level). Shared by Room Sim and Room Sim Pro. */
+    static RoomResult rate (const RoomPaths&, const Analysis&, const Translation&, const PlaybackSimulator::Tuning&,
+                            PlaybackSimulator::Level, double lfeGainDb);
+
+    /** Mode shape and modal denominators, for other room models. */
+    struct Mode { double omega2, damping, scale; int nx, ny, nz; };
+    static std::vector<Mode> modesOf (const RoomSpec&, double highestHz = highestModeHz);
+    static double shape (const RoomSpec&, const Mode&, const std::array<double, 3>& point);
+
     /** `translation` is the playback simulation of the same analysis (its band loudness and audibility). */
     RoomSimResult compute (const Analysis&, const Translation& translation, const PlaybackSimulator::Tuning&,
                            PlaybackSimulator::Level, double lfeGainDb);
 
 private:
-    struct Prepared
-    {
-        RoomSpec spec;
-        std::vector<std::complex<double>> screen, sub;  // [seat * points + i]: transfer functions on the grid points kept
-    };
-
     void prepare (const std::vector<double>& grid);
 
     std::vector<RoomSpec> specs;
     std::vector<double> preparedGrid;
-    std::vector<int> points;                // grid indices inside 20-120 Hz
-    std::vector<Prepared> prepared;
+    std::vector<RoomPaths> prepared;
 };
 
 } // namespace subguard

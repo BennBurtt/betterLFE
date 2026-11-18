@@ -559,6 +559,72 @@ au profit de cette simulation.
 évasés, absorption variable avec la fréquence, caissons multiples réglés en
 délai par l'installateur).
 
+## 3 ter. Room Sim Pro : trois salles à soi
+
+Onglet « Room Sim Pro » (exclusif avec Room Sim). Le but : sortir de
+l'implantation cinéma standard et tester le mix dans des salles construites à
+la main, enceintes et rappels placés où l'on veut. **Son score n'entre pas dans
+le score global** ; il a le sien.
+
+**Même calcul que Room Sim.** Même modèle modal (boîte rectangulaire, modes
+jusqu'à 160 Hz), même note place par place (`RoomSimulator::rate`), mêmes
+réglages Dev (tolérances, poids, plafond de dépendance, infra-grave, poids de
+la dépendance au niveau), même niveau d'écoute, même Soft / Medium / Strong,
+même LFE +10 dB. Vérifié : une salle Pro construite comme le multiplex 200
+places de Room Sim donne la même note (62,5 contre 62,4).
+
+**Ce qu'on règle, par salle.**
+
+- nom, point de départ parmi les quinze salles de Room Sim ;
+- longueur, largeur, hauteur ; TR60 libre ou préréglé (vive 0,9 s, moyenne
+  0,55 s, traitée 0,4 s, mate 0,25 s) ;
+- L, C, R : position (distance au mur de l'écran, au mur gauche, hauteur),
+  délai, niveau, polarité, marche / arrêt ;
+- 1 à 4 caissons, chacun avec position, délai, niveau, polarité ;
+- rappels (« fill speakers ») : case à cocher, 1 à 4, chacun avec position,
+  délai (par défaut aligné sur l'écran à sa propre distance, x / c), niveau,
+  polarité, et ce qu'il joue (les canaux d'écran ou le LFE) ;
+- public : premier et dernier rang, part de la largeur utilisée, nombre de
+  rangs et de places par rang (96 places au plus), hauteur d'oreille, gradins
+  (hauteur du dernier rang au-dessus du premier) ;
+- étalonnage : moyenne de toutes les places, ou une place de référence (aux
+  deux tiers de la salle, au centre).
+
+**Étalonnage.** Comme en vrai : on étalonne la salle installée normalement
+(chaque enceinte à son niveau), puis les décalages de niveau réglés sur une
+enceinte restent des décalages. Ainsi, des caissons montés de +6 dB comptent
+bien (vérifié : écart médian −2,3 → +1,6 dB, note de la salle 62,5 → 76,1),
+au lieu d'être effacés par l'étalonnage. La couleur propre de la salle n'est
+toujours pas comptée ; un LFE décorrélé donne 0 dB partout, rappels compris
+(vérifié).
+
+**Score Room Sim Pro.** Chaque salle a une case « Counts ». Les salles cochées
+(1, 2 ou 3) comptent comme des systèmes de lecture de plus, exactement comme
+les salles cochées de Room Sim : la robustesse électrique (avant tout ajout de
+Room Sim) est recalculée en gardant le pire cas. Chaque carte affiche la note
+de la salle et le résultat = robustesse électrique × note de la salle / 100.
+
+**Vue 3D.** Boîte grise translucide, mur de l'écran au fond avec la toile en
+clair, ouverte vers l'observateur ; L, C, R en blanc, caissons en orange,
+rappels en bleu, places colorées selon leur note. Glisser pour tourner, molette
+pour zoomer, double-clic pour revenir à la vue de départ.
+
+**Mémoire, export, import.** Les trois salles sont gardées entre deux
+lancements (réglage `roomPro`), et « Save config... » / « Load config... »
+écrivent et lisent un fichier `.subguardrooms`. Format texte, une ligne
+`roomN.champ = valeur` par réglage sous l'en-tête `SubGUARD Room Sim Pro`
+(version 1) ; les enceintes : `roomN.L.x`, `roomN.sub2.delayMs`,
+`roomN.fill1.feed`... Un champ absent d'un fichier plus ancien garde sa valeur
+par défaut ; un fichier qui n'est pas un fichier Room Sim Pro est refusé. **Règle
+de développement : tout nouveau réglage doit être écrit par `toText` et lu par
+`fromText`.** Un test modifie chaque champ et vérifie l'aller-retour : un
+réglage oublié dans l'export fait échouer les tests.
+
+**Temps de calcul.** La préparation d'une salle (modes × sources × places) se
+fait en arrière-plan, 0,25 s après le dernier changement de réglage ; une IMAX
+de 96 places et 11 enceintes prend environ 0,5 s. La note se met ensuite à jour
+à chaque image.
+
 ## 4. Cadence d'analyse et inertie d'affichage
 
 **Cadence.** L'analyse tourne dans son propre fil, à la cadence de l'audio : le

@@ -7,6 +7,7 @@
 #include "AudioInput.h"
 #include "ChannelFormats.h"
 #include "Widgets.h"
+#include "RoomProView.h"
 #include "../core/Inertia.h"
 
 namespace subguard
@@ -106,6 +107,9 @@ private:
     RoomSimResult roomResult;
     juce::TextButton roomButton { "Room Sim" };
     bool roomMode = false;
+    RoomProView proView;
+    juce::TextButton proButton { "Room Sim Pro" };
+    bool proMode = false;
 
     // Rooms that count in the score: ticked in Playback chains or in Room Sim
     std::vector<bool> roomSelected = RoomSimulator::defaultSelection();

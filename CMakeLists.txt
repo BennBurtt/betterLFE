@@ -14,7 +14,7 @@ endif()
 
 # ----------------------------------------------------------------- engine
 # Portable analysis engine, no dependencies.
-add_library(subguard_core STATIC core/LfeEngine.cpp core/TransientDetector.cpp core/PlaybackSim.cpp core/AnalysisRunner.cpp core/RoomSim.cpp)
+add_library(subguard_core STATIC core/LfeEngine.cpp core/TransientDetector.cpp core/PlaybackSim.cpp core/AnalysisRunner.cpp core/RoomSim.cpp core/RoomPro.cpp)
 target_include_directories(subguard_core PUBLIC core)
 
 enable_testing()
@@ -61,7 +61,8 @@ if(SUBGUARD_BUILD_APP)
     target_sources(SubGuard PRIVATE
         app/Main.cpp
         app/MainComponent.cpp
-        app/Widgets.cpp)
+        app/Widgets.cpp
+        app/RoomProView.cpp)
 
     target_compile_definitions(SubGuard PRIVATE
         JUCE_WEB_BROWSER=0

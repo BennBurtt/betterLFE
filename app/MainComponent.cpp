@@ -92,9 +92,34 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
     roomButton.onClick = [this]
     {
         roomMode = roomButton.getToggleState();
+
+        if (roomMode)
+        {
+            proMode = false;
+            proButton.setToggleState (false, juce::dontSendNotification);
+        }
+
         resized();
     };
     addAndMakeVisible (roomButton);
+
+    addChildComponent (proView);
+    proView.onConfigChanged = [this] { saveState(); };
+    proButton.setClickingTogglesState (true);
+    proButton.setTooltip ("Room Sim Pro: three rooms of your own, every speaker placed freely, with fill speakers. Its own score, not part of the global one.");
+    proButton.onClick = [this]
+    {
+        proMode = proButton.getToggleState();
+
+        if (proMode)
+        {
+            roomMode = false;
+            roomButton.setToggleState (false, juce::dontSendNotification);
+        }
+
+        resized();
+    };
+    addAndMakeVisible (proButton);
     buildCards();
 
     for (auto* speaker : { &header.left, &header.centre, &header.right })
@@ -136,6 +161,9 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
 
     if (options.openCard == "rooms")
         roomButton.setToggleState (true, juce::sendNotificationSync);
+
+    if (options.openCard == "roompro")
+        proButton.setToggleState (true, juce::sendNotificationSync);
 
     lastTick = juce::Time::getMillisecondCounterHiRes() * 0.001;
     startTimerHz (fpsBox.getSelectedId());
@@ -587,13 +615,17 @@ void MainComponent::resized()
 
     bar.removeFromLeft (14);
     roomButton.setBounds (bar.removeFromLeft (100));
+    bar.removeFromLeft (6);
+    proButton.setBounds (bar.removeFromLeft (120));
 
     history.setBounds (area.removeFromBottom (48));
     roomView.setBounds (area);
     roomView.setVisible (roomMode);
-    spectrum.setVisible (! roomMode);
-    transientStrip.setVisible (! roomMode);
-    correlation.setVisible (! roomMode);
+    proView.setBounds (area);
+    proView.setVisible (proMode);
+    spectrum.setVisible (! roomMode && ! proMode);
+    transientStrip.setVisible (! roomMode && ! proMode);
+    correlation.setVisible (! roomMode && ! proMode);
     correlation.setBounds (area.removeFromBottom (juce::jmax (150, area.getHeight() * 2 / 7)));
     transientStrip.setBounds (area.removeFromBottom (68));
     spectrum.setBounds (area);
@@ -970,6 +1002,12 @@ void MainComponent::timerCallback()
         // Playback chains, robustness, LFE dependence, overlap
         ChainsInfo info;
         info.translation = simulator.compute (measured, currentLevel(), lfeGainToggle.getToggleState() ? lfeInBandGainDb : 0.0);
+
+        // Room Sim Pro: its own score, from the electrical translation (before any Room Sim folding)
+        if (proMode)
+            proView.update (measured, info.translation, simulator.tuning, currentLevel(),
+                            lfeGainToggle.getToggleState() ? lfeInBandGainDb : 0.0);
+
         // Room Sim: computed when shown or when ticked rooms count in the score
         if (roomMode || std::find (roomSelected.begin(), roomSelected.end(), true) != roomSelected.end())
         {
@@ -1168,6 +1206,13 @@ void MainComponent::loadState()
             for (int i = 0; i < saved.length(); ++i)
                 setRoomSelected (i, saved[i] == '1');
     }
+
+    {
+        ProRooms pro;
+
+        if (ProRooms::fromText (settings->getValue ("roomPro").toStdString(), pro))
+            proView.setRooms (pro);
+    }
     setListeningLevel (settings->getDoubleValue ("listeningLevel", settings->getDoubleValue ("devListening", 85.0)));
     transientToggle.setToggleState (settings->getBoolValue ("transientCheck", false), juce::dontSendNotification);
     tAttack.setValue (settings->getDoubleValue ("transientAttack", 40.0));
@@ -1224,6 +1269,7 @@ void MainComponent::saveState()
 
         settings->setValue ("roomSelection", rooms);
     }
+    settings->setValue ("roomPro", juce::String (proView.getRooms().toText()));
     settings->setValue ("listeningLevel", listeningDbC);
     settings->setValue ("transientCheck", transientToggle.getToggleState());
     settings->setValue ("transientAttack", tAttack.value());
