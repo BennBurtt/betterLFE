@@ -38,6 +38,9 @@
 namespace subguard
 {
 
+/** Exact equality of two numbers, for "has this setting changed": the same as ==, without the compiler's warning about it. */
+inline bool same (double a, double b)     { return ! (a < b) && ! (b < a); }
+
 /** A surface material: random-incidence absorption coefficient at 63 and 125 Hz. */
 struct ProMaterial
 {
@@ -67,8 +70,8 @@ struct ProSpeaker
 
     bool operator== (const ProSpeaker& o) const
     {
-        return enabled == o.enabled && fx == o.fx && fy == o.fy && fz == o.fz && delayMs == o.delayMs && gainDb == o.gainDb
-                 && inverted == o.inverted && feed == o.feed;
+        return enabled == o.enabled && same (fx, o.fx) && same (fy, o.fy) && same (fz, o.fz) && same (delayMs, o.delayMs)
+                 && same (gainDb, o.gainDb) && inverted == o.inverted && feed == o.feed;
     }
 };
 

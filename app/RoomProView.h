@@ -40,7 +40,11 @@ public:
     /** The worst point found between the seats (extra points), drawn when there is one below every seat. */
     void setWorstSpot (std::optional<std::array<double, 3>> spot, double score)
     {
-        if (spot != worstSpot || score != worstSpotScore)
+        const bool samePlace = spot.has_value() == worstSpot.has_value()
+                                 && (! spot.has_value() || (same ((*spot)[0], (*worstSpot)[0]) && same ((*spot)[1], (*worstSpot)[1])
+                                                             && same ((*spot)[2], (*worstSpot)[2])));
+
+        if (! samePlace || ! same (score, worstSpotScore))
         {
             worstSpot = spot;
             worstSpotScore = score;

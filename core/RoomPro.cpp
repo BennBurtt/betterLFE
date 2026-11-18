@@ -794,15 +794,15 @@ double ProRoom::modeDamping (const RoomSimulator::Mode& mode) const
 
 bool ProRoom::operator== (const ProRoom& o) const
 {
-    return name == o.name && counted == o.counted && shape == o.shape && length == o.length && width == o.width && height == o.height
-             && acoustics == o.acoustics && rt60 == o.rt60 && materials == o.materials
+    return name == o.name && counted == o.counted && shape == o.shape && same (length, o.length) && same (width, o.width) && same (height, o.height)
+             && acoustics == o.acoustics && same (rt60, o.rt60) && materials == o.materials
              && lcr == o.lcr && linkLR == o.linkLR && dualLCR == o.dualLCR && numSubs == o.numSubs && subs == o.subs
              && fillsOn == o.fillsOn && linkFills == o.linkFills && numFills == o.numFills && fills == o.fills
-             && centrePercent == o.centrePercent && frontDivergence == o.frontDivergence && rearDivergence == o.rearDivergence
-             && frDivergence == o.frDivergence
-             && audienceLayout == o.audienceLayout && firstRow == o.firstRow && lastRow == o.lastRow && audienceWidth == o.audienceWidth
-             && aisle == o.aisle && ringInner == o.ringInner && ringOuter == o.ringOuter
-             && rows == o.rows && perRow == o.perRow && earHeight == o.earHeight && rake == o.rake && people == o.people
+             && same (centrePercent, o.centrePercent) && same (frontDivergence, o.frontDivergence) && same (rearDivergence, o.rearDivergence)
+             && same (frDivergence, o.frDivergence)
+             && audienceLayout == o.audienceLayout && same (firstRow, o.firstRow) && same (lastRow, o.lastRow) && same (audienceWidth, o.audienceWidth)
+             && same (aisle, o.aisle) && same (ringInner, o.ringInner) && same (ringOuter, o.ringOuter)
+             && rows == o.rows && perRow == o.perRow && same (earHeight, o.earHeight) && same (rake, o.rake) && people == o.people
              && calibration == o.calibration;
 }
 
