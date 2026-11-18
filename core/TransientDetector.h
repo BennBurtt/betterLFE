@@ -2,7 +2,10 @@
 // also in the LFE, and if so how the LFE lines up with it. Portable C++17.
 //
 // The reference is the stereo downmix of the screen channels (Lo + Ro, i.e.
-// L + R + 1.414 C): what every listener hears, whatever the system.
+// L + R + 1.414 C): what every listener hears, whatever the system. The same
+// detectors also run on L - R: an attack in L and R in opposite polarity
+// cancels in the downmix but not there (any screen content shows in one of
+// the two). Such an attack is analysed against L - R.
 //
 // 1. ATTACKS OF THE MIX, FULL BAND. The downmix is analysed at the input rate
 //    over its whole band. An attack is declared when the
@@ -188,17 +191,19 @@ private:
 
     void mixAttack (long long inputSample);
 
-    OnsetBank mixOnsets, lfeOnsets;
-    PeakOnset mixPeaks, mixHighPeaks;
+    OnsetBank mixOnsets, lfeOnsets, sideOnsets;
+    PeakOnset mixPeaks, mixHighPeaks, sidePeaks, sideHighPeaks;
+    double mixEnergy = 0.0, sideEnergy = 0.0, energyCoefficient = 0.0;
+    int mixSource = 0;                              // ring the attack being analysed is read from: 0 downmix, 2 L - R
     long long lastMixAttack = -1000000, mixRefractory = 0;
     long long inputIndex = 0, sampleIndex = 0;      // input and decimated sample counters
     std::deque<long long> pendingMix, recentMix, recentLfe;    // decimated indices
 
     struct HighPass { double b0, b1, b2, a1, a2; } inputHighPass {};
-    std::array<std::array<double, 2>, 2> filterState {};
+    std::array<std::array<double, 2>, 3> filterState {};
 
     static constexpr int historySize = 1024;       // 2 s at the decimated rate
-    std::array<std::vector<double>, 2> ring;        // 0: downmix, 1: LFE (decimated)
+    std::array<std::vector<double>, 3> ring;        // 0: downmix, 1: LFE, 2: L - R (decimated)
 
     std::array<double, 3> screenGain { { 1.0, 1.0, 1.0 } };
     double lfeGainLinear = 1.0;

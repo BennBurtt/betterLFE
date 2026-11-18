@@ -286,6 +286,10 @@ namespace
             { "Large 400 treated", "Grande 400 traitée" },
             { "IMAX treated", "IMAX traitée" },
 
+            { "same sound, confirmed", "même son, confirmé" }, { "similar sound", "son semblable" },
+            { "close in time only, maybe another sound (likeness ", "seulement proche dans le temps, peut-être un autre son (ressemblance " },
+            { "): timing attack against attack, no phase reading", ") : chronométré attaque contre attaque, pas de lecture de phase" },
+
             // The fifteen cinema rooms
             { "Corridor room, live", "Salle couloir, vive" }, { "Small multiplex, live", "Petit multiplexe, vif" },
             { "Old cinema, near-cubic, live", "Ancien cinéma, presque cubique, vif" }, { "Narrow 120 seats", "Étroite 120 places" },

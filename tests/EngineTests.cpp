@@ -689,6 +689,24 @@ static void testTransients()
     }
 
     {
+        // A kick in L and in R in opposite polarity: it cancels in the downmix (L + R),
+        // but is still found (in L - R) and lined up with the LFE
+        Scene s;
+        s.l = sum (kicks (6.0, 0.0, 1.0), floorNoise (3));
+        s.r = sum (kicks (6.0, 0.0, -1.0), floorNoise (4));
+        s.lfe = sum (kicks (6.0, 0.012, 1.0), floorNoise (5));
+        const auto events = collect (s);
+        double worst = events.empty() ? 1e9 : 0.0;
+
+        for (const auto& ev : events)
+            worst = std::max (worst, std::abs (ev.delayMs - 12.0));
+
+        std::printf ("  kick in L and R in opposite polarity (gone from the downmix): %zu of 5 found, LFE +12 ms read within %.2f ms\n",
+                     events.size(), worst);
+        check (events.size() == 5 && worst < 0.5, "an attack cancelled in the downmix is still found and timed", (double) events.size());
+    }
+
+    {
         // 10 ms late: the pair would interact fully if aligned, and mostly cancels as it is
         Scene s;
         s.c = kicks (6.0, 0.0, 1.0);

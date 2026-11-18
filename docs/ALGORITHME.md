@@ -74,6 +74,15 @@ L + R + 1,414·C), en pleine bande : ce que tout le monde entend, quel que soit
 le système. Un événement est produit pour chaque attaque du mix ; il dit si
 elle est aussi dans le LFE, et si oui comment le LFE se place.
 
+Les mêmes détecteurs tournent aussi sur **L − R** : une attaque jouée en L et
+en R en polarités opposées disparaît du downmix (L + R = 0) mais pas de
+L − R ; tout contenu d'écran apparaît dans l'une des deux. Une attaque de
+L − R n'est retenue que là où le downmix l'annule vraiment (énergie de L − R
+sur 50 ms au moins 6 dB au-dessus de celle du downmix), et elle est alors
+analysée contre L − R. Sur de la musique ordinaire, rien ne change (mêmes
+24 attaques qu'avant) ; un kick en L et R en opposition est trouvé 5 fois sur
+5 et le retard de 12 ms du LFE lu exactement (vérifié).
+
 1. **Attaques du mix, pleine bande.** Trois vues du downmix, à la fréquence
    d'échantillonnage d'entrée ; la première qui se déclenche l'emporte (garde réglée par
    « Hold », 150 ms par défaut : un kick, son clic et sa cymbale ne font
@@ -164,8 +173,17 @@ elle est aussi dans le LFE, et si oui comment le LFE se place.
 
    2,5 ms est un quart de période à 100 Hz.
 
-Le bandeau « Transients » affiche le verdict de la dernière attaque du mix :
-verdict fin si la ressemblance suffit ; sinon retard d'attaque à attaque ;
+Le bandeau « Transients » affiche le verdict de la dernière attaque du mix,
+avec trois degrés de lien entre les deux attaques :
+
+- **même son, confirmé** : ressemblance d'au moins 0,7 et retard connu à 2 ms
+  près : verdict fin (retard, polarité, phase) ;
+- **son semblable** : ressemblance au-dessus du seuil réglé : verdict fin ;
+- **seulement proche dans le temps** : le LFE a une attaque dans la plage de
+  recherche mais ne ressemble pas au mix ; ce peut être un autre son tombé
+  dans la fenêtre. Le retard est alors chronométré d'attaque à attaque, sans
+  lecture de phase, et le verdict est affiché en couleur atténuée ;
+
 sinon « nothing in the LFE within ±x ms ».
 
 **Activation.** Le contrôle des transitoires est éteint par défaut (case

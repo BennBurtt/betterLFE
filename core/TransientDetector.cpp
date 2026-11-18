@@ -362,6 +362,10 @@ TransientDetector::TransientDetector (double inputSampleRate, int decimationFact
     lfeOnsets.prepare (fs, 1, lfeBands);
     mixPeaks.prepare (inputSampleRate, midViewHz);
     mixHighPeaks.prepare (inputSampleRate, highViewHz);
+    sideOnsets.prepare (inputSampleRate, std::max (1, (int) std::lround (inputSampleRate / 1000.0)), mixBands);
+    energyCoefficient = 1.0 - std::exp (-1.0 / (0.05 * inputSampleRate));
+    sidePeaks.prepare (inputSampleRate, midViewHz);
+    sideHighPeaks.prepare (inputSampleRate, highViewHz);
 
     // Second-order Butterworth high-pass for the stored signals
     const double w0 = 2.0 * pi * inputHighPassHz / fs;
@@ -398,13 +402,13 @@ void TransientDetector::setSettings (const TransientSettings& t)
     const double window = 0.001 * TransientSettings::attackMs (t.attack), hold = 0.001 * TransientSettings::holdMs (t.hold),
                  release = 0.001 * TransientSettings::releaseMs (t.release);
 
-    for (auto* peaks : { &mixPeaks, &mixHighPeaks })
+    for (auto* peaks : { &mixPeaks, &mixHighPeaks, &sidePeaks, &sideHighPeaks })
     {
         peaks->setThreshold (rise, peakRoughnessFactor * scale);
         peaks->setTiming (window, hold, release);
     }
 
-    for (auto* bank : { &mixOnsets, &lfeOnsets })
+    for (auto* bank : { &mixOnsets, &lfeOnsets, &sideOnsets })
     {
         bank->setThreshold (rise, roughnessFactor * scale);
         bank->setTiming (hold, release);
@@ -425,6 +429,10 @@ void TransientDetector::reset()
     lfeOnsets.reset();
     mixPeaks.reset();
     mixHighPeaks.reset();
+    sideOnsets.reset();
+    sidePeaks.reset();
+    mixEnergy = sideEnergy = 0.0;
+    sideHighPeaks.reset();
     lastMixAttack = -1000000;
     recentMix.clear();
     pendingMix.clear();
@@ -486,15 +494,31 @@ void TransientDetector::processInput (const float* frame)
     if (mixPeaks.process (mix, samplesAgo))         mixAttack (inputIndex - samplesAgo);
     if (mixOnsets.process (mix, samplesAgo))        mixAttack (inputIndex - samplesAgo);
 
+    // L - R: what the downmix cancels (L and R in opposite polarity)
+    double side = screenGain[0] * frame[0] - screenGain[2] * frame[2];
+
+    if (! std::isfinite (side))
+        side = 0.0;
+
+    // Short-term energy of both (about 50 ms): an attack of L - R only counts
+    // where the downmix really cancels it (L - R at least 6 dB above)
+    mixEnergy += energyCoefficient * (mix * mix - mixEnergy);
+    sideEnergy += energyCoefficient * (side * side - sideEnergy);
+    const bool cancelled = sideEnergy > 4.0 * mixEnergy && sideEnergy > 1e-20;
+
+    if (sideHighPeaks.process (side, samplesAgo) && cancelled)  mixAttack (inputIndex - samplesAgo);
+    if (sidePeaks.process (side, samplesAgo) && cancelled)      mixAttack (inputIndex - samplesAgo);
+    if (sideOnsets.process (side, samplesAgo) && cancelled)     mixAttack (inputIndex - samplesAgo);
+
     ++inputIndex;
 }
 
 void TransientDetector::processDecimated (const double* frame)
 {
     const double mix = screenGain[0] * frame[0] + std::sqrt (2.0) * screenGain[1] * frame[1] + screenGain[2] * frame[2];
-    const double input[2] = { mix, frame[3] };
+    const double input[3] = { mix, frame[3], screenGain[0] * frame[0] - screenGain[2] * frame[2] };
 
-    for (int c = 0; c < 2; ++c)
+    for (int c = 0; c < 3; ++c)
     {
         auto& st = filterState[(size_t) c];
         const double y = inputHighPass.b0 * input[c] + st[0];
@@ -526,6 +550,20 @@ void TransientDetector::analyse (long long onsetIndex)
     const long long start = onsetIndex - preSamples;        // segment holding the attack
     const long long reference = start - segmentLength;      // same length, just before it
 
+    // Read from the downmix, or from L - R when the attack is far stronger
+    // there (L and R in opposite polarity cancel in the downmix)
+    {
+        double sum = 0.0, side = 0.0;
+
+        for (long long i = start; i < start + segmentLength; ++i)
+        {
+            sum += history (0, i) * history (0, i);
+            side += history (2, i) * history (2, i);
+        }
+
+        mixSource = side > 4.0 * sum ? 2 : 0;
+    }
+
     const long long base = reference - maxLag - whitenOrder;      // first sample needed
 
     if (base < sampleIndex - historySize + 1)
@@ -548,7 +586,7 @@ void TransientDetector::analyse (long long onsetIndex)
 
             for (int k = 0; k <= whitenOrder; ++k)
                 for (int i = 0; i + k < segmentLength; ++i)
-                    own[k] += window[(size_t) i] * history (which, reference + i) * window[(size_t) (i + k)] * history (which, reference + i + k);
+                    own[k] += window[(size_t) i] * history (which == 0 ? mixSource : 1, reference + i) * window[(size_t) (i + k)] * history (which == 0 ? mixSource : 1, reference + i + k);
 
             if (own[0] > segmentLength * floorPower)
                 for (int k = 0; k <= whitenOrder; ++k)
@@ -587,7 +625,7 @@ void TransientDetector::analyse (long long onsetIndex)
 
             for (int k = 0; k <= whitenOrder; ++k)
             {
-                m += a[k] * history (0, base + i - k);
+                m += a[k] * history (mixSource, base + i - k);
                 l += a[k] * history (1, base + i - k);
             }
 
@@ -721,7 +759,7 @@ void TransientDetector::analyse (long long onsetIndex)
 
         for (int i = 0; i < segmentLength; ++i)
         {
-            const double a = window[(size_t) i] * history (0, start + i), b = window[(size_t) i] * history (0, reference + i);
+            const double a = window[(size_t) i] * history (mixSource, start + i), b = window[(size_t) i] * history (mixSource, reference + i);
             now += a * a;
             before += b * b;
         }
@@ -855,7 +893,7 @@ void TransientDetector::analyse (long long onsetIndex)
 
         const auto tail = (long long) std::lround (0.150 * fs), lead = (long long) std::lround (0.030 * fs);
         bool mixFound = false, lfeFound = false;
-        const auto mixStart = startOf (0, onsetIndex - lead, onsetIndex + tail, 1.0, mixFound);
+        const auto mixStart = startOf (mixSource, onsetIndex - lead, onsetIndex + tail, 1.0, mixFound);
         const auto lfeStart = startOf (1, onsetIndex - maxLag, std::min (onsetIndex + maxLag + tail, sampleIndex), lfeGainLinear, lfeFound);
 
         const auto mixAt0 = mixFound ? mixStart : onsetIndex;

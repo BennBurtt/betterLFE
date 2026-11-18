@@ -786,7 +786,10 @@ void TransientStrip::paint (juce::Graphics& g)
         }
 
         const double sumDb = 10.0 * std::log10 (juce::jmax (1e-3, 1.0 + e.interactionNow));
-        detail = tr ("likeness ") + juce::String (e.match, 2) + tr ("   sum ") + (sumDb >= 0.0 ? "+" : "") + juce::String (sumDb, 1) + " dB";
+        // Three levels of link between the two attacks: close in time (below), alike, confirmed
+        const bool confirmed = e.match >= 0.7 && e.delayUncertaintyMs <= 2.0;
+        detail = (confirmed ? tr ("same sound, confirmed") : tr ("similar sound")) + "   " + tr ("likeness ") + juce::String (e.match, 2)
+                   + tr ("   sum ") + (sumDb >= 0.0 ? "+" : "") + juce::String (sumDb, 1) + " dB";
     }
     else if (e.lfeAttack)
     {
@@ -797,7 +800,7 @@ void TransientStrip::paint (juce::Graphics& g)
         {
             verdict = (e.attackDelayMs > 0.0 ? tr ("LFE attack late ") : tr ("LFE attack early ")) + about
                         + juce::String ((int) std::lround (std::abs (e.attackDelayMs))) + " ms";
-            colour = orange;
+            colour = orange.withMultipliedSaturation (0.6f);
         }
         else
         {
@@ -805,8 +808,8 @@ void TransientStrip::paint (juce::Graphics& g)
             colour = amber;
         }
 
-        detail = tr ("timed attack against attack: the LFE does not carry the same sound as the mix (likeness ")
-                   + juce::String (e.match, 2) + tr ("), no phase reading");
+        // Only close in time: it may be another sound that happens to fall in the search range
+        detail = tr ("close in time only, maybe another sound (likeness ") + juce::String (e.match, 2) + tr ("): timing attack against attack, no phase reading");
     }
     else
     {
