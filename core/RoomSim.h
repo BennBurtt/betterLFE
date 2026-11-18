@@ -68,22 +68,35 @@ struct RoomResult
     std::vector<double> seatChangeDb;           // per seat, 20-120 Hz, interaction against the approved one
     std::vector<double> seatPenalty;            // per seat, 0..1
     double worstDb = 0.0, medianDb = 0.0, bestDb = 0.0;   // seats sorted by change
-    double roomScore = 100.0;                             // 0..100
+    double roomScore = 100.0;                             // 0..100: seat scores, the worst seats weighed more (see rate)
     double combinedScore = 100.0;                         // bass robustness x room score / 100
 };
 
-/** Calibrated transfer functions of a room: screen path and LFE path, per seat and grid point. */
+/** A room's calibrated paths, per seat and grid point, as averages over the band of that point:
+    screen-path power, LFE-path power and their cross product. */
 struct RoomPaths
 {
     RoomSpec spec;
     int seats = 0;
     std::vector<int> points;                                // grid indices inside 20-120 Hz
-    std::vector<std::complex<double>> screen, sub;          // [seat * points.size() + i]
+    std::vector<double> ss, ll;                             // |screen|^2, |LFE path|^2   [seat * points.size() + i]
+    std::vector<std::complex<double>> sl;                   // screen * conj (LFE path)
 
     // The room as set up normally (no level offsets), calibrated: what each seat
     // is measured against, so that the room's own colour is left out but a
-    // speaker set off its level is not. Empty: the same as screen and sub.
-    std::vector<std::complex<double>> screenNominal, subNominal;
+    // speaker set off its level is not. Empty: the same as ss and ll.
+    std::vector<double> ssRef, llRef;
+
+    // false (Room Sim): only the interaction between the two paths counts, the
+    // colour each path gets from the room is left out.
+    // true (Room Sim Pro): the screen path (L C R) is the reference: the room
+    // colour of the screen path is left out, but the LFE path heard
+    // differently from it (subwoofers placed elsewhere, set off their level,
+    // in another mode) counts, in proportion to the bass the mix gives the LFE.
+    bool lcrReference = false;
+
+    /** Stores one band point of a seat from its complex responses (the average of several, when called with `weight`). */
+    void accumulate (size_t at, std::complex<double> screen, std::complex<double> lfe, double weight = 1.0);
 };
 
 struct RoomSimResult
@@ -125,6 +138,9 @@ public:
 
     /** Rates one room seat by seat (the interaction against the mix as approved, with audibility
         and loudness at each seat's own level). Shared by Room Sim and Room Sim Pro. */
+    /** Room score from the seat penalties: (1 - w) x mean + w x mean of the worst share (Dev settings). */
+    static double roomScoreOf (const std::vector<double>& seatPenalty, const PlaybackSimulator::Tuning&);
+
     static RoomResult rate (const RoomPaths&, const Analysis&, const Translation&, const PlaybackSimulator::Tuning&,
                             PlaybackSimulator::Level, double lfeGainDb);
 

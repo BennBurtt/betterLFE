@@ -150,7 +150,9 @@ private:
                    dCeiling { "LFE dependence, ceiling:", 0, 1, 0.01, 1.0 }, dInfraWeight { "Infra-bass weight:", 0, 1, 0.05, 0.30 },
                    dInfraLo { "Infra-bass up to:", 10, 40, 1, 25 }, dInfraHi { "Full weight from:", 40, 100, 1, 40 },
                    dLevelWeight { "LFE level dependence, weight in score:", 0, 0.5, 0.01, 0.20 },
-                   dLevelRed { "LFE level dependence, red at a mean of:", 0.5, 12, 0.1, 3 };
+                   dLevelRed { "LFE level dependence, red at a mean of:", 0.5, 12, 0.1, 3 },
+                   dWorstWeight { "Room score, weight of the worst seats:", 0, 1, 0.01, 0.25 },
+                   dWorstShare { "Room score, worst seats (share):", 0.02, 0.5, 0.01, 0.10 };
     juce::Label devLoudnessLabel;       // what the listening level makes of the bass playing now
     juce::TextButton devDefaultsButton { "Defaults" };
     std::vector<LabelledSlider*> devSliders();

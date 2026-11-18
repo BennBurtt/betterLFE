@@ -487,7 +487,8 @@ void MainComponent::buildCards()
         const auto plain = [] (double v) { return juce::String (v, 2); };
         const auto hz = [] (double v) { return juce::String ((int) v) + " Hz"; };
         dTolSoft.format = dTolMedium.format = dTolStrong.format = dLevelRed.format = db;
-        dLate.format = dEarly.format = dCeiling.format = dInfraWeight.format = dLevelWeight.format = plain;
+        dLate.format = dEarly.format = dCeiling.format = dInfraWeight.format = dLevelWeight.format = dWorstWeight.format = plain;
+        dWorstShare.format = [] (double v) { return juce::String (juce::roundToInt (100.0 * v)) + " %"; };
         dInfraLo.format = dInfraHi.format = hz;
         devLoudnessLabel.setFont (uiFont (11.5f));
         devLoudnessLabel.setColour (juce::Label::textColourId, theme::dimText);
@@ -499,6 +500,9 @@ void MainComponent::buildCards()
         dInfraWeight.setTooltip ("What bass under the 'infra-bass up to' frequency still counts for in the LFE dependence; it rises to 1 at 'full weight from'.");
         dLevelWeight.setTooltip ("The most the LFE level dependence can take off the score.");
         dLevelRed.setTooltip ("Mean difference from the expected bass at which the LFE level dependence box is fully red.");
+        dWorstWeight.setTooltip ("Room Sim and Room Sim Pro: room score = (1 - weight) x mean seat score + weight x score of the worst seats. "
+                                 "0 is the plain mean.");
+        dWorstShare.setTooltip ("Which seats count as the worst ones: this share of the seats, at least one.");
 
         for (auto* slider : devSliders())
         {
@@ -520,6 +524,8 @@ void MainComponent::buildCards()
             dInfraHi.setValue (d.infraHiHz);
             dLevelWeight.setValue (d.levelDependenceWeight);
             dLevelRed.setValue (d.levelRedDb);
+            dWorstWeight.setValue (d.roomWorstWeight);
+            dWorstShare.setValue (d.roomWorstShare);
         };
 
         auto& card = cards[(size_t) devCard];
@@ -540,13 +546,13 @@ void MainComponent::buildCards()
 
             for (auto* slider : devSliders())
             {
-                auto& column = index++ < 6 ? leftColumn : rightColumn;
+                auto& column = index++ < 7 ? leftColumn : rightColumn;
                 slider->setBounds (column.removeFromTop (46));
                 column.removeFromTop (4);
             }
 
         };
-        card.setSize (680, 404);
+        card.setSize (680, 454);
         addChildComponent (card);
     }
 
@@ -808,7 +814,7 @@ void MainComponent::showListeningMenu()
 std::vector<LabelledSlider*> MainComponent::devSliders()
 {
     return { &dTolSoft, &dTolMedium, &dTolStrong, &dLate, &dEarly, &dCeiling,
-             &dInfraWeight, &dInfraLo, &dInfraHi, &dLevelWeight, &dLevelRed };
+             &dInfraWeight, &dInfraLo, &dInfraHi, &dLevelWeight, &dLevelRed, &dWorstWeight, &dWorstShare };
 }
 
 void MainComponent::applyDevSettings()
@@ -823,6 +829,8 @@ void MainComponent::applyDevSettings()
     t.infraHiHz = dInfraHi.value();
     t.levelDependenceWeight = dLevelWeight.value();
     t.levelRedDb = dLevelRed.value();
+    t.roomWorstWeight = dWorstWeight.value();
+    t.roomWorstShare = dWorstShare.value();
     t.listeningLevelDbC = listeningDbC;
 }
 
@@ -1178,7 +1186,8 @@ void MainComponent::loadState()
 
     {
         const char* keys[] = { "devTolSoft", "devTolMedium", "devTolStrong", "devLate", "devEarly", "devCeiling",
-                               "devInfraWeight", "devInfraLo", "devInfraHi", "devLevelWeight", "devLevelRed" };
+                               "devInfraWeight", "devInfraLo", "devInfraHi", "devLevelWeight", "devLevelRed",
+                               "devRoomWorstWeight", "devRoomWorstShare" };
         int index = 0;
 
         for (auto* slider : devSliders())
@@ -1248,7 +1257,8 @@ void MainComponent::saveState()
 
     {
         const char* keys[] = { "devTolSoft", "devTolMedium", "devTolStrong", "devLate", "devEarly", "devCeiling",
-                               "devInfraWeight", "devInfraLo", "devInfraHi", "devLevelWeight", "devLevelRed" };
+                               "devInfraWeight", "devInfraLo", "devInfraHi", "devLevelWeight", "devLevelRed",
+                               "devRoomWorstWeight", "devRoomWorstShare" };
         int index = 0;
 
         for (auto* slider : devSliders())

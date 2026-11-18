@@ -22,8 +22,13 @@ namespace subguard
 class Room3DView : public juce::Component
 {
 public:
-    void setRoom (const ProRoom& r, const std::vector<double>& seatPenalties);
+    void setRoom (const ProRoom& r, const std::vector<double>& seatPenalties, const std::vector<double>& seatChangeDb = {});
     void paint (juce::Graphics&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
+
+    /** Colour of a seat score (0..100), in many steps over the range where seats fall. */
+    static juce::Colour seatColour (double score);
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
@@ -33,7 +38,9 @@ private:
     juce::Point<float> project (double x, double y, double z, float* depth = nullptr) const;
 
     ProRoom room;
-    std::vector<double> penalties;
+    std::vector<double> penalties, changes;
+    std::vector<juce::Point<float>> seatPoints;     // where each seat was drawn
+    int hovered = -1;
     double yaw = 0.0, pitch = 0.32, zoom = 1.0;
     double yawAtDrag = 0.0, pitchAtDrag = 0.0;
 };

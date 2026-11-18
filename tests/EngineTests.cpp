@@ -1848,6 +1848,9 @@ static void testRoomPro()
 
             r.numSubs = 3; r.fillsOn = ! r.fillsOn; r.numFills = 4;
             r.linkLR = false; r.linkFills = false;      // linked speakers would be mirrored on reading
+            r.dualLCR = ! r.dualLCR; r.audienceLayout = 2;
+            r.aisle = 0.1 * next(); r.ringInner = 0.01 * next(); r.ringOuter = 0.01 * next();
+            r.shape = 1; r.width = r.length;            // a round room keeps length = width
             r.firstRow = next(); r.lastRow = next(); r.audienceWidth = next();
             r.rows = 7; r.perRow = 9; r.earHeight = next(); r.rake = next(); r.calibration = 1;
         }
@@ -1932,13 +1935,14 @@ static void testRoomPro()
         check (fine, "the venue presets have sensible reverberation", 0.0);
     }
 
-    const auto scene = [] (double shared)
+    const auto scene = [] (double shared, double lfeDb = -10.0)
     {
         const auto n = noise (8.0, 111), other = noise (8.0, 112);
         LfeEngine e (sampleRate, 1.0, 0.0);
         Scene s;
         s.c = n;
-        s.lfe = scaled (sum (scaled (n, shared), scaled (other, std::sqrt (1.0 - shared * shared))), std::pow (10.0, -10.0 / 20.0));
+        s.lfe = lfeDb < -100.0 ? scaled (n, 0.0)
+                               : scaled (sum (scaled (n, shared), scaled (other, std::sqrt (1.0 - shared * shared))), std::pow (10.0, lfeDb / 20.0));
         run (e, s);
         return e.result();
     };
@@ -1951,7 +1955,8 @@ static void testRoomPro()
     {
         const auto spec = RoomSimulator::defaultRooms()[6];
         const auto started = std::chrono::steady_clock::now();
-        const auto paths = ProRoomModel::prepare (ProRoom::fromSpec (spec), sharedAnalysis.grid);
+        auto paths = ProRoomModel::prepare (ProRoom::fromSpec (spec), sharedAnalysis.grid);
+        paths.lcrReference = false;     // as Room Sim: the interaction only
         const double seconds = std::chrono::duration<double> (std::chrono::steady_clock::now() - started).count();
         const auto pro = RoomSimulator::rate (paths, sharedAnalysis, sharedT, sim.tuning, PlaybackSimulator::Level::strong, 10.0);
 
@@ -1961,19 +1966,112 @@ static void testRoomPro()
         check (std::abs (pro.roomScore - std15.rooms[6].roomScore) < 5.0, "the same room set up in Pro agrees with Room Sim", pro.roomScore);
     }
 
-    // Fill speakers on the screen channels, a decorrelated LFE: still nothing added at any seat
+    // A mix with no LFE: L C R is the reference, nothing changes at any seat (Lc / Rc fills, a second L C R set)
     {
+        const auto noLfe = scene (0.0, -200.0);
+        const auto noLfeT = sim.compute (noLfe);
         auto room = ProRoom::fromSpec (RoomSimulator::defaultRooms()[8]);
         room.fillsOn = true;
         room.numFills = 4;
-        const auto paths = ProRoomModel::prepare (room, apartAnalysis.grid);
-        const auto r = RoomSimulator::rate (paths, apartAnalysis, apartT, sim.tuning, PlaybackSimulator::Level::strong, 10.0);
+        room.dualLCR = true;
+        const auto r = RoomSimulator::rate (ProRoomModel::prepare (room, noLfe.grid), noLfe, noLfeT, sim.tuning,
+                                            PlaybackSimulator::Level::strong, 10.0);
         double worst = 0.0;
 
         for (double d : r.seatChangeDb)
             worst = std::max (worst, std::abs (d));
 
-        check (worst < 0.5 && r.roomScore > 99.0, "fill speakers, decorrelated LFE: nothing added at any seat", worst);
+        check (worst < 0.1 && r.roomScore > 99.0, "no LFE in the mix: L C R is the reference, nothing changes at any seat", worst);
+    }
+
+    // Where the subwoofers are matters (LFE as loud as the screen, unrelated to it)
+    {
+        const auto loudApart = scene (0.0, 0.0);
+        const auto loudApartT = sim.compute (loudApart);
+        auto room = ProRoom::fromSpec (RoomSimulator::defaultRooms()[6]);
+        const auto front = RoomSimulator::rate (ProRoomModel::prepare (room, loudApart.grid), loudApart, loudApartT, sim.tuning,
+                                                PlaybackSimulator::Level::strong, 10.0);
+        room.numSubs = 1;
+        room.subs[0].fx = 0.98;
+        room.subs[0].fy = 0.02;
+        room.subs[0].fz = 0.03;
+        const auto corner = RoomSimulator::rate (ProRoomModel::prepare (room, loudApart.grid), loudApart, loudApartT, sim.tuning,
+                                                 PlaybackSimulator::Level::strong, 10.0);
+        auto spread = [] (const RoomResult& x)
+        {
+            const auto [lo, hi] = std::minmax_element (x.seatChangeDb.begin(), x.seatChangeDb.end());
+            return *hi - *lo;
+        };
+        std::printf ("  LFE as loud as the screen, unrelated: subwoofers under the screen room %.1f (seats spread %.1f dB), "
+                     "one in a back corner %.1f (%.1f dB)\n", front.roomScore, spread (front), corner.roomScore, spread (corner));
+        check (std::abs (front.roomScore - corner.roomScore) > 5.0, "moving the subwoofer to a back corner changes the room score", corner.roomScore);
+    }
+
+    // Room score: the worst seats weigh more
+    {
+        std::vector<double> penalties (20, 0.0);
+        penalties[3] = penalties[9] = penalties[14] = 0.7;
+        const double score = RoomSimulator::roomScoreOf (penalties, sim.tuning);
+        std::printf ("  17 good seats and 3 bad ones (30 %%): room score %.1f (plain mean 89.5)\n", score);
+        check (std::abs (score - 74.6) < 0.2, "three bad seats out of twenty pull the room down to about 75", score);
+    }
+
+    // Round room: Bessel modes
+    {
+        check (std::abs (ProRoomModel::besselJ (0, 2.404825557695773)) < 1e-9, "J0 is zero at 2.4048", ProRoomModel::besselJ (0, 2.404825557695773));
+        check (std::abs (ProRoomModel::besselDerivativeZero (1, 1) - 1.841183781) < 1e-6
+                 && std::abs (ProRoomModel::besselDerivativeZero (2, 1) - 3.054236928) < 1e-6
+                 && std::abs (ProRoomModel::besselDerivativeZero (0, 1) - 3.831705970) < 1e-6,
+               "zeros of J'm: 1.8412, 3.0542, 3.8317", ProRoomModel::besselDerivativeZero (1, 1));
+
+        ProRoom round = ProRoom::fromSpec (RoomSimulator::defaultRooms()[6]);
+        round.shape = ProRoom::round;
+        round.width = 10.0;
+        round.applyLinks();
+        double lowest = 1e9;
+
+        for (const auto& m : ProRoomModel::modesOf (round, 160.0))
+            if (m.hz > 0.0)
+                lowest = std::min (lowest, m.hz);
+
+        std::printf ("  round room 10 m across: first mode %.2f Hz (c x 1.8412 / (2 pi x 5) = 20.10)\n", lowest);
+        check (std::abs (lowest - 343.0 * 1.841183781 / (2.0 * 3.14159265358979 * 5.0)) < 0.01, "first mode of a round room", lowest);
+
+        double outside = 0.0;
+
+        for (const auto& seat : round.seatPositions())
+            outside = std::max (outside, std::hypot (seat[0] - 5.0, seat[1] - 5.0) - 5.0);
+
+        check (outside <= 0.0, "every seat of a round room is inside it", outside);
+    }
+
+    // Audience layouts
+    {
+        auto r = ProRoom::fromSpec (RoomSimulator::defaultRooms()[6]);
+        r.audienceLayout = ProRoom::sidesLayout;
+        r.aisle = 0.3;
+        r.perRow = 8;
+        double nearest = 1e9;
+
+        for (const auto& seat : r.seatPositions())
+            nearest = std::min (nearest, std::abs (seat[1] - 0.5 * r.width));
+
+        check (nearest >= 0.15 * r.width - 1e-9, "two blocks: no seat in the aisle", nearest);
+
+        r.audienceLayout = ProRoom::ringLayout;
+        r.ringInner = 0.3;
+        r.ringOuter = 0.8;
+        double lo = 1e9, hi = 0.0;
+
+        for (const auto& seat : r.seatPositions())
+        {
+            const double d = std::hypot (seat[0] - 0.5 * r.length, seat[1] - 0.5 * r.width);
+            lo = std::min (lo, d);
+            hi = std::max (hi, d);
+        }
+
+        const double half = 0.5 * std::min (r.length, r.width);
+        check (lo >= 0.3 * half - 1e-6 && hi <= 0.8 * half + 1e-6, "rings: every seat between the inner and outer radius", hi);
     }
 
     // A subwoofer set 6 dB too loud is not calibrated away

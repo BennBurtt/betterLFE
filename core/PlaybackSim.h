@@ -224,6 +224,12 @@ public:
         double levelDependenceWeight = PlaybackSimulator::levelDependenceWeight;
         double levelRedDb = PlaybackSimulator::levelRedDb;
 
+        // Room Sim and Room Sim Pro: a room's score is the mean seat score,
+        // pulled down by its worst seats: (1 - w) x mean + w x mean of the
+        // worst share of seats. A few bad seats in a good room then cost it
+        // 10 to 30 points instead of 1 or 2.
+        double roomWorstWeight = 0.25, roomWorstShare = 0.10;
+
         // Listening level: the sound pressure level, in dB(C), that a screen
         // channel gives with the reference signal at -20 dBFS RMS. 85 is the
         // cinema calibration (SMPTE RP 200); dubbing stages and smaller

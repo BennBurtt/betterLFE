@@ -537,11 +537,20 @@ place, bosses et creux de la salle compris. L'acoustique de la salle ne dépend
 pas du niveau (elle est linéaire) ; ce qui en dépend, c'est ce qu'on en
 entend : plus le niveau d'écoute est élevé, plus ses défauts sont audibles.
 Mesuré, LFE identique à la façade à −50 dBFS : note moyenne des salles 99 à
-70 dB(C), 65 à 90 dB(C).
+70 dB(C), 58 à 90 dB(C) (score de salle pesant les pires places).
 
 Chaque place est notée comme un système de lecture (tolérance, doublement de
-sonie ISO 226, audibilité) ; score de la salle = 100 × (1 − pénalité moyenne
-des places) ; **résultat = robustesse du grave × score de la salle / 100**.
+sonie ISO 226, audibilité) : note de la place = 100 × (1 − pénalité).
+**Score de la salle** : la note moyenne des places, tirée vers le bas par les
+pires places,
+
+`score = (1 − w) × moyenne des places + w × moyenne des pires places`
+
+avec par défaut w = 0,25 et les pires places = 10 % des places (au moins une),
+réglables dans Dev. Ainsi 17 bonnes places et 3 mauvaises (30 %) donnent 74,6
+au lieu de 89,5 en moyenne simple (vérifié) : quelques places ratées coûtent
+10 à 30 points à une bonne salle. w = 0 redonne la moyenne simple.
+**Résultat = robustesse du grave × score de la salle / 100**.
 
 **Les quinze salles** sont des exemples représentatifs (dimensions et TR60
 typiques), pas des salles mesurées : du couloir vif (18 × 6 × 5 m, 0,9 s) à
@@ -567,36 +576,84 @@ la main (exposition, défilé, galerie, tente, église, salon, régie), enceinte
 et rappels placés où l'on veut. **Son score n'entre pas dans le score global** ;
 il a le sien.
 
-**Même calcul que Room Sim.** Même modèle modal (boîte rectangulaire, modes
-jusqu'à 160 Hz), même note place par place (`RoomSimulator::rate`), mêmes
-réglages Dev (tolérances, poids, plafond de dépendance, infra-grave, poids de
-la dépendance au niveau), même niveau d'écoute, même Soft / Medium / Strong,
-même LFE +10 dB. Vérifié : une salle Pro construite comme le multiplex 200
-places de Room Sim donne la même note (62,5 contre 62,4).
+**Même note que Room Sim, une référence plus exigeante.** Même modèle modal
+(modes jusqu'à 160 Hz), même note place par place et même score de salle
+(`RoomSimulator::rate`), mêmes réglages Dev, même niveau d'écoute, même
+Soft / Medium / Strong, même LFE +10 dB. Une différence voulue :
+
+- Room Sim ne compte que l'interaction entre l'écran et le LFE ; la couleur
+  que chaque chemin prend dans la salle est retirée.
+- **Room Sim Pro prend le chemin de l'écran (L C R) comme référence** :
+  `référence = |H écran|² × (P façade + P LFE)` à chaque place, comme si
+  tout le grave passait par L C R. La couleur propre du chemin d'écran est
+  retirée, mais le chemin LFE entendu autrement que lui compte : caissons
+  placés ailleurs, réglés hors niveau, dans un autre mode, en proportion du
+  grave que le mix confie au LFE. Un mix sans LFE ne change à aucune place
+  (vérifié) ; un LFE décorrélé et aussi fort que l'écran passe de 74,6 (caissons
+  sous l'écran, 4,8 dB d'écart entre places) à 32,6 avec un seul caisson dans
+  un coin du fond (19 dB d'écart) (vérifié). C'est la philosophie de SubGUARD :
+  le grave ne doit pas reposer sur le LFE.
+
+Vérifié : avec la référence de Room Sim, une salle Pro construite comme le
+multiplex 200 places donne la même note que Room Sim (55,5 contre 55,4).
+
+**Échantillonnage fin.** Chaque point de la grille d'analyse représente une
+bande d'environ 2,3 %. Quand les modes sont plus étroits que cette bande
+(décroissance longue : largeur ≈ δ/π, 0,2 Hz à 10 s), la réponse est moyennée
+sur 2 à 8 fréquences dans la bande au lieu d'être lue en son centre ; les
+puissances et le produit croisé des deux chemins sont moyennés, pas les
+réponses complexes.
 
 **Ce qu'on règle, par salle** (panneaux de potentiomètres, à la manière du
 panner de Pro Tools ; la molette fait défiler la colonne, un clic sur la
 valeur permet de la taper) :
 
-- **Room** : nom ; point de départ (les quinze salles de Room Sim, ou six
-  lieux hors cinéma) ; longueur, largeur, hauteur.
+- **Room** : nom ; point de départ (les quinze salles de Room Sim, ou sept
+  lieux hors cinéma) ; forme rectangulaire ou ronde ; longueur, largeur
+  (ou diamètre), hauteur.
 - **Acoustics** : décroissance réglée à la main (TR60 de 0,1 à 10 s) ou
   calculée d'après les matériaux des six surfaces (voir plus bas). Affichés :
   TR60 d'Eyring à 63 et 125 Hz, fréquence de Schroeder.
-- **Left / Right** : L et R liés par défaut (« Link ») : R est le miroir de L
-  par rapport à l'axe de la salle ; délié, chacun a son panneau. Puis
-  **Centre**. Pour chaque enceinte : distance au mur avant (front wall, celui
-  de l'écran), distance au mur gauche, hauteur, délai, niveau, polarité (Ø),
-  marche / arrêt (On).
+- **L C R** : un jeu, ou deux jeux dos à dos (le second est le premier
+  tourné de 180° autour du centre de la salle : on place le premier, le
+  second suit). L et R liés par défaut (« Link ») : R est le miroir de L par
+  rapport à l'axe de la salle ; délié, chacun a son panneau. Puis Centre. Pour
+  chaque enceinte : distance au mur avant (front wall, celui de l'écran),
+  distance au mur gauche, hauteur, délai, niveau, polarité (Ø), marche / arrêt
+  (On). Au grave, une enceinte rayonne de la même façon dans toutes les
+  directions : son orientation ne compte pas, seule sa position compte.
 - **Subwoofers** : 1 à 4, mêmes réglages.
 - **Fill speakers** (rappels) : On, Link (les rappels 2 et 4 sont les miroirs
   de 1 et 3 : on règle des paires), 1 ou 2 paires (ou 1 à 4 déliés), mêmes
-  réglages plus ce qu'ils jouent (L C R ou LFE). Délai par défaut : aligné sur
-  l'écran à leur propre distance (x / c).
-- **Audience** : premier et dernier rang, part de la largeur, rangs, places
-  par rang (96 au plus), hauteur d'oreille, gradins.
+  réglages plus ce qu'ils jouent : **Lc / Rc** (L ou R + C à −3 dB) ou LFE.
+  Le grave d'écran étant pris comme un seul signal partagé par L, C et R
+  (comme dans Room Sim), un rappel Lc / Rc rayonne 1 + 10^(−3/20) = 1,71 fois
+  l'amplitude d'une enceinte d'écran. Délai par défaut : aligné sur l'écran à
+  leur propre distance (x / c).
+- **Audience** : trois dispositions. En rangs (premier et dernier rang, part
+  de la largeur, rangs, places par rang) ; en deux blocs avec une allée libre
+  au milieu (podium de défilé, scène : part de la largeur laissée libre) ; en
+  anneaux autour du centre (rayon intérieur et extérieur, nombre d'anneaux,
+  places sur l'anneau extérieur, les anneaux intérieurs en ont moins). Hauteur
+  d'oreille, gradins. 96 places au plus.
 - **Calibration** : moyenne de toutes les places, ou place de référence (aux
   deux tiers, au centre).
+
+**Salle ronde.** Un cylindre à parois rigides, modes exacts (Morse & Ingard
+[35]) : `ψ = Jm(kr·r) · cos ou sin(mθ) · cos(nz·π·z/H)`, `kr = j'mn / a`, où
+j'mn est le n-ième zéro de la dérivée de la fonction de Bessel Jm et a le
+rayon. Jm est calculée par la règle des trapèzes sur sa représentation
+intégrale (convergence exponentielle sur un intégrande périodique [36]) et
+les zéros par encadrement. Vérifié : J0 s'annule à 2,4048, les zéros de J'm
+valent 1,8412 (m = 1), 3,0542 (m = 2), 3,8317 (m = 0), et le premier mode d'une
+salle ronde de 10 m de diamètre tombe à c × 1,8412 / (2π × 5) = 20,10 Hz.
+Décroissance de chaque mode par les surfaces qu'il touche, comme pour la
+boîte, la paroi pesée par la part du mode qui la longe :
+`δ = c / (16 V) · Σ (moyenne de ψ² sur la surface / moyenne dans le volume) · S · α'`
+(rapport 1 / (1 − m²/j'²) pour la paroi, plafonné à 4 ; 2 ou 1 pour le sol et
+le plafond). Une salle « arrondie » (coins arrondis, ovale) n'a pas de modes
+en forme close ; elle demanderait un calcul numérique de la forme du sol, non
+fait à ce jour.
 
 **On règle d'abord la salle, puis on place les enceintes.** Les positions sont
 gardées en proportion de la salle (le rang de sièges aussi) et affichées en
@@ -661,16 +718,34 @@ la loi de masse. L'idée : avec une photo et les dimensions au mètre près, on
 choisit les matériaux et on obtient une salle plausible ; si l'on connaît le
 TR60 mesuré, le régler à la main reste plus juste.
 
-**Six lieux hors cinéma** (point de départ, matériaux compris ; TR60 d'Eyring
-à 63 Hz) : galerie « white cube » 20 × 12 × 5 m (1,13 s), halle industrielle
-pour défilé 40 × 20 × 10 m (2,56 s), tente 30 × 15 × 6 m (0,33 s), église en
-pierre 40 × 14 × 15 m (3,42 s), salon 6 × 4,5 × 2,6 m (0,49 s), régie traitée
-7 × 5,5 × 3 m (0,51 s).
+**Sept lieux hors cinéma** (point de départ, matériaux compris ; TR60
+d'Eyring à 63 Hz) : galerie « white cube » 20 × 12 × 5 m (1,13 s), halle
+industrielle pour défilé 40 × 20 × 10 m, public de part et d'autre du podium
+(2,56 s), tente 30 × 15 × 6 m (0,33 s), église en pierre 40 × 14 × 15 m
+(3,42 s), salon 6 × 4,5 × 2,6 m (0,49 s), régie traitée 7 × 5,5 × 3 m
+(0,51 s), salle ronde de 24 m avec deux L C R dos à dos au centre et le public
+en anneaux (1,68 s).
+
+**Ce que change la position d'une enceinte, et ce que change un matériau.**
+La position d'une source fixe sa part dans chaque mode (ψ à la source) : dans
+un coin, elle excite tous les modes au maximum ; au milieu d'un mur, elle
+n'excite pas les modes qui y ont un nœud. Les matériaux fixent la
+décroissance de chaque mode, d'après toutes les surfaces que ce mode touche :
+une enceinte dans le coin d'un mur en béton et d'un mur peint excite les mêmes
+modes que dans le coin opposé, mais chaque mode décroît selon l'ensemble des
+parois, pas selon celle qui est derrière l'enceinte. Dans ce modèle (faible
+absorption), les matériaux ne déforment pas les modes ; avec des parois très
+absorbantes, ils le feraient, ce qui n'est pas modélisé.
+
+**Couleurs des places.** Une échelle à dix paliers (violet 0, magenta 40,
+rouge 55, orange 65 à 75, jaune 82, vert-jaune 88, vert 93 à 97, turquoise
+100) : des places à quelques points d'écart se distinguent. Au survol, la vue
+3D donne la note de la place en % et l'écart en dB.
 
 **Étalonnage.** Comme en vrai : on étalonne la salle installée normalement
 (chaque enceinte à son niveau), puis les décalages de niveau réglés sur une
 enceinte restent des décalages. Ainsi, des caissons montés de +6 dB comptent
-bien (vérifié : écart médian −2,3 → +1,6 dB, note de la salle 62,5 → 76,1),
+bien (vérifié : écart médian −2,3 → +1,4 dB, note de la salle 51,6 → 54,3),
 au lieu d'être effacés par l'étalonnage. La couleur propre de la salle n'est
 toujours pas comptée ; un LFE décorrélé donne 0 dB partout, rappels compris
 (vérifié).
@@ -690,9 +765,11 @@ tourner, molette pour zoomer, double-clic pour revenir à la vue de départ.
 lancements (réglage `roomPro`), et « Save config... » / « Load config... »
 écrivent et lisent un fichier `.subguardrooms`. Format texte, une ligne
 `roomN.champ = valeur` par réglage sous l'en-tête `SubGUARD Room Sim Pro`,
-version 2 : positions en proportion de la salle (`roomN.L.x = 0.03`), liens
+version 3 : positions en proportion de la salle (`roomN.L.x = 0.03`), liens
 (`linkLR`, `linkFills`), mode de décroissance (`acoustics`), matériaux par leur
-nom stable (`roomN.material.floor = concrete`). Un fichier de version 1
+nom stable (`roomN.material.floor = concrete`), forme (`shape`), second jeu
+L C R (`dualLCR`), disposition du public (`audienceLayout`, `aisle`,
+`ringInner`, `ringOuter`). Un fichier de version 1
 (positions en mètres) est converti à la lecture, liens coupés pour garder la
 disposition telle quelle (vérifié). Un champ absent garde sa valeur par
 défaut ; un fichier qui n'est pas un fichier Room Sim Pro est refusé. **Règle de
@@ -702,8 +779,13 @@ réglage oublié dans l'export fait échouer les tests.
 
 **Temps de calcul.** La préparation d'une salle (modes × sources × places) se
 fait en arrière-plan, 0,25 s après le dernier changement de réglage ; une IMAX
-de 96 places et 11 enceintes prend environ 0,4 s. La note se met ensuite à jour
-à chaque image. Avec un TR60 long (jusqu'à 10 s), les modes deviennent très
+de 96 places et 11 enceintes prend environ 0,4 s, les lieux hors cinéma 0,6 s
+au plus. Les sources d'un même chemin sont additionnées mode par mode avant
+la boucle des places, si bien qu'une place coûte quatre sommes sur les modes
+quel que soit le nombre d'enceintes. Cas extrêmes : hangar de 60 × 40 × 25 m à
+10 s de TR60 (27 000 modes, 96 places) 9 s, salle ronde de 40 m à 10 s 5 s ;
+la carte affiche « computing... » pendant ce temps. La note se met ensuite à
+jour à chaque image. Avec un TR60 long (jusqu'à 10 s), les modes deviennent très
 étroits (largeur ≈ δ/π, 0,2 Hz à 10 s) : la grille d'analyse les échantillonne,
 le résultat est une moyenne réaliste mais pas une courbe point par point.
 
@@ -894,6 +976,10 @@ du son) : bruit blanc ou rose, aucune ; grondement grave (sous 90 Hz), 1 à 3.
     (125 Hz à 4 kHz).
 34. L. L. Beranek, *Concert Halls and Opera Houses*, Springer (absorption du
     public assis).
+35. P. M. Morse, K. U. Ingard, *Theoretical Acoustics*, McGraw-Hill, 1968,
+    §9.2 (modes d'une cavité cylindrique).
+36. L. N. Trefethen, J. A. C. Weideman, « The exponentially convergent
+    trapezoidal rule », *SIAM Review* 56(3), 385–458 (2014).
 
 
 ## Niveau du LFE et réglages

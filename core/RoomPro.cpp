@@ -34,8 +34,10 @@ namespace
 
     Point inside (const ProRoom& r, double x, double y, double z)
     {
-        return { std::clamp (x, 0.05, r.length - 0.05), std::clamp (y, 0.05, r.width - 0.05), std::clamp (z, 0.05, r.height - 0.05) };
+        return r.keptInside ({ x, y, z });
     }
+
+    constexpr double lcRcWeight = 1.7079457843841379;     // L + C at -3 dB: 1 + 10^(-3/20), the screen bass taken as one signal
 
     const char* surfaceKeys[ProRoom::numSurfaces] = { "front", "back", "left", "right", "floor", "ceiling" };
 }
@@ -189,6 +191,35 @@ std::vector<ProRoom> ProRoom::venues()
         rooms.push_back (r);
     }
 
+    // The fashion show: the audience on both sides of the catwalk
+    rooms[1].audienceLayout = sidesLayout;
+    rooms[1].aisle = 0.2;
+    rooms[1].audienceWidth = 0.8;
+    rooms[1].perRow = 8;
+
+    // In the round: two L C R sets back to back in the middle, the audience in rings around them
+    {
+        ProRoom r = fromSpec ({ "In the round, two L C R back to back", "In the round", 24.0, 24.0, 8.0, 0.6 });
+        r.shape = round;
+        r.acoustics = 1;
+        r.materials = materialsOf ("plasterboard", "plasterboard", "plasterboard", "plasterboard", "concrete", "plasterboard");
+        r.dualLCR = true;
+        const double z = 2.5 / r.height;
+        r.lcr = { at (0.47, 0.42, z), at (0.47, 0.5, z), at (0.47, 0.58, z) };
+        r.numSubs = 2;
+        r.subs[0] = at (0.5, 0.46, 0.4 / r.height);
+        r.subs[1] = at (0.5, 0.54, 0.4 / r.height);
+        r.audienceLayout = ringLayout;
+        r.ringInner = 0.3;
+        r.ringOuter = 0.85;
+        r.rows = 4;
+        r.perRow = 24;
+        r.earHeight = 1.6;
+        r.applyLinks();
+        r.rt60 = r.eyringRt60 (63.0);
+        rooms.push_back (r);
+    }
+
     return rooms;
 }
 
@@ -200,15 +231,61 @@ std::array<double, 3> ProRoom::positionOf (const ProSpeaker& s) const
 std::vector<Point> ProRoom::seatPositions() const
 {
     std::vector<Point> seats;
-    const int nRows = std::clamp (rows, 1, 12), nPer = std::clamp (perRow, 1, 12);
+    const int nRows = std::clamp (rows, 1, 12), nPer = std::clamp (perRow, 1, 24);
+    const auto full = [&seats] { return (int) seats.size() >= ProRoomModel::maxSeats; };
 
-    for (int row = 0; row < nRows && (int) seats.size() < ProRoomModel::maxSeats; ++row)
+    if (audienceLayout == ringLayout)
+    {
+        // Rings around the centre of the room; the outer ring has `perRow` seats, the inner ones fewer
+        const double half = 0.5 * std::min (length, width);
+        const double inner = half * std::clamp (std::min (ringInner, ringOuter), 0.0, 1.0);
+        const double outer = half * std::clamp (std::max (ringInner, ringOuter), 0.0, 1.0);
+
+        for (int ring = 0; ring < nRows && ! full(); ++ring)
+        {
+            const double u = nRows > 1 ? ring / (double) (nRows - 1) : 1.0;
+            const double radius = inner + (outer - inner) * u;
+            const int count = std::max (4, (int) std::lround (nPer * radius / std::max (outer, 0.01)));
+            const double z = earHeight + rake * u;
+
+            for (int k = 0; k < count && ! full(); ++k)
+            {
+                const double angle = 2.0 * pi * (k + 0.5 * (ring % 2)) / count;
+                seats.push_back (inside (*this, 0.5 * length + radius * std::cos (angle), 0.5 * width + radius * std::sin (angle), z));
+            }
+        }
+
+        return seats;
+    }
+
+    for (int row = 0; row < nRows && ! full(); ++row)
     {
         const double u = nRows > 1 ? row / (double) (nRows - 1) : 0.0;
         const double x = length * (firstRow + (lastRow - firstRow) * u);
         const double z = earHeight + rake * u;
 
-        for (int col = 0; col < nPer && (int) seats.size() < ProRoomModel::maxSeats; ++col)
+        if (audienceLayout == sidesLayout)
+        {
+            // Two blocks, the aisle in the middle left free (a catwalk, a stage)
+            const double gap = std::clamp (aisle, 0.0, std::max (0.0, audienceWidth - 0.02));
+            const int left = (nPer + 1) / 2, right = nPer / 2;
+
+            for (int side = 0; side < 2; ++side)
+            {
+                const int count = side == 0 ? left : right;
+
+                for (int col = 0; col < count && ! full(); ++col)
+                {
+                    const double v = count > 1 ? col / (double) (count - 1) : 0.5;
+                    const double share = 0.5 * gap + (0.5 * audienceWidth - 0.5 * gap) * (side == 0 ? 1.0 - v : v);
+                    seats.push_back (inside (*this, x, width * (0.5 + (side == 0 ? -share : share)), z));
+                }
+            }
+
+            continue;
+        }
+
+        for (int col = 0; col < nPer && ! full(); ++col)
         {
             const double v = nPer > 1 ? col / (double) (nPer - 1) : 0.5;
             const double y = width * (0.5 - 0.5 * audienceWidth + audienceWidth * v);
@@ -242,6 +319,9 @@ int ProRoom::referenceSeat() const
 
 void ProRoom::applyLinks()
 {
+    if (shape == round)
+        length = width;
+
     if (linkLR)
         lcr[2] = mirrored (lcr[0]);
 
@@ -253,10 +333,84 @@ void ProRoom::applyLinks()
     }
 }
 
+double ProRoom::volume() const
+{
+    return shape == round ? pi * 0.25 * width * width * height : length * width * height;
+}
+
+Point ProRoom::keptInside (Point p) const
+{
+    p[2] = std::clamp (p[2], 0.05, height - 0.05);
+
+    if (shape == round)
+    {
+        const double radius = 0.5 * width, cx = 0.5 * width, cy = 0.5 * width;
+        const double dx = p[0] - cx, dy = p[1] - cy, d = std::sqrt (dx * dx + dy * dy);
+
+        if (d > radius - 0.05)
+        {
+            const double k = (radius - 0.05) / std::max (d, 1e-9);
+            p[0] = cx + dx * k;
+            p[1] = cy + dy * k;
+        }
+
+        return p;
+    }
+
+    p[0] = std::clamp (p[0], 0.05, length - 0.05);
+    p[1] = std::clamp (p[1], 0.05, width - 0.05);
+    return p;
+}
+
+std::vector<ProRoom::Placed> ProRoom::placedSpeakers() const
+{
+    std::vector<Placed> out;
+
+    const auto add = [&] (const ProSpeaker& s, int path, double weight, bool mirror)
+    {
+        if (! s.enabled)
+            return;
+
+        auto p = positionOf (s);
+
+        if (mirror)
+            p = { length - p[0], width - p[1], p[2] };
+
+        out.push_back ({ keptInside (p), path, s.delayMs, (s.inverted ? -1.0 : 1.0) * std::pow (10.0, s.gainDb / 20.0) * weight,
+                         (s.inverted ? -1.0 : 1.0) * weight });
+    };
+
+    for (const auto& s : lcr)
+        add (s, 0, 1.0, false);
+
+    if (dualLCR)
+        for (const auto& s : lcr)
+            add (s, 0, 1.0, true);
+
+    for (int i = 0; i < std::clamp (numSubs, 1, maxSubs); ++i)
+        add (subs[(size_t) i], 1, 1.0, false);
+
+    if (fillsOn)
+        for (int i = 0; i < std::clamp (numFills, 1, maxFills); ++i)
+        {
+            const auto& f = fills[(size_t) i];
+            add (f, f.feed == 1 ? 1 : 0, f.feed == 1 ? 1.0 : lcRcWeight, false);
+        }
+
+    return out;
+}
+
 //==============================================================================
 // Acoustics
 double ProRoom::surfaceArea (int surface) const
 {
+    if (shape == round)
+    {
+        if (surface == frontWall)                       return pi * width * height;
+        if (surface == floor || surface == ceiling)     return pi * 0.25 * width * width;
+        return 0.0;
+    }
+
     if (surface == frontWall || surface == backWall)    return width * height;
     if (surface == leftWall || surface == rightWall)    return length * height;
     return length * width;
@@ -287,8 +441,7 @@ double ProRoom::eyringRt60 (double hz) const
         absorbed += surfaceArea (i) * std::clamp (absorption (i, hz), 0.0, 0.95);
     }
 
-    const double volume = length * width * height;
-    return 24.0 * std::log (10.0) * volume / (RoomSimulator::speedOfSound * area * exponentOf (absorbed / area));
+    return 24.0 * std::log (10.0) * volume() / (RoomSimulator::speedOfSound * area * exponentOf (absorbed / area));
 }
 
 double ProRoom::rt60At (double hz) const
@@ -298,7 +451,7 @@ double ProRoom::rt60At (double hz) const
 
 double ProRoom::schroederHz() const
 {
-    return 2000.0 * std::sqrt (rt60At (63.0) / (length * width * height));
+    return 2000.0 * std::sqrt (rt60At (63.0) / volume());
 }
 
 double ProRoom::modeDamping (const RoomSimulator::Mode& mode) const
@@ -324,7 +477,8 @@ double ProRoom::modeDamping (const RoomSimulator::Mode& mode) const
 
 bool ProRoom::operator== (const ProRoom& o) const
 {
-    return name == o.name && counted == o.counted && length == o.length && width == o.width && height == o.height
+    return name == o.name && counted == o.counted && shape == o.shape && dualLCR == o.dualLCR && audienceLayout == o.audienceLayout
+             && aisle == o.aisle && ringInner == o.ringInner && ringOuter == o.ringOuter && length == o.length && width == o.width && height == o.height
              && acoustics == o.acoustics && rt60 == o.rt60 && materials == o.materials
              && lcr == o.lcr && linkLR == o.linkLR && numSubs == o.numSubs && subs == o.subs && fillsOn == o.fillsOn
              && linkFills == o.linkFills && numFills == o.numFills
@@ -403,6 +557,7 @@ std::string ProRooms::toText() const
 
         out << k << "name = " << name << "\n"
             << k << "counted = " << (r.counted ? 1 : 0) << "\n"
+            << k << "shape = " << r.shape << "\n"
             << k << "length = " << number (r.length) << "\n"
             << k << "width = " << number (r.width) << "\n"
             << k << "height = " << number (r.height) << "\n"
@@ -413,7 +568,8 @@ std::string ProRooms::toText() const
             out << k << "material." << surfaceKeys[m] << " = "
                 << ProRoom::materialList()[(size_t) std::clamp (r.materials[(size_t) m], 0, (int) ProRoom::materialList().size() - 1)].key << "\n";
 
-        out << k << "linkLR = " << (r.linkLR ? 1 : 0) << "\n";
+        out << k << "linkLR = " << (r.linkLR ? 1 : 0) << "\n"
+            << k << "dualLCR = " << (r.dualLCR ? 1 : 0) << "\n";
 
         const char* lcrNames[] = { "L", "C", "R" };
 
@@ -431,7 +587,11 @@ std::string ProRooms::toText() const
         for (int s = 0; s < ProRoom::maxFills; ++s)
             writeSpeaker (out, k + "fill" + std::to_string (s + 1), r.fills[(size_t) s]);
 
-        out << k << "firstRow = " << number (r.firstRow) << "\n"
+        out << k << "audienceLayout = " << r.audienceLayout << "\n"
+            << k << "aisle = " << number (r.aisle) << "\n"
+            << k << "ringInner = " << number (r.ringInner) << "\n"
+            << k << "ringOuter = " << number (r.ringOuter) << "\n"
+            << k << "firstRow = " << number (r.firstRow) << "\n"
             << k << "lastRow = " << number (r.lastRow) << "\n"
             << k << "audienceWidth = " << number (r.audienceWidth) << "\n"
             << k << "rows = " << r.rows << "\n"
@@ -474,6 +634,7 @@ bool ProRooms::fromText (const std::string& text, ProRooms& out)
 
         reader.get (k + "name", r.name);
         reader.get (k + "counted", r.counted);
+        reader.get (k + "shape", r.shape);
         reader.get (k + "length", r.length);
         reader.get (k + "width", r.width);
         reader.get (k + "height", r.height);
@@ -490,6 +651,7 @@ bool ProRooms::fromText (const std::string& text, ProRooms& out)
         }
 
         reader.get (k + "linkLR", r.linkLR);
+        reader.get (k + "dualLCR", r.dualLCR);
 
         const char* lcrNames[] = { "L", "C", "R" };
 
@@ -508,6 +670,10 @@ bool ProRooms::fromText (const std::string& text, ProRooms& out)
         for (int s = 0; s < ProRoom::maxFills; ++s)
             reader.get (k + "fill" + std::to_string (s + 1), r.fills[(size_t) s]);
 
+        reader.get (k + "audienceLayout", r.audienceLayout);
+        reader.get (k + "aisle", r.aisle);
+        reader.get (k + "ringInner", r.ringInner);
+        reader.get (k + "ringOuter", r.ringOuter);
         reader.get (k + "firstRow", r.firstRow);
         reader.get (k + "lastRow", r.lastRow);
         reader.get (k + "audienceWidth", r.audienceWidth);
@@ -540,12 +706,193 @@ bool ProRooms::fromText (const std::string& text, ProRooms& out)
         r.numSubs = std::clamp (r.numSubs, 1, ProRoom::maxSubs);
         r.numFills = std::clamp (r.numFills, 1, ProRoom::maxFills);
         r.acoustics = std::clamp (r.acoustics, 0, 1);
+        r.shape = std::clamp (r.shape, 0, 1);
+        r.audienceLayout = std::clamp (r.audienceLayout, 0, 2);
         r.rt60 = std::clamp (r.rt60, 0.1, 10.0);
         r.applyLinks();
     }
 
     out = result;
     return true;
+}
+
+//==============================================================================
+//==============================================================================
+// Modes
+double ProRoomModel::besselJ (int m, double x)
+{
+    // J_m(x) = 1/(2 pi) * integral over a period of cos (m t - x sin t): the
+    // trapezoidal rule on a periodic integrand converges exponentially once the
+    // number of points exceeds the oscillations (Trefethen & Weideman 2014).
+    const int n = 2 * (int) (std::abs (x) + std::abs (m)) + 48;
+    double sum = 0.0;
+
+    for (int i = 0; i < n; ++i)
+    {
+        const double t = 2.0 * pi * i / n;
+        sum += std::cos (m * t - x * std::sin (t));
+    }
+
+    return sum / n;
+}
+
+namespace
+{
+    double besselJDerivative (int m, double x)
+    {
+        return m == 0 ? -ProRoomModel::besselJ (1, x) : 0.5 * (ProRoomModel::besselJ (m - 1, x) - ProRoomModel::besselJ (m + 1, x));
+    }
+
+    // Zeros of J'_m up to `highest` (the zero at 0 of J'_0 left out)
+    std::vector<double> derivativeZeros (int m, double highest)
+    {
+        std::vector<double> zeros;
+        const double step = 0.05;
+        // The first zero of J'_m lies beyond m: start just before it (near 0, J'_m is too small to trust its sign)
+        double x0 = m == 0 ? 1e-3 : std::max (1e-3, m - 0.5), f0 = besselJDerivative (m, x0);
+
+        for (double x1 = x0 + step; x1 <= highest + step; x1 += step)
+        {
+            const double f1 = besselJDerivative (m, x1);
+
+            if ((f0 < 0.0) != (f1 < 0.0))
+            {
+                double lo = x0, hi = x1, flo = f0;
+
+                for (int it = 0; it < 50; ++it)
+                {
+                    const double mid = 0.5 * (lo + hi), fm = besselJDerivative (m, mid);
+
+                    if ((fm < 0.0) == (flo < 0.0))  { lo = mid; flo = fm; }
+                    else                             { hi = mid; }
+                }
+
+                if (0.5 * (lo + hi) <= highest)
+                    zeros.push_back (0.5 * (lo + hi));
+            }
+
+            x0 = x1;
+            f0 = f1;
+        }
+
+        return zeros;
+    }
+}
+
+double ProRoomModel::besselDerivativeZero (int m, int n)
+{
+    for (double highest = 10.0; highest < 400.0; highest *= 2.0)
+    {
+        const auto zeros = derivativeZeros (m, highest);
+
+        if ((int) zeros.size() >= n)
+            return zeros[(size_t) n - 1];
+    }
+
+    return 0.0;
+}
+
+std::vector<ProRoomModel::Mode> ProRoomModel::modesOf (const ProRoom& room, double highestHz)
+{
+    ProRoom r = room;
+    r.applyLinks();
+    const double c = RoomSimulator::speedOfSound;
+    std::vector<Mode> modes;
+
+    if (r.shape == ProRoom::rectangle)
+    {
+        const RoomSpec spec { "", "", r.length, r.width, r.height, r.rt60At (63.0) };
+
+        for (const auto& m : RoomSimulator::modesOf (spec, highestHz))
+        {
+            Mode mode;
+            mode.omega2 = m.omega2;
+            mode.hz = std::sqrt (m.omega2) / (2.0 * pi);
+            mode.damping = r.modeDamping (m);
+            mode.scale = m.scale;
+            mode.nx = m.nx;
+            mode.ny = m.ny;
+            mode.nz = m.nz;
+            modes.push_back (mode);
+        }
+
+        return modes;
+    }
+
+    // Cylinder of radius a, rigid walls (Morse & Ingard, Theoretical Acoustics, 9.2):
+    //   psi = J_m (k_r r) cos or sin (m theta) cos (nz pi z / H),  k_r = j'_mn / a
+    // Each mode's decay from the surfaces it meets, as for the rectangle, the
+    // wall weighed by how much of the mode lies against it.
+    const double a = 0.5 * r.width, H = r.height, kmax = 2.0 * pi * highestHz / c;
+    const double V = r.volume();
+    const double wallArea = r.surfaceArea (ProRoom::frontWall), floorArea = r.surfaceArea (ProRoom::floor);
+
+    for (int m = 0; m <= (int) (kmax * a) + 2; ++m)
+    {
+        auto roots = derivativeZeros (m, kmax * a);
+
+        if (m == 0)
+            roots.insert (roots.begin(), 0.0);
+
+        for (double root : roots)
+        {
+            const double kr = root / a;
+            const double radialMean = root == 0.0 ? 1.0 : (1.0 - (double) (m * m) / (root * root)) * std::pow (besselJ (m, root), 2.0);
+
+            for (int nz = 0; ; ++nz)
+            {
+                const double kz = nz * pi / H, k2 = kr * kr + kz * kz;
+
+                if (k2 > kmax * kmax)
+                    break;
+
+                Mode mode;
+                mode.hz = c * std::sqrt (k2) / (2.0 * pi);
+                mode.omega2 = std::pow (2.0 * pi * mode.hz, 2.0);
+                mode.m = m;
+                mode.radialK = kr;
+                mode.nz = nz;
+                mode.scale = 1.0 / (std::max (radialMean, 1e-9) * (m == 0 ? 1.0 : 0.5) * (nz == 0 ? 1.0 : 0.5));
+
+                if (r.acoustics != 1)
+                {
+                    mode.damping = 3.0 * std::log (10.0) / std::clamp (r.rt60, 0.1, 10.0);
+                }
+                else
+                {
+                    // delta = c / (16 V) * sum of (mean of psi^2 on the surface / mean in the volume) * S * alpha'
+                    const double wallRatio = root == 0.0 ? 1.0 : std::min (4.0, 1.0 / std::max (0.25, 1.0 - (double) (m * m) / (root * root)));
+                    const double flatRatio = nz != 0 ? 2.0 : 1.0;
+                    const double sum = wallRatio * wallArea * exponentOf (r.absorption (ProRoom::frontWall, mode.hz))
+                                     + flatRatio * floorArea * exponentOf (r.absorption (ProRoom::floor, mode.hz))
+                                     + flatRatio * floorArea * exponentOf (r.absorption (ProRoom::ceiling, mode.hz));
+                    mode.damping = c * sum / (16.0 * V);
+                }
+
+                modes.push_back (mode);
+
+                if (m > 0)
+                {
+                    mode.sine = true;
+                    modes.push_back (mode);
+                }
+            }
+        }
+    }
+
+    return modes;
+}
+
+double ProRoomModel::shape (const ProRoom& r, const Mode& mode, const Point& p)
+{
+    if (r.shape == ProRoom::rectangle)
+        return std::cos (mode.nx * pi * p[0] / r.length) * std::cos (mode.ny * pi * p[1] / r.width) * std::cos (mode.nz * pi * p[2] / r.height);
+
+    const double dx = p[0] - 0.5 * r.width, dy = p[1] - 0.5 * r.width;
+    const double radius = std::sqrt (dx * dx + dy * dy), theta = std::atan2 (dy, dx);
+    const double radial = mode.radialK == 0.0 ? 1.0 : besselJ (mode.m, mode.radialK * radius);
+    const double angular = mode.m == 0 ? 1.0 : (mode.sine ? std::sin (mode.m * theta) : std::cos (mode.m * theta));
+    return radial * angular * std::cos (mode.nz * pi * p[2] / r.height);
 }
 
 //==============================================================================
@@ -556,83 +903,112 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
 
     RoomSpec spec;
     spec.name = r.name;
-    spec.length = std::max (r.length, 2.0);
-    spec.width = std::max (r.width, 2.0);
-    spec.height = std::max (r.height, 2.0);
+    spec.length = r.length;
+    spec.width = r.width;
+    spec.height = r.height;
     spec.rt60 = r.rt60At (63.0);
 
     RoomPaths paths;
     paths.spec = spec;
+    paths.lcrReference = true;
     paths.points = RoomSimulator::bandPoints (grid);
     const auto seats = r.seatPositions();
     paths.seats = (int) seats.size();
-    auto modes = RoomSimulator::modesOf (spec, highestModeHz);
+    const auto modes = modesOf (r, highestModeHz);
+    const auto sources = r.placedSpeakers();
 
-    for (auto& mode : modes)
-        mode.damping = r.modeDamping (mode);
-
-    // Every source with its path (0 screen, 1 LFE), position and complex gain
-    struct Source { int path; Point pos; double delay, sign, level; };
-    std::vector<Source> sources;
-
-    const auto add = [&] (const ProSpeaker& s, int path)
-    {
-        if (! s.enabled)
-            return;
-
-        const auto p = r.positionOf (s);
-        sources.push_back ({ path, inside (r, p[0], p[1], p[2]), s.delayMs * 0.001, s.inverted ? -1.0 : 1.0, std::pow (10.0, s.gainDb / 20.0) });
-    };
-
-    for (const auto& s : r.lcr)
-        add (s, 0);
-
-    for (int i = 0; i < std::clamp (r.numSubs, 1, ProRoom::maxSubs); ++i)
-        add (r.subs[(size_t) i], 1);
-
-    if (r.fillsOn)
-        for (int i = 0; i < std::clamp (r.numFills, 1, ProRoom::maxFills); ++i)
-            add (r.fills[(size_t) i], r.fills[(size_t) i].feed == 1 ? 1 : 0);
-
-    // Mode shapes at every source, once
+    // Mode shapes at every source and seat, once
     std::vector<std::vector<double>> atSource (sources.size(), std::vector<double> (modes.size()));
 
     for (size_t s = 0; s < sources.size(); ++s)
         for (size_t k = 0; k < modes.size(); ++k)
-            atSource[s][k] = RoomSimulator::shape (spec, modes[k], sources[s].pos);
+            atSource[s][k] = shape (r, modes[k], sources[s].position);
+
+    // Each grid point stands for a band about 2.3 % wide. When the modes are
+    // narrower than that (long decay), the response is averaged over several
+    // frequencies inside the band instead of read at its centre.
+    double narrowest = 1e9;
+
+    for (const auto& m : modes)
+        narrowest = std::min (narrowest, m.damping / pi);       // half-power bandwidth, Hz
 
     const size_t n = paths.points.size();
-    paths.screen.assign ((size_t) paths.seats * n, cd());
-    paths.sub.assign ((size_t) paths.seats * n, cd());
-
-    // The same paths with every speaker at its calibrated level: what the
-    // calibration measures. Level offsets set on a speaker stay offsets.
+    paths.ss.assign ((size_t) paths.seats * n, 0.0);
+    paths.ll = paths.ss;
+    paths.sl.assign ((size_t) paths.seats * n, cd());
     RoomPaths nominal = paths;
-    std::vector<double> atSeat (modes.size());
-    std::vector<cd> term (modes.size());
+
+    struct Sub { double w, weight; };
+    std::vector<std::vector<Sub>> subs (n);
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        const auto g = (size_t) paths.points[i];
+        const double lo = g > 0 ? std::sqrt (grid[g] * grid[g - 1]) : grid[g] / 1.0115;
+        const double hi = g + 1 < grid.size() ? std::sqrt (grid[g] * grid[g + 1]) : grid[g] * 1.0115;
+        const int count = std::clamp ((int) std::ceil (2.0 * (hi - lo) / std::max (narrowest, 1e-3)), 1, 8);
+
+        for (int j = 0; j < count; ++j)
+            subs[i].push_back ({ 2.0 * pi * lo * std::pow (hi / lo, (j + 0.5) / count), 1.0 / count });
+    }
+
+    // Mode shapes at every seat (with the mode's scale), once
+    const size_t numModes = modes.size();
+    std::vector<double> atSeats ((size_t) paths.seats * numModes);
 
     for (int seat = 0; seat < paths.seats; ++seat)
+        for (size_t k = 0; k < numModes; ++k)
+            atSeats[(size_t) seat * numModes + k] = shape (r, modes[k], seats[(size_t) seat]) * modes[k].scale;
+
+    // For each frequency, the sources of a path are summed mode by mode first
+    // (their delays and levels included), so that each seat then costs four
+    // sums over the modes, whatever the number of speakers.
+    std::vector<cd> screenAt (numModes), lfeAt (numModes), screenNominalAt (numModes), lfeNominalAt (numModes), term (numModes);
+
+    for (size_t i = 0; i < n; ++i)
     {
-        for (size_t k = 0; k < modes.size(); ++k)
-            atSeat[k] = RoomSimulator::shape (spec, modes[k], seats[(size_t) seat]) * modes[k].scale;
-
-        for (size_t i = 0; i < n; ++i)
+        for (const auto& sub : subs[i])
         {
-            const double w = 2.0 * pi * grid[(size_t) paths.points[i]];
-
-            for (size_t k = 0; k < modes.size(); ++k)
-                term[k] = atSeat[k] / cd (modes[k].omega2 - w * w, 2.0 * modes[k].damping * w);
+            const double w = sub.w;
+            std::fill (screenAt.begin(), screenAt.end(), cd());
+            std::fill (lfeAt.begin(), lfeAt.end(), cd());
+            std::fill (screenNominalAt.begin(), screenNominalAt.end(), cd());
+            std::fill (lfeNominalAt.begin(), lfeNominalAt.end(), cd());
 
             for (size_t s = 0; s < sources.size(); ++s)
             {
-                cd h;
+                const cd delay = std::polar (1.0, -w * sources[s].delayMs * 0.001);
+                const cd gain = delay * sources[s].gain, nominalGain = delay * sources[s].nominalWeight;
+                auto& actual = sources[s].path == 0 ? screenAt : lfeAt;
+                auto& nominalSum = sources[s].path == 0 ? screenNominalAt : lfeNominalAt;
 
-                for (size_t k = 0; k < modes.size(); ++k)
-                    h += atSource[s][k] * term[k];
+                for (size_t k = 0; k < numModes; ++k)
+                {
+                    actual[k] += atSource[s][k] * gain;
+                    nominalSum[k] += atSource[s][k] * nominalGain;
+                }
+            }
 
-                h *= sources[s].sign * std::polar (1.0, -w * sources[s].delay);
-                (sources[s].path == 0 ? nominal.screen : nominal.sub)[(size_t) seat * n + i] += h;
-                (sources[s].path == 0 ? paths.screen : paths.sub)[(size_t) seat * n + i] += h * sources[s].level;
+            for (size_t k = 0; k < numModes; ++k)
+                term[k] = 1.0 / cd (modes[k].omega2 - w * w, 2.0 * modes[k].damping * w);
+
+            for (int seat = 0; seat < paths.seats; ++seat)
+            {
+                const double* shapes = &atSeats[(size_t) seat * numModes];
+                cd screen, lfe, screenNominal, lfeNominal;
+
+                for (size_t k = 0; k < numModes; ++k)
+                {
+                    const cd t = shapes[k] * term[k];
+                    screen += screenAt[k] * t;
+                    lfe += lfeAt[k] * t;
+                    screenNominal += screenNominalAt[k] * t;
+                    lfeNominal += lfeNominalAt[k] * t;
+                }
+
+                const size_t at = (size_t) seat * n + i;
+                paths.accumulate (at, screen, lfe, sub.weight);
+                nominal.accumulate (at, screenNominal, lfeNominal, sub.weight);
             }
         }
     }
@@ -648,23 +1024,23 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
     auto calibrated = nominal;
     RoomSimulator::calibrate (calibrated, grid, calibrationSeats);
 
-    const auto scaleOf = [] (const std::vector<cd>& before, const std::vector<cd>& after)
+    const auto scaleOf = [] (const std::vector<double>& before, const std::vector<double>& after)
     {
         for (size_t i = 0; i < before.size(); ++i)
-            if (std::abs (before[i]) > 0.0)
-                return std::abs (after[i]) / std::abs (before[i]);
+            if (before[i] > 0.0)
+                return after[i] / before[i];
 
         return 1.0;
     };
 
-    const double screenScale = scaleOf (nominal.screen, calibrated.screen), subScale = scaleOf (nominal.sub, calibrated.sub);
+    const double screenScale = scaleOf (nominal.ss, calibrated.ss), subScale = scaleOf (nominal.ll, calibrated.ll);
 
-    for (auto& h : paths.screen)    h *= screenScale;
-    for (auto& h : paths.sub)       h *= subScale;
+    for (auto& v : paths.ss)    v *= screenScale;
+    for (auto& v : paths.ll)    v *= subScale;
+    for (auto& v : paths.sl)    v *= std::sqrt (screenScale * subScale);
 
-    paths.screenNominal = calibrated.screen;
-    paths.subNominal = calibrated.sub;
-
+    paths.ssRef = calibrated.ss;
+    paths.llRef = calibrated.ll;
     return paths;
 }
 

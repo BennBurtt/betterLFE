@@ -46,7 +46,7 @@ struct ProSpeaker
     double delayMs = 0.0;               // added delay
     double gainDb = 0.0;                // level against its calibrated level
     bool inverted = false;
-    int feed = 0;                       // fill speakers only: 0 the screen channels (L, C, R), 1 the LFE
+    int feed = 0;                       // fill speakers only: 0 Lc / Rc (L or R + C at -3 dB), 1 the LFE
 
     bool operator== (const ProSpeaker& o) const
     {
@@ -58,11 +58,14 @@ struct ProSpeaker
 struct ProRoom
 {
     static constexpr int maxSubs = 4, maxFills = 4;
-    enum Surface { frontWall, backWall, leftWall, rightWall, floor, ceiling, numSurfaces };
+    enum Surface { frontWall, backWall, leftWall, rightWall, floor, ceiling, numSurfaces };   // round room: frontWall is the wall
+    enum Shape { rectangle, round };
+    enum Layout { rowsLayout, sidesLayout, ringLayout };
 
     std::string name = "Room";
     bool counted = true;                // counts in the Room Sim Pro score
 
+    int shape = rectangle;              // round: a cylinder, its diameter is the width (the length follows it)
     double length = 20.0, width = 13.0, height = 7.0;   // m
     int acoustics = 0;                  // 0: RT60 set by hand; 1: from the materials of the six surfaces
     double rt60 = 0.55;                 // s, 0.1 to 10
@@ -70,6 +73,7 @@ struct ProRoom
 
     std::array<ProSpeaker, 3> lcr;      // L, C, R
     bool linkLR = true;                 // R mirrors L across the room's centre line
+    bool dualLCR = false;               // a second L C R set, back to back: mirrored through the centre of the room
     int numSubs = 2;
     std::array<ProSpeaker, maxSubs> subs;
     bool fillsOn = false;
@@ -78,9 +82,12 @@ struct ProRoom
     std::array<ProSpeaker, maxFills> fills;
 
     // Audience
-    double firstRow = 0.35, lastRow = 0.85; // share of the length, from the front wall
-    double audienceWidth = 0.64;            // share of the room width
-    int rows = 4, perRow = 5;
+    int audienceLayout = rowsLayout;        // rows; two blocks with a free aisle in the middle; rings around the centre
+    double firstRow = 0.35, lastRow = 0.85; // rows and blocks: share of the length, from the front wall
+    double audienceWidth = 0.64;            // rows and blocks: share of the room width
+    double aisle = 0.25;                    // blocks: share of the width left free in the middle
+    double ringInner = 0.3, ringOuter = 0.85;   // rings: radii as a share of half the smaller side
+    int rows = 4, perRow = 5;               // rings: number of rings, seats on the outer ring
     double earHeight = 1.2;                 // m above the floor at the first row
     double rake = 0.0;                      // m the last row is raised above the first
 
@@ -99,8 +106,15 @@ struct ProRoom
     std::vector<std::array<double, 3>> seatPositions() const;
     int referenceSeat() const;
 
-    /** Mirrors the linked speakers (R from L, fills 2 and 4 from 1 and 3). */
+    /** Mirrors the linked speakers (R from L, fills 2 and 4 from 1 and 3); a round room gets its length from its width. */
     void applyLinks();
+
+    /** Every speaker as placed, with the second L C R set when there is one. path: 0 screen, 1 LFE; weight: relative amplitude. */
+    struct Placed { std::array<double, 3> position; int path; double delayMs, gain, nominalWeight; };
+    std::vector<Placed> placedSpeakers() const;
+
+    double volume() const;
+    std::array<double, 3> keptInside (std::array<double, 3> p) const;      // a point moved inside the walls if needed
 
     // Acoustics
     double surfaceArea (int surface) const;
@@ -121,7 +135,7 @@ struct ProRooms
 
     static ProRooms defaults();     // a small, a medium and a large room
 
-    static constexpr int formatVersion = 2;     // 2: positions as a share of the room, links, materials
+    static constexpr int formatVersion = 3;     // 2: positions as a share of the room, links, materials; 3: shape, layouts, second L C R
     std::string toText() const;
     static bool fromText (const std::string&, ProRooms& out);    // false: not a Room Sim Pro file; `out` untouched
 
@@ -131,6 +145,23 @@ struct ProRooms
 class ProRoomModel
 {
 public:
+    /** A room mode: rectangular (orders nx, ny, nz) or cylindrical (angular order m, radial root, height order nz). */
+    struct Mode
+    {
+        double hz, omega2, damping, scale;
+        int nx = 0, ny = 0, nz = 0;         // rectangle
+        int m = 0;                          // cylinder
+        double radialK = 0.0;               // cylinder: radial wavenumber, 1/m
+        bool sine = false;                  // cylinder: sin (m theta) instead of cos
+    };
+
+    static std::vector<Mode> modesOf (const ProRoom&, double highestHz = highestModeHz);
+    static double shape (const ProRoom&, const Mode&, const std::array<double, 3>& point);
+
+    /** Bessel function of the first kind, and the n-th zero (n from 1) of its derivative. */
+    static double besselJ (int m, double x);
+    static double besselDerivativeZero (int m, int n);
+
     static constexpr double highestModeHz = 160.0;
     static constexpr int maxSeats = 96;
 

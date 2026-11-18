@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 
 namespace subguard
 {
@@ -146,6 +147,13 @@ cd RoomSimulator::response (const RoomSpec& r, const Point& source, const Point&
     return sum;
 }
 
+void RoomPaths::accumulate (size_t at, cd screen, cd lfe, double weight)
+{
+    ss[at] += weight * std::norm (screen);
+    ll[at] += weight * std::norm (lfe);
+    sl[at] += weight * screen * std::conj (lfe);
+}
+
 std::vector<int> RoomSimulator::bandPoints (const std::vector<double>& grid)
 {
     std::vector<int> points;
@@ -174,8 +182,8 @@ void RoomSimulator::calibrate (RoomPaths& p, const std::vector<double>& grid, co
         for (size_t i = 0; i < n; ++i)
         {
             const double hz = grid[(size_t) p.points[i]];
-            screenMean += hz * std::norm (p.screen[(size_t) seat * n + i]);
-            subMean += hz * std::norm (p.sub[(size_t) seat * n + i]);
+            screenMean += hz * p.ss[(size_t) seat * n + i];
+            subMean += hz * p.ll[(size_t) seat * n + i];
             weight += hz;
         }
     }
@@ -183,8 +191,9 @@ void RoomSimulator::calibrate (RoomPaths& p, const std::vector<double>& grid, co
     const double screenScale = weight > 0.0 && screenMean > 0.0 ? std::sqrt (weight / screenMean) : 1.0;
     const double subScale = weight > 0.0 && subMean > 0.0 ? std::sqrt (weight / subMean) : 1.0;
 
-    for (auto& h : p.screen)    h *= screenScale;
-    for (auto& h : p.sub)       h *= subScale;
+    for (auto& v : p.ss)    v *= screenScale * screenScale;
+    for (auto& v : p.ll)    v *= subScale * subScale;
+    for (auto& v : p.sl)    v *= screenScale * subScale;
 }
 
 void RoomSimulator::prepare (const std::vector<double>& grid)
@@ -211,8 +220,9 @@ void RoomSimulator::prepare (const std::vector<double>& grid)
             for (const auto& s : subs)      atSub[k] += shape (spec, modes[k], s) / (double) subs.size();
         }
 
-        p.screen.assign (seatPoints.size() * points.size(), cd());
-        p.sub.assign (seatPoints.size() * points.size(), cd());
+        p.ss.assign (seatPoints.size() * points.size(), 0.0);
+        p.ll.assign (seatPoints.size() * points.size(), 0.0);
+        p.sl.assign (seatPoints.size() * points.size(), cd());
 
         for (size_t seat = 0; seat < seatPoints.size(); ++seat)
         {
@@ -233,8 +243,7 @@ void RoomSimulator::prepare (const std::vector<double>& grid)
                     hl += atSub[k] * term;
                 }
 
-                p.screen[seat * points.size() + i] = hs;
-                p.sub[seat * points.size() + i] = hl;
+                p.accumulate (seat * points.size() + i, hs, hl);
             }
         }
 
@@ -260,6 +269,29 @@ RoomSimResult RoomSimulator::compute (const Analysis& a, const Translation& t, c
         out.rooms.push_back (rate (room, a, t, tuning, level, lfeGainDb));
 
     return out;
+}
+
+double RoomSimulator::roomScoreOf (const std::vector<double>& seatPenalty, const PlaybackSimulator::Tuning& tuning)
+{
+    // Mean seat score, pulled down by the worst seats
+    if (seatPenalty.empty())
+        return 100.0;
+
+    auto sorted = seatPenalty;
+    std::sort (sorted.begin(), sorted.end(), std::greater<double>());
+    const size_t worst = std::max<size_t> (1, (size_t) std::lround (tuning.roomWorstShare * (double) sorted.size()));
+    double mean = 0.0, worstMean = 0.0;
+
+    for (size_t i = 0; i < sorted.size(); ++i)
+    {
+        mean += sorted[i] / (double) sorted.size();
+
+        if (i < worst)
+            worstMean += sorted[i] / (double) worst;
+    }
+
+    const double w = std::clamp (tuning.roomWorstWeight, 0.0, 1.0);
+    return 100.0 * (1.0 - ((1.0 - w) * mean + w * worstMean));
 }
 
 RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const Translation& t, const PlaybackSimulator::Tuning& tuning,
@@ -341,7 +373,6 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
         return PlaybackSimulator::iso226Spl (hz, phon + 10.0) - PlaybackSimulator::iso226Spl (hz, phon);
     };
 
-    double penaltySum = 0.0;
     r.seatChangeDb.assign ((size_t) room.seats, 0.0);
     r.seatPenalty.assign ((size_t) room.seats, 0.0);
 
@@ -359,12 +390,15 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
 
             const double hz = a.grid[g];
             const size_t at = (size_t) seat * points.size() + i;
-            const cd hs = room.screen[at], hl = room.sub[at] * gain;
-            const cd hsRef = room.screenNominal.empty() ? hs : room.screenNominal[at];
-            const cd hlRef = room.subNominal.empty() ? hl : room.subNominal[at] * gain;
-            const double power = std::norm (hs) * m.pF[g] + std::norm (hl) * m.pLfe[g];
-            inPower[b] += hz * (std::norm (hsRef) * m.pF[g] + std::norm (hlRef) * m.pLfe[g]);
-            actual[b] += hz * std::max (0.0, power + 2.0 * (hs * std::conj (hl) * cross[i]).real());
+            const double ss = room.ss[at], ll = room.ll[at] * gain * gain;
+            const double ssRef = room.ssRef.empty() ? ss : room.ssRef[at];
+            const double llRef = room.llRef.empty() ? ll : room.llRef[at] * gain * gain;
+            const double power = ss * m.pF[g] + ll * m.pLfe[g];
+
+            // Pro: the whole mix through the screen path is the reference (LCR first)
+            inPower[b] += hz * (room.lcrReference ? ssRef * (m.pF[g] + gain * gain * m.pLfe[g])
+                                                  : ssRef * m.pF[g] + llRef * m.pLfe[g]);
+            actual[b] += hz * std::max (0.0, power + 2.0 * gain * (room.sl[at] * cross[i]).real());
         }
 
         // What the interaction adds at this seat, against what it added on the
@@ -403,7 +437,6 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
         r.seatPenalty[(size_t) seat] = std::min (penalty, 1.0) * heardAtAll;
         r.seatChangeDb[(size_t) seat] = totalPower > 0.0 ? limitedDb ((totalActual / totalPower) / (approvedTotal / (approvedPowerTotal + 1e-60) + 1e-30))
                                                          : 0.0;
-        penaltySum += r.seatPenalty[(size_t) seat];
     }
 
     auto sorted = r.seatChangeDb;
@@ -411,7 +444,7 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
     r.worstDb = std::abs (sorted.front()) > std::abs (sorted.back()) ? sorted.front() : sorted.back();
     r.medianDb = sorted.size() % 2 == 1 ? sorted[sorted.size() / 2] : 0.5 * (sorted[sorted.size() / 2 - 1] + sorted[sorted.size() / 2]);
     r.bestDb = *std::min_element (sorted.begin(), sorted.end(), [] (double x, double y) { return std::abs (x) < std::abs (y); });
-    r.roomScore = 100.0 * (1.0 - penaltySum / room.seats);
+    r.roomScore = roomScoreOf (r.seatPenalty, tuning);
     r.combinedScore = t.robustness * r.roomScore / 100.0;
     return r;
 }
