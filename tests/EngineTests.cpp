@@ -1828,12 +1828,16 @@ static void testRoomPro()
         {
             r.name = "Room " + std::to_string ((int) next());
             r.counted = ! r.counted;
-            r.length = next(); r.width = next(); r.height = next(); r.rt60 = next();
+            r.length = next(); r.width = next(); r.height = next(); r.rt60 = 1.0 + 0.01 * next();
+            r.acoustics = 1 - r.acoustics;
+
+            for (size_t m = 0; m < r.materials.size(); ++m)
+                r.materials[m] = (int) (3 + m * 2);
 
             const auto change = [&] (ProSpeaker& sp)
             {
                 sp.enabled = ! sp.enabled;
-                sp.x = next(); sp.y = next(); sp.z = next(); sp.delayMs = next(); sp.gainDb = next();
+                sp.fx = next() * 0.01; sp.fy = next() * 0.01; sp.fz = next() * 0.01; sp.delayMs = next(); sp.gainDb = next();
                 sp.inverted = ! sp.inverted;
                 sp.feed = 1 - sp.feed;
             };
@@ -1843,6 +1847,7 @@ static void testRoomPro()
             for (auto& sp : r.fills)    change (sp);
 
             r.numSubs = 3; r.fillsOn = ! r.fillsOn; r.numFills = 4;
+            r.linkLR = false; r.linkFills = false;      // linked speakers would be mirrored on reading
             r.firstRow = next(); r.lastRow = next(); r.audienceWidth = next();
             r.rows = 7; r.perRow = 9; r.earHeight = next(); r.rake = next(); r.calibration = 1;
         }
@@ -1851,6 +1856,80 @@ static void testRoomPro()
         const bool read = ProRooms::fromText (p.toText(), back);
         check (read && back == p, "export then import gives back every field of the three rooms", read ? 1.0 : 0.0);
         check (! ProRooms::fromText ("not a room file", back), "a file that is not a Room Sim Pro file is refused", 0.0);
+
+        // The links are written and read too
+        p.rooms[1].linkLR = true;
+        p.rooms[2].linkFills = true;
+        p.rooms[1].applyLinks();
+        p.rooms[2].applyLinks();
+        const bool readLinks = ProRooms::fromText (p.toText(), back);
+        check (readLinks && back == p, "linked speakers survive the export too", readLinks ? 1.0 : 0.0);
+    }
+
+    // A version 1 file (positions in metres) is read into shares of the room, layout unchanged
+    {
+        const std::string v1 = "SubGUARD Room Sim Pro\nversion = 1\nroom1.length = 20\nroom1.width = 10\nroom1.height = 5\n"
+                               "room1.L.x = 2\nroom1.L.y = 1\nroom1.L.z = 2.5\nroom1.R.y = 7\nroom1.firstRow = 8\n";
+        ProRooms back;
+        const bool read = ProRooms::fromText (v1, back);
+        const auto& r = back.rooms[0];
+        const auto l = r.positionOf (r.lcr[0]);
+        check (read && std::abs (l[0] - 2.0) < 1e-9 && std::abs (l[1] - 1.0) < 1e-9 && std::abs (l[2] - 2.5) < 1e-9
+                 && std::abs (r.positionOf (r.lcr[2])[1] - 7.0) < 1e-9 && std::abs (r.firstRow - 0.4) < 1e-9 && ! r.linkLR,
+               "an older file (metres) is read as shares of the room, layout kept", l[0]);
+    }
+
+    // Positions follow the room; linked R mirrors L
+    {
+        auto r = ProRoom::fromSpec (RoomSimulator::defaultRooms()[6]);
+        r.lcr[0].fy = 0.2;
+        r.applyLinks();
+        const double before = r.positionOf (r.lcr[0])[1];
+        r.width *= 2.0;
+        check (std::abs (r.positionOf (r.lcr[0])[1] - 2.0 * before) < 1e-9 && std::abs (r.lcr[2].fy - 0.8) < 1e-12,
+               "resizing the room moves the speakers with it; linked R mirrors L", r.lcr[2].fy);
+    }
+
+    // Materials: decay from the surfaces (Kuttruff), checked against Eyring
+    {
+        auto r = ProRoom::fromSpec (RoomSimulator::defaultRooms()[6]);
+        r.acoustics = 1;
+        r.materials.fill (ProRoom::materialIndex ("plasterboard"));
+        const double eyring = r.eyringRt60 (100.0);
+        RoomSpec spec { "test", "test", r.length, r.width, r.height, 1.0 };
+        RoomSimulator::Mode oblique {}, axial {};
+
+        for (const auto& m : RoomSimulator::modesOf (spec, 160.0))
+        {
+            const double hz = std::sqrt (m.omega2) / (2.0 * 3.14159265358979);
+
+            if (m.nx != 0 && m.ny != 0 && m.nz != 0 && hz > 95.0 && hz < 105.0 && oblique.nx == 0)    oblique = m;
+            if (m.nx != 0 && m.ny == 0 && m.nz == 0 && hz > 60.0 && axial.nx == 0)                   axial = m;
+        }
+
+        const double obliqueRt = 3.0 * std::log (10.0) / r.modeDamping (oblique);
+        const double axialRt = 3.0 * std::log (10.0) / r.modeDamping (axial);
+        std::printf ("  multiplex 200 in plasterboard: Eyring %.2f s, oblique mode %.2f s, axial mode %.2f s, Schroeder %.0f Hz\n",
+                     eyring, obliqueRt, axialRt, r.schroederHz());
+        check (std::abs (obliqueRt - eyring) / eyring < 0.02, "an oblique mode decays as Eyring's RT60 (same surfaces)", obliqueRt);
+        check (axialRt > obliqueRt * 1.1, "an axial mode decays more slowly than an oblique one", axialRt);
+
+        r.materials.fill (ProRoom::materialIndex ("concrete"));
+        check (r.eyringRt60 (63.0) > 8.0, "a bare concrete box rings for seconds", r.eyringRt60 (63.0));
+        check (ProRoom::materialIndex ("open") >= 0 && ProRoom::materialIndex ("nothing") < 0, "materials are found by their saved name", 0.0);
+    }
+
+    // The venues: every one prepared and rated
+    {
+        bool fine = true;
+
+        for (const auto& v : ProRoom::venues())
+        {
+            std::printf ("  %-32s RT60 63 Hz %.2f s, 125 Hz %.2f s\n", v.name.c_str(), v.eyringRt60 (63.0), v.eyringRt60 (125.0));
+            fine = fine && v.eyringRt60 (63.0) > 0.05 && v.eyringRt60 (63.0) < 20.0;
+        }
+
+        check (fine, "the venue presets have sensible reverberation", 0.0);
     }
 
     const auto scene = [] (double shared)

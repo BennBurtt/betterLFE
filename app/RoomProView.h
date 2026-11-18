@@ -38,41 +38,66 @@ private:
     double yawAtDrag = 0.0, pitchAtDrag = 0.0;
 };
 
-/** The settings of one room, in a scrolling list. */
+/** Knobs in the style of a console panner: dark track, green arc, green-on-black read-out. */
+class ProKnobLook : public juce::LookAndFeel_V4
+{
+public:
+    ProKnobLook();
+    void drawRotarySlider (juce::Graphics&, int x, int y, int width, int height, float position, float startAngle, float endAngle,
+                           juce::Slider&) override;
+    juce::Label* createSliderTextBox (juce::Slider&) override;
+};
+
+/** The settings of one room: panels of knobs, as on a console panner, in a scrolling column. */
 class RoomProEditor : public juce::Component
 {
 public:
+    static constexpr int knobWidth = 56, knobHeight = 76, columns = 5, preferredWidth = columns * knobWidth + 16;
+
+    RoomProEditor();
+    ~RoomProEditor() override;
+
     std::function<void()> onChange;             // any value changed
     std::function<void()> onStructureChange;    // the list of controls must be rebuilt
 
     void setRoom (ProRoom* r)                   { room = r; rebuild(); }
     void rebuild();
     void resized() override;
+    void paint (juce::Graphics&) override;
 
     int preferredHeight() const                 { return contentHeight; }
 
 private:
-    struct Row
+    struct Item
     {
+        enum Kind { section, subsection, knob, wide, info } kind = knob;
+        juce::String title;
         std::unique_ptr<juce::Label> label;
         std::unique_ptr<juce::Component> control;
-        bool header = false;
+        std::vector<std::unique_ptr<juce::TextButton>> buttons;     // on a section bar
+        std::function<void()> refresh;                              // brings the control back to the room's values
     };
 
-    void addHeader (const juce::String&);
-    juce::Slider& addSlider (const juce::String& label, double min, double max, double step, const juce::String& suffix,
-                             double& value, bool rebuildOnChange = false);
-    void addToggle (const juce::String& label, bool& value, bool rebuildOnChange = false);
-    void addChoice (const juce::String& label, const juce::StringArray& items, int& value, bool rebuildOnChange = false);
-    void addCount (const juce::String& label, int lowest, int highest, int& value, bool rebuildOnChange);   // value shown as is
-    void addSpeaker (const juce::String& name, ProSpeaker&, bool isFill);
+    void section (const juce::String& title, bool sub = false);
+    void barToggle (const juce::String& text, const juce::String& tip, bool& value, bool structure, juce::Colour on);
+    juce::Slider& knob (const juce::String& label, double min, double max, double step, const juce::String& suffix,
+                        std::function<double()> get, std::function<void (double)> set, std::function<double()> top = {});
+    juce::Slider& knob (const juce::String& label, double min, double max, double step, const juce::String& suffix, double& value);
+    juce::Slider& countKnob (const juce::String& label, int min, int max, int& value);
+    juce::ComboBox& choice (const juce::String& label, const juce::StringArray& entries, std::function<int()> get,
+                            std::function<void (int)> set, bool structure);
+    void wide (const juce::String& label, std::unique_ptr<juce::Component>);
+    void info (std::function<juce::String()> text);
+    void speaker (const juce::String& title, ProSpeaker&, bool sub, bool isFill, bool* link);
     void changed (bool structure);
+    void refreshAll();
 
+    ProKnobLook look;
     ProRoom* room = nullptr;
-    std::vector<Row> rows;
-    std::vector<juce::Slider*> xSliders, ySliders, zSliders;
+    std::vector<Item> items;
+    std::vector<std::pair<juce::Rectangle<int>, int>> bars;     // section bars laid out, and their kind
+    std::vector<juce::Rectangle<int>> panels;
     int contentHeight = 0;
-    int presetChoice = 0;
 };
 
 class RoomProView : public juce::Component

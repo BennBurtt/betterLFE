@@ -563,8 +563,9 @@ délai par l'installateur).
 
 Onglet « Room Sim Pro » (exclusif avec Room Sim). Le but : sortir de
 l'implantation cinéma standard et tester le mix dans des salles construites à
-la main, enceintes et rappels placés où l'on veut. **Son score n'entre pas dans
-le score global** ; il a le sien.
+la main (exposition, défilé, galerie, tente, église, salon, régie), enceintes
+et rappels placés où l'on veut. **Son score n'entre pas dans le score global** ;
+il a le sien.
 
 **Même calcul que Room Sim.** Même modèle modal (boîte rectangulaire, modes
 jusqu'à 160 Hz), même note place par place (`RoomSimulator::rate`), mêmes
@@ -573,22 +574,98 @@ la dépendance au niveau), même niveau d'écoute, même Soft / Medium / Strong,
 même LFE +10 dB. Vérifié : une salle Pro construite comme le multiplex 200
 places de Room Sim donne la même note (62,5 contre 62,4).
 
-**Ce qu'on règle, par salle.**
+**Ce qu'on règle, par salle** (panneaux de potentiomètres, à la manière du
+panner de Pro Tools ; la molette fait défiler la colonne, un clic sur la
+valeur permet de la taper) :
 
-- nom, point de départ parmi les quinze salles de Room Sim ;
-- longueur, largeur, hauteur ; TR60 libre ou préréglé (vive 0,9 s, moyenne
-  0,55 s, traitée 0,4 s, mate 0,25 s) ;
-- L, C, R : position (distance au mur de l'écran, au mur gauche, hauteur),
-  délai, niveau, polarité, marche / arrêt ;
-- 1 à 4 caissons, chacun avec position, délai, niveau, polarité ;
-- rappels (« fill speakers ») : case à cocher, 1 à 4, chacun avec position,
-  délai (par défaut aligné sur l'écran à sa propre distance, x / c), niveau,
-  polarité, et ce qu'il joue (les canaux d'écran ou le LFE) ;
-- public : premier et dernier rang, part de la largeur utilisée, nombre de
-  rangs et de places par rang (96 places au plus), hauteur d'oreille, gradins
-  (hauteur du dernier rang au-dessus du premier) ;
-- étalonnage : moyenne de toutes les places, ou une place de référence (aux
-  deux tiers de la salle, au centre).
+- **Room** : nom ; point de départ (les quinze salles de Room Sim, ou six
+  lieux hors cinéma) ; longueur, largeur, hauteur.
+- **Acoustics** : décroissance réglée à la main (TR60 de 0,1 à 10 s) ou
+  calculée d'après les matériaux des six surfaces (voir plus bas). Affichés :
+  TR60 d'Eyring à 63 et 125 Hz, fréquence de Schroeder.
+- **Left / Right** : L et R liés par défaut (« Link ») : R est le miroir de L
+  par rapport à l'axe de la salle ; délié, chacun a son panneau. Puis
+  **Centre**. Pour chaque enceinte : distance au mur avant (front wall, celui
+  de l'écran), distance au mur gauche, hauteur, délai, niveau, polarité (Ø),
+  marche / arrêt (On).
+- **Subwoofers** : 1 à 4, mêmes réglages.
+- **Fill speakers** (rappels) : On, Link (les rappels 2 et 4 sont les miroirs
+  de 1 et 3 : on règle des paires), 1 ou 2 paires (ou 1 à 4 déliés), mêmes
+  réglages plus ce qu'ils jouent (L C R ou LFE). Délai par défaut : aligné sur
+  l'écran à leur propre distance (x / c).
+- **Audience** : premier et dernier rang, part de la largeur, rangs, places
+  par rang (96 au plus), hauteur d'oreille, gradins.
+- **Calibration** : moyenne de toutes les places, ou place de référence (aux
+  deux tiers, au centre).
+
+**On règle d'abord la salle, puis on place les enceintes.** Les positions sont
+gardées en proportion de la salle (le rang de sièges aussi) et affichées en
+mètres. Agrandir la salle déplace les enceintes avec elle : une enceinte à 1 m
+du mur gauche d'une salle de 10 m de large est à 2 m dans une salle de 20 m,
+toujours au même endroit relatif (vérifié).
+
+**Absorption par les matériaux.** Chaque surface (mur avant, mur arrière, murs
+gauche et droit, sol, plafond) reçoit un matériau réel, avec son coefficient
+d'absorption α à 63 et 125 Hz (interpolé en log de fréquence entre les deux,
+constant au-delà). Chaque mode décroît alors selon les surfaces qu'il frappe
+(Kuttruff [31], faible admittance de paroi, α = 8·Re β) :
+
+`δn = c / (8 V) · Σ surfaces  w · S · α(fn)`
+
+avec `w = 1` si le mode a un ordre non nul perpendiculaire à cette surface (il
+la frappe) et `w = 1/2` s'il court le long. Un mode oblique retrouve la
+décroissance d'Eyring ; un mode axial ne perd son énergie que sur ses deux murs
+et sonne plus longtemps (vérifié : salle de 20 × 13 × 7 m tout en plaque de
+plâtre, TR60 d'Eyring 0,87 s, mode oblique 0,87 s, mode axial 1,47 s). Pour une
+forte absorption, α est remplacé par −ln(1 − α) (Eyring [32]), plafonné à
+α = 0,95 : le modèle reste approché pour les surfaces très absorbantes et les
+côtés ouverts. TR60 affiché : Eyring, `T = 24 ln10 · V / (c · S · (−ln(1 − ᾱ)))`.
+Fréquence de Schroeder `2000 · √(T / V)` [31] : en dessous, la salle se résume
+à quelques modes isolés, c'est là que le modèle est le plus juste ; au-dessus,
+les modes se recouvrent et le résultat est une moyenne.
+
+| Matériau | α 63 Hz | α 125 Hz | Source |
+|---|---|---|---|
+| Béton brut ou peint | 0,01 | 0,01 | [33] |
+| Brique non vernie | 0,03 | 0,03 | [33] |
+| Enduit sur brique ou béton | 0,013 | 0,013 | [33] |
+| Marbre, pierre, carrelage | 0,01 | 0,01 | [33] |
+| Parpaing peint | 0,10 | 0,10 | [33] |
+| Parpaing brut | 0,18 | 0,36 | [33], 63 Hz divisé par 2 |
+| Plaque de plâtre sur ossature | 0,29 | 0,29 | [33], 63 Hz gardé |
+| Lambris bois sur tasseaux | 0,28 | 0,28 | [33], 63 Hz gardé |
+| Vitrage épais, grandes baies | 0,18 | 0,18 | [33], 63 Hz gardé |
+| Vitrage ordinaire | 0,35 | 0,35 | [33], 63 Hz gardé |
+| Parquet sur solives | 0,15 | 0,15 | [33], 63 Hz gardé |
+| Lino, vinyle, caoutchouc sur béton | 0,02 | 0,02 | [33] |
+| Moquette sur béton | 0,02 | 0,02 | [33] |
+| Moquette sur sous-couche mousse | 0,04 | 0,08 | [33], 63 Hz divisé par 2 |
+| Rideau de velours lourd, drapé | 0,07 | 0,14 | [33], 63 Hz divisé par 2 |
+| Dalles de plafond acoustique suspendues | 0,25 | 0,50 | estimation (0,3 à 0,7 à 125 Hz) |
+| Laine minérale 100 mm au mur | 0,15 | 0,35 | estimation (données types) |
+| Pièges à basses (membranes accordées) | 0,60 | 0,70 | estimation (données types) |
+| Public en fauteuils rembourrés | 0,30 | 0,60 | [34], 63 Hz divisé par 2 |
+| Public debout (environ 1 par m²) | 0,10 | 0,20 | estimation |
+| Bardage ou toit en tôle d'acier | 0,20 | 0,15 | estimation (loi de masse) |
+| Toile de tente (membrane PVC) | 0,80 | 0,70 | estimation (loi de masse) |
+| Côté ouvert (pas de mur) | 1,00 | 1,00 | exact : rien ne revient |
+
+Ce qui est établi et ce qui est supposé : les valeurs à 125 Hz viennent des
+tables publiées [33, 34] ; à 63 Hz elles sont rarement publiées, d'où une règle
+explicite (surfaces rigides et panneaux : valeur de 125 Hz gardée ; matériaux
+poreux : divisée par 2, car leur absorption chute avec la fréquence). Les
+lignes marquées « estimation » n'ont pas de table derrière elles : ce sont des
+ordres de grandeur. Les membranes légères (toile, tôle) laissent passer le
+grave : vu de l'intérieur, ce qui traverse est perdu, d'où un α élevé tiré de
+la loi de masse. L'idée : avec une photo et les dimensions au mètre près, on
+choisit les matériaux et on obtient une salle plausible ; si l'on connaît le
+TR60 mesuré, le régler à la main reste plus juste.
+
+**Six lieux hors cinéma** (point de départ, matériaux compris ; TR60 d'Eyring
+à 63 Hz) : galerie « white cube » 20 × 12 × 5 m (1,13 s), halle industrielle
+pour défilé 40 × 20 × 10 m (2,56 s), tente 30 × 15 × 6 m (0,33 s), église en
+pierre 40 × 14 × 15 m (3,42 s), salon 6 × 4,5 × 2,6 m (0,49 s), régie traitée
+7 × 5,5 × 3 m (0,51 s).
 
 **Étalonnage.** Comme en vrai : on étalonne la salle installée normalement
 (chaque enceinte à son niveau), puis les décalages de niveau réglés sur une
@@ -604,26 +681,31 @@ les salles cochées de Room Sim : la robustesse électrique (avant tout ajout de
 Room Sim) est recalculée en gardant le pire cas. Chaque carte affiche la note
 de la salle et le résultat = robustesse électrique × note de la salle / 100.
 
-**Vue 3D.** Boîte grise translucide, mur de l'écran au fond avec la toile en
-clair, ouverte vers l'observateur ; L, C, R en blanc, caissons en orange,
-rappels en bleu, places colorées selon leur note. Glisser pour tourner, molette
-pour zoomer, double-clic pour revenir à la vue de départ.
+**Vue 3D.** Boîte grise translucide, mur avant (celui de l'écran) au fond avec
+la toile en clair, ouverte vers l'observateur ; L, C, R en blanc, caissons en
+orange, rappels en bleu, places colorées selon leur note. Glisser pour
+tourner, molette pour zoomer, double-clic pour revenir à la vue de départ.
 
 **Mémoire, export, import.** Les trois salles sont gardées entre deux
 lancements (réglage `roomPro`), et « Save config... » / « Load config... »
 écrivent et lisent un fichier `.subguardrooms`. Format texte, une ligne
-`roomN.champ = valeur` par réglage sous l'en-tête `SubGUARD Room Sim Pro`
-(version 1) ; les enceintes : `roomN.L.x`, `roomN.sub2.delayMs`,
-`roomN.fill1.feed`... Un champ absent d'un fichier plus ancien garde sa valeur
-par défaut ; un fichier qui n'est pas un fichier Room Sim Pro est refusé. **Règle
-de développement : tout nouveau réglage doit être écrit par `toText` et lu par
+`roomN.champ = valeur` par réglage sous l'en-tête `SubGUARD Room Sim Pro`,
+version 2 : positions en proportion de la salle (`roomN.L.x = 0.03`), liens
+(`linkLR`, `linkFills`), mode de décroissance (`acoustics`), matériaux par leur
+nom stable (`roomN.material.floor = concrete`). Un fichier de version 1
+(positions en mètres) est converti à la lecture, liens coupés pour garder la
+disposition telle quelle (vérifié). Un champ absent garde sa valeur par
+défaut ; un fichier qui n'est pas un fichier Room Sim Pro est refusé. **Règle de
+développement : tout nouveau réglage doit être écrit par `toText` et lu par
 `fromText`.** Un test modifie chaque champ et vérifie l'aller-retour : un
 réglage oublié dans l'export fait échouer les tests.
 
 **Temps de calcul.** La préparation d'une salle (modes × sources × places) se
 fait en arrière-plan, 0,25 s après le dernier changement de réglage ; une IMAX
-de 96 places et 11 enceintes prend environ 0,5 s. La note se met ensuite à jour
-à chaque image.
+de 96 places et 11 enceintes prend environ 0,4 s. La note se met ensuite à jour
+à chaque image. Avec un TR60 long (jusqu'à 10 s), les modes deviennent très
+étroits (largeur ≈ δ/π, 0,2 Hz à 10 s) : la grille d'analyse les échantillonne,
+le résultat est une moyenne réaliste mais pas une courbe point par point.
 
 ## 4. Cadence d'analyse et inertie d'affichage
 
@@ -803,7 +885,15 @@ du son) : bruit blanc ou rose, aucune ; grondement grave (sous 90 Hz), 1 à 3.
     de 5 dB aux basses fréquences. Relevé par une recherche, texte non
     consulté (source secondaire).
 31. H. Kuttruff, *Room Acoustics*, CRC Press (fréquence de Schroeder,
-    statistique du champ réverbéré, somme des modes).
+    statistique du champ réverbéré, somme des modes, amortissement des modes
+    d'une salle rectangulaire en fonction de l'admittance des parois).
+32. C. F. Eyring, « Reverberation time in "dead" rooms », *J. Acoust. Soc.
+    Am.* 1, 217–241 (1930).
+33. F. A. Everest, K. C. Pohlmann, *Master Handbook of Acoustics*,
+    McGraw-Hill, table des coefficients d'absorption des matériaux courants
+    (125 Hz à 4 kHz).
+34. L. L. Beranek, *Concert Halls and Opera Houses*, Springer (absorption du
+    public assis).
 
 
 ## Niveau du LFE et réglages

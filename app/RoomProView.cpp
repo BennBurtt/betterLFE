@@ -131,7 +131,8 @@ void Room3DView::paint (juce::Graphics& g)
             return;
 
         float d = 0.0f;
-        const auto at = project (std::clamp (s.x, 0.0, L), std::clamp (s.y, 0.0, W), std::clamp (s.z, 0.0, H), &d);
+        const auto p = room.positionOf (s);
+        const auto at = project (std::clamp (p[0], 0.0, L), std::clamp (p[1], 0.0, W), std::clamp (p[2], 0.0, H), &d);
         marks.push_back ({ d, at, colour, 0.0f, label, true });
     };
 
@@ -221,9 +222,102 @@ void Room3DView::mouseDoubleClick (const juce::MouseEvent&)
 }
 
 //==============================================================================
+// Knobs
+ProKnobLook::ProKnobLook()
+{
+    setColour (juce::Slider::textBoxTextColourId, juce::Colour (0xff8cf03c));
+    setColour (juce::Slider::textBoxBackgroundColourId, juce::Colour (0xff0b120b));
+    setColour (juce::Slider::textBoxOutlineColourId, juce::Colour (0xff2a2d2a));
+    setColour (juce::Slider::textBoxHighlightColourId, juce::Colour (0xff3d6b1a));
+    setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff0b120b));
+    setColour (juce::TextEditor::textColourId, juce::Colour (0xff8cf03c));
+    setColour (juce::TextEditor::outlineColourId, juce::Colour (0xff2a2d2a));
+    setColour (juce::ComboBox::backgroundColourId, juce::Colour (0xff0b120b));
+    setColour (juce::ComboBox::textColourId, juce::Colour (0xff8cf03c));
+    setColour (juce::ComboBox::outlineColourId, juce::Colour (0xff2a2d2a));
+    setColour (juce::ComboBox::arrowColourId, juce::Colour (0xff8cf03c));
+}
+
+void ProKnobLook::drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height, float position, float startAngle,
+                                    float endAngle, juce::Slider& slider)
+{
+    const auto area = juce::Rectangle<float> ((float) x, (float) y, (float) width, (float) height);
+    const float radius = juce::jmin (area.getWidth(), area.getHeight()) * 0.5f - 3.0f;
+    const auto centre = area.getCentre();
+    const float angle = startAngle + position * (endAngle - startAngle);
+    const juce::Colour green (0xff7ddc1f);
+
+    // Track, then the value arc (from zero when the range goes both ways)
+    juce::Path track;
+    track.addCentredArc (centre.x, centre.y, radius, radius, 0.0f, startAngle, endAngle, true);
+    g.setColour (juce::Colour (0xff141516));
+    g.strokePath (track, juce::PathStrokeType (3.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+    float from = startAngle;
+
+    if (slider.getMinimum() < 0.0 && slider.getMaximum() > 0.0)
+        from = startAngle + (float) slider.valueToProportionOfLength (0.0) * (endAngle - startAngle);
+
+    if (std::abs (angle - from) > 0.01f)
+    {
+        juce::Path arc;
+        arc.addCentredArc (centre.x, centre.y, radius, radius, 0.0f, juce::jmin (from, angle), juce::jmax (from, angle), true);
+        g.setColour (green.withAlpha (0.85f));
+        g.strokePath (arc, juce::PathStrokeType (2.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
+
+    const auto tip = centre.getPointOnCircumference (radius, angle);
+    g.setColour (green);
+    g.fillEllipse (tip.x - 2.2f, tip.y - 2.2f, 4.4f, 4.4f);
+
+    // Metal knob and its pointer
+    const float body = radius - 4.0f;
+    g.setColour (juce::Colours::black.withAlpha (0.55f));
+    g.fillEllipse (centre.x - body + 1.0f, centre.y - body + 1.5f, body * 2.0f, body * 2.0f);
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xffc9ccd1), centre.x - body, centre.y - body,
+                                             juce::Colour (0xff55585e), centre.x + body, centre.y + body, false));
+    g.fillEllipse (centre.x - body, centre.y - body, body * 2.0f, body * 2.0f);
+    g.setColour (juce::Colour (0xff2a2b2e));
+    g.drawEllipse (centre.x - body, centre.y - body, body * 2.0f, body * 2.0f, 1.0f);
+    g.setColour (juce::Colour (0xff1c1d1f));
+    g.drawLine (juce::Line<float> (centre, centre.getPointOnCircumference (body - 1.5f, angle)), 2.4f);
+}
+
+juce::Label* ProKnobLook::createSliderTextBox (juce::Slider& slider)
+{
+    auto* label = LookAndFeel_V4::createSliderTextBox (slider);
+    label->setFont (uiFont (11.0f, true));
+    label->setJustificationType (juce::Justification::centred);
+    return label;
+}
+
+//==============================================================================
 // Settings editor
+namespace
+{
+    const juce::Colour panelColour { 0xff2b2d31 }, barColour { 0xff1b1c1f }, subBarColour { 0xff383a3f };
+    const juce::Colour onGreen { 0xff5fae22 }, polarityOrange { 0xffd9861c };
+    const juce::String polaritySign = juce::String (juce::CharPointer_UTF8 ("\xc3\x98"));    // Ø
+}
+
+RoomProEditor::RoomProEditor()
+{
+    setLookAndFeel (&look);
+}
+
+RoomProEditor::~RoomProEditor()
+{
+    items.clear();
+    setLookAndFeel (nullptr);
+}
+
 void RoomProEditor::changed (bool structure)
 {
+    if (room != nullptr)
+        room->applyLinks();
+
+    refreshAll();
+
     if (structure)
     {
         if (onStructureChange)
@@ -235,138 +329,174 @@ void RoomProEditor::changed (bool structure)
     }
 }
 
-void RoomProEditor::addHeader (const juce::String& text)
+void RoomProEditor::refreshAll()
 {
-    Row row;
-    row.header = true;
-    row.label = std::make_unique<juce::Label> (juce::String(), text);
-    row.label->setFont (uiFont (13.0f, true));
-    row.label->setColour (juce::Label::textColourId, theme::text);
-    addAndMakeVisible (*row.label);
-    rows.push_back (std::move (row));
+    for (auto& item : items)
+        if (item.refresh)
+            item.refresh();
 }
 
-juce::Slider& RoomProEditor::addSlider (const juce::String& label, double min, double max, double step, const juce::String& suffix,
-                                        double& value, bool rebuildOnChange)
+void RoomProEditor::section (const juce::String& title, bool sub)
 {
-    Row row;
-    row.label = std::make_unique<juce::Label> (juce::String(), label);
-    row.label->setFont (uiFont (12.0f));
-    row.label->setColour (juce::Label::textColourId, theme::dimText);
+    Item item;
+    item.kind = sub ? Item::subsection : Item::section;
+    item.title = title;
+    items.push_back (std::move (item));
+}
 
-    auto slider = std::make_unique<juce::Slider> (juce::Slider::LinearBar, juce::Slider::TextBoxRight);
-    slider->setRange (min, max, step);
-    slider->setTextValueSuffix (suffix);
-    slider->setValue (value, juce::dontSendNotification);
-    auto* raw = slider.get();
-    double* target = &value;
-    slider->onValueChange = [this, raw, target, rebuildOnChange]
+void RoomProEditor::barToggle (const juce::String& text, const juce::String& tip, bool& value, bool structure, juce::Colour on)
+{
+    auto button = std::make_unique<juce::TextButton> (text);
+    button->setClickingTogglesState (true);
+    button->setToggleState (value, juce::dontSendNotification);
+    button->setTooltip (tip);
+    button->setColour (juce::TextButton::buttonColourId, juce::Colour (0xff3a3c41));
+    button->setColour (juce::TextButton::buttonOnColourId, on);
+    button->setColour (juce::TextButton::textColourOffId, juce::Colour (0xffb8b8b8));
+    button->setColour (juce::TextButton::textColourOnId, juce::Colours::white);
+    auto* raw = button.get();
+    bool* target = &value;
+    button->onClick = [this, raw, target, structure]
     {
-        *target = raw->getValue();
-        changed (rebuildOnChange);
+        *target = raw->getToggleState();
+        changed (structure);
+    };
+    addAndMakeVisible (*button);
+    items.back().buttons.push_back (std::move (button));
+}
+
+juce::Slider& RoomProEditor::knob (const juce::String& label, double min, double max, double step, const juce::String& suffix,
+                                   std::function<double()> get, std::function<void (double)> set, std::function<double()> top)
+{
+    Item item;
+    item.kind = Item::knob;
+    item.label = std::make_unique<juce::Label> (juce::String(), label);
+    item.label->setFont (uiFont (10.5f));
+    item.label->setJustificationType (juce::Justification::centred);
+    item.label->setColour (juce::Label::textColourId, juce::Colour (0xffc8c8c8));
+    item.label->setInterceptsMouseClicks (false, false);
+
+    auto slider = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow);
+    slider->setTextBoxStyle (juce::Slider::TextBoxBelow, false, knobWidth - 6, 16);
+    slider->setRange (min, top ? juce::jmax (min + step, top()) : max, step);
+    slider->setNumDecimalPlacesToDisplay (step >= 1.0 ? 0 : (step >= 0.1 ? 1 : 2));
+    slider->setTextValueSuffix (suffix);
+    slider->setValue (get(), juce::dontSendNotification);
+    slider->setMouseDragSensitivity (180);
+    slider->setScrollWheelEnabled (false);      // the wheel scrolls the column
+    auto* raw = slider.get();
+    slider->onValueChange = [this, raw, set]
+    {
+        set (raw->getValue());
+        changed (false);
+    };
+    item.refresh = [raw, get, top, min, step]
+    {
+        if (top)
+            raw->setRange (min, juce::jmax (min + step, top()), step);
+
+        raw->setValue (get(), juce::dontSendNotification);
     };
 
-    addAndMakeVisible (*row.label);
+    addAndMakeVisible (*item.label);
     addAndMakeVisible (*slider);
-    row.control = std::move (slider);
-    rows.push_back (std::move (row));
+    item.control = std::move (slider);
+    items.push_back (std::move (item));
     return *raw;
 }
 
-void RoomProEditor::addToggle (const juce::String& label, bool& value, bool rebuildOnChange)
+juce::Slider& RoomProEditor::knob (const juce::String& label, double min, double max, double step, const juce::String& suffix, double& value)
 {
-    Row row;
-    auto toggle = std::make_unique<juce::ToggleButton> (label);
-    toggle->setToggleState (value, juce::dontSendNotification);
-    auto* raw = toggle.get();
-    bool* target = &value;
-    toggle->onClick = [this, raw, target, rebuildOnChange]
-    {
-        *target = raw->getToggleState();
-        changed (rebuildOnChange);
-    };
-
-    addAndMakeVisible (*toggle);
-    row.control = std::move (toggle);
-    rows.push_back (std::move (row));
+    double* target = &value;
+    return knob (label, min, max, step, suffix, [target] { return *target; }, [target] (double v) { *target = v; });
 }
 
-void RoomProEditor::addChoice (const juce::String& label, const juce::StringArray& items, int& value, bool rebuildOnChange)
+juce::Slider& RoomProEditor::countKnob (const juce::String& label, int min, int max, int& value)
 {
-    Row row;
-    row.label = std::make_unique<juce::Label> (juce::String(), label);
-    row.label->setFont (uiFont (12.0f));
-    row.label->setColour (juce::Label::textColourId, theme::dimText);
+    int* target = &value;
+    return knob (label, min, max, 1.0, {}, [target] { return (double) *target; }, [target] (double v) { *target = juce::roundToInt (v); });
+}
 
+void RoomProEditor::wide (const juce::String& label, std::unique_ptr<juce::Component> control)
+{
+    Item item;
+    item.kind = Item::wide;
+
+    if (label.isNotEmpty())
+    {
+        item.label = std::make_unique<juce::Label> (juce::String(), label);
+        item.label->setFont (uiFont (11.0f));
+        item.label->setColour (juce::Label::textColourId, juce::Colour (0xffc8c8c8));
+        addAndMakeVisible (*item.label);
+    }
+
+    addAndMakeVisible (*control);
+    item.control = std::move (control);
+    items.push_back (std::move (item));
+}
+
+juce::ComboBox& RoomProEditor::choice (const juce::String& label, const juce::StringArray& entries, std::function<int()> get,
+                                       std::function<void (int)> set, bool structure)
+{
     auto box = std::make_unique<juce::ComboBox>();
 
-    for (int i = 0; i < items.size(); ++i)
-        box->addItem (items[i], i + 1);
+    for (int i = 0; i < entries.size(); ++i)
+        box->addItem (entries[i], i + 1);
 
-    box->setSelectedId (value + 1, juce::dontSendNotification);
+    box->setSelectedId (get() + 1, juce::dontSendNotification);
     auto* raw = box.get();
-    int* target = &value;
-    box->onChange = [this, raw, target, rebuildOnChange]
+    box->onChange = [this, raw, set, structure]
     {
-        *target = raw->getSelectedId() - 1;
-        changed (rebuildOnChange);
+        set (raw->getSelectedId() - 1);
+        changed (structure);
     };
-
-    addAndMakeVisible (*row.label);
-    addAndMakeVisible (*box);
-    row.control = std::move (box);
-    rows.push_back (std::move (row));
+    wide (label, std::move (box));
+    items.back().refresh = [raw, get] { raw->setSelectedId (get() + 1, juce::dontSendNotification); };
+    return *raw;
 }
 
-void RoomProEditor::addCount (const juce::String& label, int lowest, int highest, int& value, bool rebuildOnChange)
+void RoomProEditor::info (std::function<juce::String()> text)
 {
-    Row row;
-    row.label = std::make_unique<juce::Label> (juce::String(), label);
-    row.label->setFont (uiFont (12.0f));
-    row.label->setColour (juce::Label::textColourId, theme::dimText);
-
-    auto box = std::make_unique<juce::ComboBox>();
-
-    for (int n = lowest; n <= highest; ++n)
-        box->addItem (juce::String (n), n);
-
-    value = std::clamp (value, lowest, highest);
-    box->setSelectedId (value, juce::dontSendNotification);
-    auto* raw = box.get();
-    int* target = &value;
-    box->onChange = [this, raw, target, rebuildOnChange]
-    {
-        *target = raw->getSelectedId();
-        changed (rebuildOnChange);
-    };
-
-    addAndMakeVisible (*row.label);
-    addAndMakeVisible (*box);
-    row.control = std::move (box);
-    rows.push_back (std::move (row));
+    Item item;
+    item.kind = Item::info;
+    item.label = std::make_unique<juce::Label>();
+    item.label->setFont (uiFont (10.5f));
+    item.label->setColour (juce::Label::textColourId, juce::Colour (0xff9fd36a));
+    item.label->setJustificationType (juce::Justification::topLeft);
+    item.label->setText (text(), juce::dontSendNotification);
+    auto* raw = item.label.get();
+    item.refresh = [raw, text] { raw->setText (text(), juce::dontSendNotification); };
+    addAndMakeVisible (*item.label);
+    items.push_back (std::move (item));
 }
 
-void RoomProEditor::addSpeaker (const juce::String& name, ProSpeaker& s, bool isFill)
+void RoomProEditor::speaker (const juce::String& title, ProSpeaker& s, bool sub, bool isFill, bool* link)
 {
-    addHeader (name);
-    addToggle ("On", s.enabled);
-    xSliders.push_back (&addSlider ("Distance from the screen wall", 0.0, room->length, 0.05, " m", s.x));
-    ySliders.push_back (&addSlider ("From the left wall", 0.0, room->width, 0.05, " m", s.y));
-    zSliders.push_back (&addSlider ("Height", 0.0, room->height, 0.05, " m", s.z));
-    addSlider ("Delay", 0.0, isFill ? 300.0 : 50.0, 0.1, " ms", s.delayMs);
-    addSlider ("Level", -20.0, 20.0, 0.5, " dB", s.gainDb);
-    addToggle ("Polarity inverted", s.inverted);
+    section (title, sub);
+
+    if (link != nullptr)
+        barToggle ("Link", "Linked: the right one mirrors the left one across the centre of the room.", *link, true, onGreen);
+
+    barToggle (polaritySign, "Polarity inverted", s.inverted, false, polarityOrange);
+    barToggle ("On", "Speaker on", s.enabled, false, onGreen);
+
+    ProSpeaker* sp = &s;
+    knob ("From front", 0.0, 1.0, 0.05, " m", [this, sp] { return sp->fx * room->length; },
+          [this, sp] (double v) { sp->fx = v / room->length; }, [this] { return room->length; });
+    knob ("From left", 0.0, 1.0, 0.05, " m", [this, sp] { return sp->fy * room->width; },
+          [this, sp] (double v) { sp->fy = v / room->width; }, [this] { return room->width; });
+    knob ("Height", 0.0, 1.0, 0.05, " m", [this, sp] { return sp->fz * room->height; },
+          [this, sp] (double v) { sp->fz = v / room->height; }, [this] { return room->height; });
+    knob ("Delay", 0.0, isFill ? 300.0 : 50.0, 0.1, " ms", s.delayMs);
+    knob ("Level", -20.0, 20.0, 0.5, " dB", s.gainDb);
 
     if (isFill)
-        addChoice ("Plays", { "Screen channels (L, C, R)", "LFE" }, s.feed);
+        choice ("Plays", { "L C R (screen channels)", "LFE" }, [sp] { return sp->feed; }, [sp] (int v) { sp->feed = v; }, false);
 }
 
 void RoomProEditor::rebuild()
 {
-    rows.clear();
-    xSliders.clear();
-    ySliders.clear();
-    zSliders.clear();
+    items.clear();
     removeAllChildren();
 
     if (room == nullptr)
@@ -375,179 +505,282 @@ void RoomProEditor::rebuild()
     auto& r = *room;
 
     // Room
-    addHeader ("Room");
+    section ("Room");
     {
-        Row row;
-        row.label = std::make_unique<juce::Label> (juce::String(), "Name");
-        row.label->setFont (uiFont (12.0f));
-        row.label->setColour (juce::Label::textColourId, theme::dimText);
         auto text = std::make_unique<juce::TextEditor>();
         text->setText (juce::String (r.name), false);
+        text->setFont (uiFont (12.0f, true));
         auto* raw = text.get();
         text->onTextChange = [this, raw] { room->name = raw->getText().toStdString(); changed (false); };
-        addAndMakeVisible (*row.label);
-        addAndMakeVisible (*text);
-        row.control = std::move (text);
-        rows.push_back (std::move (row));
+        wide ("Name", std::move (text));
     }
 
     {
-        juce::StringArray presets { "Keep as it is" };
-
-        for (const auto& spec : RoomSimulator::defaultRooms())
-            presets.add ("Start from: " + juce::String (spec.name));
-
-        presetChoice = 0;
-        Row row;
-        row.label = std::make_unique<juce::Label> (juce::String(), "Preset");
-        row.label->setFont (uiFont (12.0f));
-        row.label->setColour (juce::Label::textColourId, theme::dimText);
         auto box = std::make_unique<juce::ComboBox>();
+        box->setTextWhenNothingSelected ("Choose a room...");
+        box->addSectionHeading ("Cinemas");
+        const auto specs = RoomSimulator::defaultRooms();
 
-        for (int i = 0; i < presets.size(); ++i)
-            box->addItem (presets[i], i + 1);
+        for (size_t i = 0; i < specs.size(); ++i)
+            box->addItem (specs[i].name, (int) i + 1);
 
-        box->setSelectedId (1, juce::dontSendNotification);
+        box->addSectionHeading ("Other venues");
+        const auto venues = ProRoom::venues();
+
+        for (size_t i = 0; i < venues.size(); ++i)
+            box->addItem (juce::String (venues[i].name), 100 + (int) i);
+
         auto* raw = box.get();
         box->onChange = [this, raw]
         {
-            const int choice = raw->getSelectedId() - 2;
-            const auto specs = RoomSimulator::defaultRooms();
-
-            if (choice >= 0 && choice < (int) specs.size())
-            {
-                const bool counted = room->counted;
-                *room = ProRoom::fromSpec (specs[(size_t) choice]);
-                room->counted = counted;
-                changed (true);
-            }
-        };
-
-        addAndMakeVisible (*row.label);
-        addAndMakeVisible (*box);
-        row.control = std::move (box);
-        rows.push_back (std::move (row));
-    }
-
-    const auto resizeRanges = [this]
-    {
-        for (auto* s : xSliders)    s->setRange (0.0, room->length, 0.05);
-        for (auto* s : ySliders)    s->setRange (0.0, room->width, 0.05);
-        for (auto* s : zSliders)    s->setRange (0.0, room->height, 0.05);
-    };
-
-    for (auto* dimension : { &addSlider ("Length", 4.0, 60.0, 0.1, " m", r.length), &addSlider ("Width", 3.0, 40.0, 0.1, " m", r.width),
-                             &addSlider ("Height", 2.5, 25.0, 0.1, " m", r.height) })
-    {
-        auto previous = dimension->onValueChange;
-        dimension->onValueChange = [previous, resizeRanges] { previous(); resizeRanges(); };
-    }
-
-    addSlider ("Reverberation (RT60, low frequencies)", 0.1, 2.5, 0.01, " s", r.rt60);
-
-    {
-        Row row;
-        row.label = std::make_unique<juce::Label> (juce::String(), "Treatment preset");
-        row.label->setFont (uiFont (12.0f));
-        row.label->setColour (juce::Label::textColourId, theme::dimText);
-        auto box = std::make_unique<juce::ComboBox>();
-        box->addItem ("Keep as it is", 1);
-        box->addItem ("Live room (0.9 s)", 2);
-        box->addItem ("Average room (0.55 s)", 3);
-        box->addItem ("Treated room (0.4 s)", 4);
-        box->addItem ("Dead room (0.25 s)", 5);
-        box->setSelectedId (1, juce::dontSendNotification);
-        auto* raw = box.get();
-        box->onChange = [this, raw]
-        {
-            const double values[] = { 0.0, 0.0, 0.9, 0.55, 0.4, 0.25 };
             const int id = raw->getSelectedId();
+            const auto cinemas = RoomSimulator::defaultRooms();
+            const auto others = ProRoom::venues();
+            const bool counted = room->counted;
 
-            if (id >= 2 && id <= 5)
-            {
-                room->rt60 = values[id];
-                changed (true);
-            }
+            if (id >= 1 && id <= (int) cinemas.size())
+                *room = ProRoom::fromSpec (cinemas[(size_t) id - 1]);
+            else if (id >= 100 && id < 100 + (int) others.size())
+                *room = others[(size_t) id - 100];
+            else
+                return;
+
+            room->counted = counted;
+            changed (true);
         };
-
-        addAndMakeVisible (*row.label);
-        addAndMakeVisible (*box);
-        row.control = std::move (box);
-        rows.push_back (std::move (row));
+        wide ("Start from", std::move (box));
     }
 
-    // Screen speakers
-    const char* lcrNames[] = { "Left (L)", "Centre (C)", "Right (R)" };
+    knob ("Length", 4.0, 60.0, 0.1, " m", r.length);
+    knob ("Width", 3.0, 40.0, 0.1, " m", r.width);
+    knob ("Height", 2.5, 25.0, 0.1, " m", r.height);
 
-    for (int i = 0; i < 3; ++i)
-        addSpeaker (lcrNames[i], r.lcr[(size_t) i], false);
+    // Acoustics
+    section ("Acoustics");
+    choice ("Decay", { "RT60 set by hand", "From the materials" }, [this] { return room->acoustics; },
+            [this] (int v) { room->acoustics = v; }, true);
 
-    // Subwoofers
-    addHeader ("Subwoofers");
-    addCount ("Number", 1, ProRoom::maxSubs, r.numSubs, true);
+    if (r.acoustics == 0)
+    {
+        knob ("RT60", 0.1, 10.0, 0.01, " s", r.rt60).setSkewFactorFromMidPoint (1.0);
+    }
+    else
+    {
+        juce::StringArray names;
 
-    for (int i = 0; i < std::clamp (r.numSubs, 1, ProRoom::maxSubs); ++i)
-        addSpeaker ("Subwoofer " + juce::String (i + 1), r.subs[(size_t) i], false);
+        for (const auto& m : ProRoom::materialList())
+            names.add (juce::String (m.name) + "  (" + juce::String (m.alpha63, 2) + " / " + juce::String (m.alpha125, 2) + ")");
 
-    // Fill speakers
-    addHeader ("Fill speakers (rappels)");
-    addToggle ("Use fill speakers", r.fillsOn, true);
+        const char* surfaces[] = { "Front wall", "Back wall", "Left wall", "Right wall", "Floor", "Ceiling" };
+
+        for (int i = 0; i < ProRoom::numSurfaces; ++i)
+            choice (surfaces[i], names, [this, i] { return room->materials[(size_t) i]; },
+                    [this, i] (int v) { room->materials[(size_t) i] = juce::jmax (0, v); }, false);
+    }
+
+    info ([this]
+    {
+        const auto& rm = *room;
+        juce::String text;
+
+        if (rm.acoustics == 1)
+            text << "RT60 (Eyring)  63 Hz: " << juce::String (rm.eyringRt60 (63.0), 2) << " s   125 Hz: "
+                 << juce::String (rm.eyringRt60 (125.0), 2) << " s\n";
+        else
+            text << "Absorption in brackets: 63 Hz / 125 Hz\n";
+
+        text << "Schroeder frequency " << juce::roundToInt (rm.schroederHz()) << " Hz: below it, single modes.";
+        return text;
+    });
+
+    // Speakers
+    if (r.linkLR)
+    {
+        speaker ("Left / Right", r.lcr[0], false, false, &r.linkLR);
+    }
+    else
+    {
+        speaker ("Left", r.lcr[0], false, false, &r.linkLR);
+        speaker ("Right", r.lcr[2], false, false, nullptr);
+    }
+
+    speaker ("Centre", r.lcr[1], false, false, nullptr);
+
+    section ("Subwoofers");
+    choice ("Number", { "1", "2", "3", "4" }, [this] { return room->numSubs - 1; }, [this] (int v) { room->numSubs = v + 1; }, true);
+
+    for (int i = 0; i < juce::jlimit (1, ProRoom::maxSubs, r.numSubs); ++i)
+        speaker ("Sub " + juce::String (i + 1), r.subs[(size_t) i], true, false, nullptr);
+
+    section ("Fill speakers");
+    barToggle ("Link", "Linked: fills 2 and 4 mirror fills 1 and 3 across the centre of the room.", r.linkFills, true, onGreen);
+    barToggle ("On", "Use fill speakers", r.fillsOn, true, onGreen);
 
     if (r.fillsOn)
     {
-        addCount ("Number", 1, ProRoom::maxFills, r.numFills, true);
+        if (r.linkFills)
+        {
+            choice ("Number", { "1 pair", "2 pairs" }, [this] { return room->numFills <= 2 ? 0 : 1; },
+                    [this] (int v) { room->numFills = (v + 1) * 2; }, true);
 
-        for (int i = 0; i < std::clamp (r.numFills, 1, ProRoom::maxFills); ++i)
-            addSpeaker ("Fill " + juce::String (i + 1), r.fills[(size_t) i], true);
+            for (int pair = 0; pair < (r.numFills <= 2 ? 1 : 2); ++pair)
+                speaker ("Fills " + juce::String (pair * 2 + 1) + " / " + juce::String (pair * 2 + 2), r.fills[(size_t) pair * 2],
+                         true, true, nullptr);
+        }
+        else
+        {
+            choice ("Number", { "1", "2", "3", "4" }, [this] { return room->numFills - 1; }, [this] (int v) { room->numFills = v + 1; }, true);
+
+            for (int i = 0; i < juce::jlimit (1, ProRoom::maxFills, r.numFills); ++i)
+                speaker ("Fill " + juce::String (i + 1), r.fills[(size_t) i], true, true, nullptr);
+        }
     }
 
     // Audience
-    addHeader ("Audience");
-    addSlider ("First row, from the screen wall", 0.5, 60.0, 0.1, " m", r.firstRow);
-    addSlider ("Last row, from the screen wall", 0.5, 60.0, 0.1, " m", r.lastRow);
-    addSlider ("Width used", 0.1, 1.0, 0.01, "", r.audienceWidth);
+    section ("Audience");
+    knob ("First row", 0.0, 1.0, 0.1, " m", [this] { return room->firstRow * room->length; },
+          [this] (double v) { room->firstRow = v / room->length; }, [this] { return room->length; });
+    knob ("Last row", 0.0, 1.0, 0.1, " m", [this] { return room->lastRow * room->length; },
+          [this] (double v) { room->lastRow = v / room->length; }, [this] { return room->length; });
+    knob ("Width", 10.0, 100.0, 1.0, " %", [this] { return room->audienceWidth * 100.0; },
+          [this] (double v) { room->audienceWidth = v / 100.0; });
+    countKnob ("Rows", 1, 12, r.rows);
+    countKnob ("Per row", 1, 12, r.perRow);
+    knob ("Ear", 0.8, 3.0, 0.05, " m", r.earHeight);
+    knob ("Rake", 0.0, 10.0, 0.05, " m", r.rake);
 
-    addCount ("Rows", 1, 12, r.rows, false);
-    addCount ("Seats per row", 1, 12, r.perRow, false);
-    addSlider ("Ear height (first row)", 0.8, 3.0, 0.05, " m", r.earHeight);
-    addSlider ("Rake (last row raised by)", 0.0, 10.0, 0.05, " m", r.rake);
-
-    // Calibration
-    addHeader ("Calibration");
-    addChoice ("Levels set at", { "Average of all seats", "Reference seat (2/3 of the room, centre)" }, r.calibration);
+    section ("Calibration");
+    choice ("Levels set at", { "All seats (average)", "Reference seat (2/3, centre)" }, [this] { return room->calibration; },
+            [this] (int v) { room->calibration = v; }, false);
 
     resized();
 }
 
 void RoomProEditor::resized()
 {
-    int y = 4;
     const int width = getWidth();
+    int y = 4, column = 0;
+    bars.clear();
+    panels.clear();
+    int panelTop = -1;
 
-    for (auto& row : rows)
+    const auto endRow = [&]
     {
-        if (row.header)
+        if (column > 0)
         {
-            y += 8;
-            row.label->setBounds (4, y, width - 8, 22);
-            y += 24;
+            y += knobHeight;
+            column = 0;
+        }
+    };
+
+    for (auto& item : items)
+    {
+        if (item.kind == Item::section || item.kind == Item::subsection)
+        {
+            endRow();
+            const bool sub = item.kind == Item::subsection;
+
+            if (! sub)
+            {
+                if (panelTop >= 0)
+                    panels.push_back ({ 2, panelTop, width - 4, y + 4 - panelTop });
+
+                y += panelTop >= 0 ? 12 : 0;
+                panelTop = y;
+            }
+            else
+            {
+                y += 4;
+            }
+
+            const auto bar = juce::Rectangle<int> (sub ? 8 : 2, y, width - (sub ? 16 : 4), sub ? 18 : 22);
+            bars.push_back ({ bar, (int) item.kind });
+            auto buttons = bar.reduced (3, 2);
+
+            for (auto& b : item.buttons)
+            {
+                b->setBounds (buttons.removeFromRight (b->getButtonText() == polaritySign ? 24 : 34));
+                buttons.removeFromRight (3);
+            }
+
+            y += bar.getHeight() + 4;
             continue;
         }
 
-        if (row.label != nullptr)
+        if (item.kind == Item::knob)
         {
-            row.label->setBounds (4, y, width * 45 / 100, 24);
-            row.control->setBounds (width * 45 / 100 + 6, y + 1, width - width * 45 / 100 - 10, 22);
+            const int x = 8 + column * knobWidth;
+            item.label->setBounds (x, y, knobWidth, 12);
+            item.control->setBounds (x, y + 12, knobWidth, knobHeight - 14);
+
+            if (++column == columns)
+            {
+                y += knobHeight;
+                column = 0;
+            }
+
+            continue;
+        }
+
+        endRow();
+
+        if (item.kind == Item::info)
+        {
+            item.label->setBounds (8, y, width - 16, 30);
+            y += 32;
+            continue;
+        }
+
+        if (item.label != nullptr)
+        {
+            item.label->setBounds (8, y, 74, 22);
+            item.control->setBounds (84, y, width - 92, 22);
         }
         else
         {
-            row.control->setBounds (4, y, width - 8, 24);
+            item.control->setBounds (8, y, width - 16, 22);
         }
 
-        y += 27;
+        y += 26;
     }
 
-    contentHeight = y + 8;
+    endRow();
+
+    if (panelTop >= 0)
+        panels.push_back ({ 2, panelTop, width - 4, y + 4 - panelTop });
+
+    contentHeight = y + 10;
+    repaint();
+}
+
+void RoomProEditor::paint (juce::Graphics& g)
+{
+    g.fillAll (theme::plot);
+
+    for (const auto& p : panels)
+    {
+        g.setColour (panelColour);
+        g.fillRoundedRectangle (p.toFloat(), 4.0f);
+    }
+
+    size_t b = 0;
+
+    for (const auto& item : items)
+    {
+        if (item.kind != Item::section && item.kind != Item::subsection)
+            continue;
+
+        if (b >= bars.size())
+            break;
+
+        const auto bar = bars[b++].first;
+        const bool sub = item.kind == Item::subsection;
+        g.setColour (sub ? subBarColour : barColour);
+        g.fillRoundedRectangle (bar.toFloat(), sub ? 2.0f : 3.0f);
+        g.setColour (sub ? juce::Colour (0xffd0d0d0) : juce::Colours::white);
+        g.setFont (uiFont (sub ? 11.0f : 12.5f, true));
+        g.drawText (item.title, bar.reduced (6, 0), juce::Justification::centredLeft);
+    }
 }
 
 //==============================================================================
@@ -747,7 +980,7 @@ void RoomProView::paint (juce::Graphics& g)
         g.setColour (theme::dimText);
         g.setFont (uiFont (10.5f));
         g.drawText (juce::String (room.length, 1) + " x " + juce::String (room.width, 1) + " x " + juce::String (room.height, 1) + " m,  RT60 "
-                      + juce::String (room.rt60, 2) + " s,  " + juce::String ((int) room.seatPositions().size()) + " seats"
+                      + juce::String (room.rt60At (63.0), 2) + " s,  " + juce::String ((int) room.seatPositions().size()) + " seats"
                       + (room.fillsOn ? ",  fills" : ""),
                     inner.removeFromTop (14.0f), juce::Justification::centredLeft);
 
@@ -805,13 +1038,13 @@ void RoomProView::resized()
     }
 
     area.removeFromTop (10);
-    auto settings = area.removeFromRight (juce::jmax (360, area.getWidth() * 38 / 100));
+    auto settings = area.removeFromRight (RoomProEditor::preferredWidth + editorViewport.getScrollBarThickness() + 2);
     area.removeFromRight (10);
     view3d.setBounds (area);
     editorViewport.setBounds (settings);
-    editor.setSize (settings.getWidth() - editorViewport.getScrollBarThickness() - 2, 100);
+    editor.setSize (RoomProEditor::preferredWidth, 100);
     editor.resized();
-    editor.setSize (editor.getWidth(), editor.preferredHeight());
+    editor.setSize (RoomProEditor::preferredWidth, editor.preferredHeight());
 }
 
 void RoomProView::mouseDown (const juce::MouseEvent& e)
