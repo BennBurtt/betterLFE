@@ -892,7 +892,11 @@ l'abaisse (12 dB la déplacent de 11 % de la hauteur de la salle), sa couleur va
 (rien) au rouge (6 dB et plus). La place survolée dans la vue 3D est marquée
 par un trait vertical et ses trois valeurs. Le fader « Écart des calques »
 règle leur écartement : 1 = 30 % de la hauteur de la salle entre deux
-couches, 3 par défaut, de 0,5 à 6 ; le cadre suit la hauteur de la pile. Les
+couches, 3 par défaut, de 0,5 à 6 ; le cadre suit la hauteur de la pile. Le
+fader « Amplitude » règle de combien un dB déplace une couche (1 = 12 dB pour
+11 % de la hauteur de la salle, 3 par défaut, de 0,5 à 10). La colonne des
+réglages de la salle et des enceintes se replie (bouton « Réglages ») pour
+laisser la place aux deux vues. Les
 couches :
 
 | Couche | Bande | Pourquoi ces limites |
@@ -948,8 +952,10 @@ fond face à la régie ; avec deux rappels LFE à mi-salle sur les côtés,
 **Ce que reçoit chaque tête.** Pour chaque place : le niveau du grave de 20 à
 120 Hz (dB SPL), sa sonie (phones de la bande la plus forte, ISO 226) et le
 niveau sous 40 Hz, infra compris, ressenti plus qu'entendu. La luminosité de
-chaque tête suit la sonie du grave qui l'atteint (sombre à 20 phones, pleine à
-80) ; une note de 100 est en vert franc. Au survol : la note, l'écart, ce que
+chaque tête suit la part du grave du mix qui l'atteint, face à la régie :
+pleine au niveau de la régie ou au-dessus, plus sombre à mesure que la place
+en perd (la plus sombre dès 12 dB en moins). Une tête juste à côté d'un
+caisson, qui perd très peu, reste bien verte ; une note de 100 est en vert franc. Au survol : la note, l'écart, ce que
 la tête entend et ce qu'elle ressent.
 
 **Couleurs des places.** Une échelle à dix paliers (violet 0, magenta 40,

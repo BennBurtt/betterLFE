@@ -122,6 +122,8 @@ private:
     double yawAtDrag = 0.0, pitchAtDrag = 0.0;
     juce::Slider spacing;                           // how far apart the three layers are (x the room height share)
     juce::Label spacingLabel;
+    juce::Slider amplitude;                         // how far a dB moves a layer
+    juce::Label amplitudeLabel;
 };
 
 /** Knobs in the style of a console panner: dark track, green arc, green-on-black read-out. */
@@ -266,6 +268,8 @@ private:
     std::shared_ptr<ProCamera> camera = std::make_shared<ProCamera>();
     RoomProEditor editor;
     juce::Viewport editorViewport;
+    juce::TextButton settingsButton;
+    bool settingsOpen = true;
     juce::TextButton saveButton { tr ("Save config...") }, loadButton { tr ("Load config...") };
     std::unique_ptr<juce::FileChooser> chooser;
 };

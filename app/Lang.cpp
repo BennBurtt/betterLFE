@@ -319,6 +319,10 @@ namespace
             { "Bass layers against the approved mix. Drag to turn, wheel to zoom, double-click to reset.",
               "Couches du grave face au mix validé. Glisser pour tourner, molette pour zoomer, double-clic pour revenir." },
 
+            { "How far a boost lifts a layer and a dip lowers it.", "De combien un boost soulève un calque et un creux l'abaisse." },
+            { "Amplitude", "Amplitude" }, { "Settings", "Réglages" }, { "Fold the settings away", "Replier les réglages" },
+            { "Show the room and speaker settings", "Afficher les réglages de la salle et des enceintes" },
+
             // The fifteen cinema rooms
             { "Corridor room, live", "Salle couloir, vive" }, { "Small multiplex, live", "Petit multiplexe, vif" },
             { "Old cinema, near-cubic, live", "Ancien cinéma, presque cubique, vif" }, { "Narrow 120 seats", "Étroite 120 places" },

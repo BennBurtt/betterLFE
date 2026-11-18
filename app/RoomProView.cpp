@@ -211,9 +211,10 @@ void Room3DView::paint (juce::Graphics& g)
         seatPoints[i] = at;
         auto colour = rated ? seatColour (100.0 * (1.0 - penalties[i])) : juce::Colour (0xff8a8a8a);
 
-        // Brightness from the bass that reaches this head: dim when little does (20 phon or less), full from 80 phon
-        if (i < heard.size())
-            colour = colour.withMultipliedBrightness ((float) juce::jmap (juce::jlimit (20.0, 80.0, heard[i]), 20.0, 80.0, 0.3, 1.0));
+        // Brightness from how much of the mix's bass reaches this head, against the stage:
+        // full at the stage level or above, dimmer as it loses it (darkest from 12 dB down)
+        if (i < levels.size())
+            colour = colour.withMultipliedBrightness ((float) juce::jmap (juce::jlimit (-12.0, 0.0, levels[i]), -12.0, 0.0, 0.3, 1.0));
 
         marks.push_back ({ d, at, colour, {}, false, (int) i });
     }
@@ -423,13 +424,33 @@ RoomLayerView::RoomLayerView()
     spacingLabel.setJustificationType (juce::Justification::centredRight);
     addAndMakeVisible (spacing);
     addAndMakeVisible (spacingLabel);
+
+    // Amplitude: how far a dB moves a layer; 1 is the first version (12 dB = 11 % of the room height), 3 by default
+    amplitude.setSliderStyle (juce::Slider::LinearHorizontal);
+    amplitude.setTextBoxStyle (juce::Slider::TextBoxRight, false, 44, 18);
+    amplitude.setRange (0.5, 10.0, 0.1);
+    amplitude.setValue (3.0, juce::dontSendNotification);
+    amplitude.setTextValueSuffix (juce::String::fromUTF8 (" \xc3\x97"));
+    amplitude.setTooltip (tr ("How far a boost lifts a layer and a dip lowers it."));
+    amplitude.onValueChange = [this] { repaint(); };
+    amplitudeLabel.setText (tr ("Amplitude"), juce::dontSendNotification);
+    amplitudeLabel.setFont (uiFont (10.5f));
+    amplitudeLabel.setColour (juce::Label::textColourId, theme::dimText);
+    amplitudeLabel.setJustificationType (juce::Justification::centredRight);
+    addAndMakeVisible (amplitude);
+    addAndMakeVisible (amplitudeLabel);
 }
 
 void RoomLayerView::resized()
 {
-    auto top = getLocalBounds().reduced (8, 4).removeFromTop (20);
-    spacing.setBounds (top.removeFromRight (170));
-    spacingLabel.setBounds (top.removeFromRight (110));
+    auto area = getLocalBounds().reduced (8, 4);
+    area.removeFromTop (16);       // the caption line
+    auto row = area.removeFromTop (20);
+    spacing.setBounds (row.removeFromRight (150));
+    spacingLabel.setBounds (row.removeFromRight (100));
+    row.removeFromRight (8);
+    amplitude.setBounds (row.removeFromRight (150));
+    amplitudeLabel.setBounds (row.removeFromRight (70));
 }
 
 void RoomLayerView::setData (const ProRoom& r, const RoomPaths* paths, const RoomResult* result)
@@ -507,7 +528,7 @@ void RoomLayerView::paint (juce::Graphics& g)
     }
 
     // Each layer at its height (infra at the bottom), lifted where the bass is boosted, lowered where it dips
-    const double scale = 0.11 * roomHeight / 12.0;     // 12 dB move a layer by 11 % of the room height
+    const double scale = 0.11 * roomHeight / 12.0 * amplitude.getValue();     // at 1: 12 dB move a layer by 11 % of the room height
 
     for (int l = 0; l < RoomResult::numLayers; ++l)
     {
@@ -525,7 +546,7 @@ void RoomLayerView::paint (juce::Graphics& g)
             if (k < 0 || std::isnan (values[(size_t) k]))
                 return false;
 
-            db = juce::jlimit (-12.0, 12.0, values[(size_t) k]);
+            db = juce::jlimit (-24.0, 24.0, values[(size_t) k]);
             at = project (nodes[(size_t) k][0], nodes[(size_t) k][1], base + scale * db);
             return true;
         };
@@ -1385,6 +1406,8 @@ RoomProView::RoomProView()
 
     saveButton.setTooltip (tr ("Save the three rooms to a file."));
     loadButton.setTooltip (tr ("Load three rooms from a file."));
+    settingsButton.onClick = [this] { settingsOpen = ! settingsOpen; resized(); };
+    addAndMakeVisible (settingsButton);
     saveButton.onClick = [this] { exportConfig(); };
     loadButton.onClick = [this] { importConfig(); };
     addAndMakeVisible (saveButton);
@@ -1667,8 +1690,17 @@ void RoomProView::resized()
     }
 
     area.removeFromTop (10);
-    auto settings = area.removeFromRight (RoomProEditor::preferredWidth + editorViewport.getScrollBarThickness() + 2);
+
+    // The settings column folds away: a narrow strip with its button is left
+    auto strip = area.removeFromRight (settingsOpen ? RoomProEditor::preferredWidth + editorViewport.getScrollBarThickness() + 2 : 26);
     area.removeFromRight (10);
+    settingsButton.setButtonText (settingsOpen ? tr ("Settings") + juce::String::fromUTF8 ("  \xe2\x96\xb8")
+                                               : juce::String::fromUTF8 ("\xe2\x97\x82"));
+    settingsButton.setTooltip (settingsOpen ? tr ("Fold the settings away") : tr ("Show the room and speaker settings"));
+    auto settings = strip;
+    settingsButton.setBounds (settings.removeFromTop (24));
+    settings.removeFromTop (4);
+    editorViewport.setVisible (settingsOpen);
     // The 3D view and the layered view side by side, the same size
     auto right = area.removeFromRight ((area.getWidth() - 10) / 2);
     area.removeFromRight (10);
