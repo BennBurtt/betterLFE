@@ -1200,13 +1200,13 @@ du son) : bruit blanc ou rose, aucune ; grondement grave (sous 90 Hz), 1 à 3.
     public assis).
 35. P. M. Morse, K. U. Ingard, *Theoretical Acoustics*, McGraw-Hill, 1968,
     §9.2 (modes d'une cavité cylindrique).
-38. H. Møller, C. S. Pedersen, « Hearing at low and infrasonic frequencies »,
-    *Noise & Health* 6(23), 37–57 (2004).
 36. L. N. Trefethen, J. A. C. Weideman, « The exponentially convergent
     trapezoidal rule », *SIAM Review* 56(3), 385–458 (2014).
 37. Y. Suzuki, H. Takeshima, K. Kurakata, « Revision of ISO 226 "Normal
     Equal-Loudness-Level Contours" from 2003 to 2023 edition: the background
     and results », *Acoust. Sci. & Tech.* 45(1), 2024.
+38. H. Møller, C. S. Pedersen, « Hearing at low and infrasonic frequencies »,
+    *Noise & Health* 6(23), 37–57 (2004).
 
 
 ## Niveau du LFE et réglages
