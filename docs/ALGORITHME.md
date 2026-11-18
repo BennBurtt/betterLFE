@@ -642,11 +642,11 @@ matrice 4 × 4 de produits de chemins `H_a · conj(H_b)` (a, b ∈ {L, C, R, LFE
 moyennée sur la bande de chaque point ; la puissance entendue est
 `Σ_ab P_ab · S_ab`, où S est la matrice du mix. Ainsi, du grave seulement dans L
 n'est entendu que là où porte l'enceinte L : avec un LFE identique à L et un
-caisson à droite, les places de gauche bougent de 4,7 dB, celles de droite de
-0,8 dB (vérifié). Room Sim joue aussi chaque canal d'écran par sa propre
-enceinte. En Pro, la référence est le mix d'écran tel quel ; le grave du LFE
-y est attendu là où est celui de l'écran, dans les proportions L / C / R du
-mix. Étalonnage : chaque groupe d'enceintes (L, C, R, caissons) est réglé
+caisson à droite, l'interférence change en moyenne de 3,4 dB sur les places
+de gauche et de 2,5 dB sur celles de droite (vérifié). Room Sim joue aussi
+chaque canal d'écran par sa propre enceinte. En Pro, la puissance entendue
+est coupée en trois termes exacts (LCR, LFE, croisement : voir « Deux
+lentilles » plus bas). Étalonnage : chaque groupe d'enceintes (L, C, R, caissons) est réglé
 séparément au niveau du mix validé ; les rappels gardent leur niveau face à
 l'enceinte d'écran de leur côté. C'est l'équivalent d'un réglage au bruit
 rose et au sonomètre : la même **énergie totale** de 20 à 120 Hz sur les
@@ -890,13 +890,21 @@ un creux fait de 1 à 4 m de large : 0,6 m d'écart suffit à le voir.
 d'oreille (20 points sur le grand côté, chaque maille subdivisée en 3 × 3
 facettes à l'affichage) : un boost soulève la couche, un creux l'abaisse (12 dB
 la déplacent de 11 % de la hauteur de la salle, à l'amplitude 1). Couleur de
-chaque facette : gris à 0 dB (l'équivalent d'une note de 100), du bleu au
-violet pour un creux, du jaune au rouge pour un boost, pleine à 9 dB. Un
-liseré gris marque, à la hauteur de chaque couche, le plan neutre (0 dB) :
-la référence pour lire les écarts. La place survolée dans la vue 3D est marquée
+chaque facette : gris à ±0,5 dB, puis directement des couleurs saturées pour
+que le gris ne les dilue pas : bleu vif, bleu profond puis violet pour un
+creux, jaune, orange puis rouge pour un boost, pleine à 6 dB (à peu près là où
+la sonie du grave double, la pénalité pleine d'une place). Les facettes sont
+opaques : une couche n'est pas délavée par celles qui sont derrière. Un liseré
+gris marque, à la hauteur de chaque couche, le plan neutre (0 dB) : la
+référence pour lire les écarts. Chaque couche reste attachée aux murs : du
+bord du maillage, une jupe descend (ou monte) jusqu'au mur le plus proche, à
+la hauteur neutre de la couche. La hauteur suit une limite douce,
+`12 dB × tanh(écart / 12 dB)` : un très gros boost ne fait plus « voler » la
+couche hors de la salle, et le cadre s'ajuste du point le plus bas au plus
+haut, si bien que rien ne sort de la vue. La place survolée dans la vue 3D est marquée
 par un trait vertical et ses trois valeurs. Le fader « Écart des calques »
 règle leur écartement : 1 = 30 % de la hauteur de la salle entre deux
-couches, 3 par défaut, de 0,5 à 6 ; le cadre suit la hauteur de la pile. Le
+couches, 3 par défaut, de 0,5 à 6. Le
 fader « Amplitude » règle de combien un dB déplace une couche (1 = 12 dB pour
 11 % de la hauteur de la salle, 3 par défaut, de 0,5 à 10). La colonne des
 réglages de la salle et des enceintes se replie (bouton « Réglages ») pour
@@ -934,16 +942,50 @@ infrasons :
 Le reste de la notation est le même (tolérance, poids selon le grave entendu).
 Room Sim, lui, reste sur 20–120 Hz.
 
-**Couverture (Room Sim Pro).** Le modèle modal contient la perte avec la
-distance, les déphasages entre sources et les modes ; la note d'interaction
-les retire volontairement en comparant chaque place au chemin d'écran à cette
-même place. Room Sim Pro note donc aussi la **couverture** : le niveau du
-grave à chaque place face au niveau du mix validé, couleur de la salle comprise
-(rangs du fond qui perdent le grave, trous, boosts), bande par bande, avec la
-même tolérance, les mêmes dB de doublement et la même audibilité. Pénalité de
-la place = `1 − (1 − interaction) × (1 − w × couverture)`, avec `w` = 0,5 par
-défaut (réglage Dev « Couverture (Pro), poids » ; 0 redonne l'interaction
-seule). Au survol, chaque tête affiche son grave face au mix validé.
+**Deux lentilles : la répartition (le lieu) et les interférences (le mix).**
+Room Sim Pro sépare deux questions qui n'ont pas la même cause ni le même
+remède. Le calcul raisonne par **canal du mix**, pas par endroit : « LCR »
+veut dire les canaux L, C, R joués par toutes les enceintes qui les jouent
+(un ou deux jeux LCR, rappels Lc/Rc, divergences), où qu'elles soient ; « LFE »
+veut dire le canal LFE joué par les caissons et les rappels LFE, où qu'ils
+soient. Il n'y a pas d'écran dans le calcul.
+
+En chaque point et à chaque fréquence, la puissance entendue est
+`Σ_ab P_ab S_ab` (P : chemins de la salle, S : inter-spectres du mix). Elle se
+coupe exactement en trois termes :
+
+| Terme | Formule | Contenu | Qui peut corriger |
+|---|---|---|---|
+| LCR | `Σ_{a,b ∈ L,C,R} P_ab S_ab` | L, C, R par toutes leurs enceintes, leurs croisements entre eux compris (rappel contre l'enceinte qu'il répète, divergence) | le lieu |
+| LFE | `P_EE S_EE` | le LFE par toutes ses enceintes, caisson contre caisson compris | le lieu |
+| croisement | `2 Re Σ_c P_cE S_cE` | l'interférence entre le LFE et les LCR ; nul quand le LFE du mix ne partage rien avec les LCR | le mix (et le lieu, pour une salle donnée) |
+
+Dans le mix validé, les mêmes termes valent `S_LCR`, `S_EE` et
+`2 Re Σ_c S_cE` (chemins unité).
+
+- **Répartition** (pour placer les caissons, les rappels et les LCR) : le
+  niveau en chaque point face au mix validé, couleur de la salle et placement
+  compris : `entendu / validé`. Filtre « Tout | LCR | LFE » : `LCR / S_LCR` ou
+  `LFE / S_EE`. Un trou en « LCR » vient des LCR ou des rappels Lc/Rc, un trou
+  en « LFE » des caissons ou des rappels LFE.
+- **Interférences** (pour l'assistant mixage) : ce que fait le croisement,
+  face à ce qu'il faisait dans le mix validé :
+  `[entendu / (LCR + LFE)] / [validé / (S_LCR + S_EE)]`. Le niveau propre de
+  chaque partie s'annule : un caisson mal placé ou mal réglé, un rappel mal
+  placé n'y entrent pas. Un LFE décorrélé donne 0 dB partout (vérifié : note
+  d'interférences 100 et couches plates, caisson sous l'écran ou dans un coin
+  du fond).
+
+Les deux sont notées place par place de la même façon (bande par bande, même
+tolérance, mêmes dB de doublement, même audibilité, infra compris), puis en
+note de salle avec la même règle (moyenne et pire part). Chaque carte affiche
+les deux notes ; la lentille choisie est en couleur, avec son P10 et son pire
+point. La note combinée, `1 − (1 − interférences) × (1 − w × répartition)`
+par place, avec `w` = 0,5 par défaut (réglage Dev « Couverture (Pro),
+poids »), ne sert qu'au score Room Sim Pro qui joint les salles cochées.
+Vérifications : déplacer un caisson laisse la partie LCR de chaque place
+identique ; déplacer des rappels Lc/Rc change la partie LCR (jusqu'à 3,7 dB
+à une place) et pas la partie LFE.
 
 **Étalonnage du système LFE.** Caissons et rappels LFE sont réglés ensemble,
 comme le ferait un installateur : joués ensemble, ils atteignent le niveau du
@@ -955,35 +997,37 @@ fond face au mix validé ; avec deux rappels LFE à mi-salle sur les côtés,
 
 **Ce que reçoit chaque tête.** Pour chaque place : le niveau du grave de 20 à
 120 Hz (dB SPL), sa sonie (phones de la bande la plus forte, ISO 226) et le
-niveau sous 40 Hz, infra compris, ressenti plus qu'entendu. La luminosité de
-chaque tête suit la part du grave du mix qui l'atteint, face au mix validé :
-pleine au niveau du mix validé ou au-dessus, plus sombre à mesure que la place
-en perd (la plus sombre dès 12 dB en moins). Une tête juste à côté d'un
-caisson, qui perd très peu, reste bien verte ; une note de 100 est en vert franc. Au survol : la note, l'écart, ce que
-la tête entend et ce qu'elle ressent.
+niveau sous 40 Hz, infra compris, ressenti plus qu'entendu. La couleur de
+chaque tête suit la lentille choisie, avec la même échelle que la vue en
+couches : en répartition, son niveau face au mix validé (tout, LCR ou LFE) ;
+en interférences, ce que le croisement change. Gris : comme validé ; bleu :
+un creux ; rouge : un boost. Au survol : la note dans la lentille, le grave
+(tout, LCR seuls, LFE seul), l'interférence, ce que la tête entend et ce
+qu'elle ressent.
 
-**Couleurs des places.** Une échelle à dix paliers (violet 0, magenta 40,
-rouge 55, orange 65 à 75, jaune 82, vert-jaune 88, vert 93 à 97, turquoise
-100) : des places à quelques points d'écart se distinguent. Au survol, la vue
-3D donne la note de la place en % et l'écart en dB.
+**Couleurs des notes.** Sur la ligne des places de chaque carte, une échelle
+à dix paliers (violet 0, magenta 40, rouge 55, orange 65 à 75, jaune 82,
+vert-jaune 88, vert 93 à 97, vert franc 100) : des places à quelques points
+d'écart se distinguent.
 
 **Étalonnage.** Comme en vrai : on étalonne la salle installée normalement
 (chaque enceinte à son niveau), puis les décalages de niveau réglés sur une
 enceinte restent des décalages. Ainsi, des caissons montés de +6 dB comptent
-bien (vérifié : écart médian −2,3 → +1,4 dB, note de la salle 51,6 → 54,3),
-au lieu d'être effacés par l'étalonnage. La couleur propre de la salle n'est
-toujours pas comptée ; un LFE décorrélé donne 0 dB partout, rappels compris
-(vérifié).
+bien au lieu d'être effacés par l'étalonnage : ils vont dans la répartition
+(vérifié : partie LFE +6,00 dB à chaque place en moyenne, partie LCR
+inchangée), pas dans les interférences.
 
 **Score Room Sim Pro.** Chaque salle a une case « Counts ». Les salles cochées
 (1, 2 ou 3) comptent comme des systèmes de lecture de plus, exactement comme
 les salles cochées de Room Sim : la robustesse électrique (avant tout ajout de
 Room Sim) est recalculée en gardant le pire cas. Chaque carte affiche la note
-de la salle et le résultat = robustesse électrique × note de la salle / 100.
+de répartition et la note d'interférences de la salle.
 
-**Vue 3D.** Boîte grise translucide, mur avant (celui de l'écran) au fond avec
-la toile en clair, ouverte vers l'observateur ; L, C, R en blanc, caissons en
-orange, rappels en bleu, places colorées selon leur note. Glisser pour
+**Vue 3D.** Boîte grise translucide, mur avant au fond, ouverte vers
+l'observateur ; un écran y est dessiné en clair si l'option « Écran » est
+cochée (un simple repère, sans effet sur le calcul ; décochée pour les lieux
+hors cinéma). L, C, R en blanc, caissons en orange, rappels en bleu, têtes
+colorées selon la lentille. Glisser pour
 tourner, molette pour zoomer, double-clic pour revenir à la vue de départ.
 
 **Confort.** Un double-clic sur un potentiomètre le remet à sa valeur par

@@ -1935,7 +1935,7 @@ static void testRoomPro()
 
             r.numSubs = 3; r.fillsOn = ! r.fillsOn; r.numFills = 4;
             r.linkLR = false; r.linkFills = false;      // linked speakers would be mirrored on reading
-            r.dualLCR = ! r.dualLCR; r.audienceLayout = 2;
+            r.dualLCR = ! r.dualLCR; r.screen = ! r.screen; r.audienceLayout = 2;
             r.aisle = 0.1 * next(); r.ringInner = 0.01 * next(); r.ringOuter = 0.01 * next();
             r.shape = ProRoom::lShape;
             r.people = 2;
@@ -2112,9 +2112,42 @@ static void testRoomPro()
             const auto [lo, hi] = std::minmax_element (x.seatChangeDb.begin(), x.seatChangeDb.end());
             return *hi - *lo;
         };
-        std::printf ("  LFE as loud as the screen, unrelated: subwoofers under the screen room %.1f (seats spread %.1f dB), "
-                     "one in a back corner %.1f (%.1f dB)\n", front.roomScore, spread (front), corner.roomScore, spread (corner));
-        check (std::abs (front.roomScore - corner.roomScore) > 5.0, "moving the subwoofer to a back corner changes the room score", corner.roomScore);
+        auto partSpread = [] (const RoomResult& x, int part)
+        {
+            const auto& v = x.seatPartDb[(size_t) part];
+            const auto [lo, hi] = std::minmax_element (v.begin(), v.end());
+            return *hi - *lo;
+        };
+        std::printf ("  LFE as loud as the screen, unrelated: subwoofers under the screen room %.1f (coverage %.1f, interference %.1f, "
+                     "seats spread %.1f dB, LFE alone spread %.1f dB), one in a back corner %.1f (coverage %.1f, interference %.1f, %.1f dB, "
+                     "LFE alone %.1f dB)\n",
+                     front.roomScore, front.lensScore[RoomResult::coverageLens], front.lensScore[RoomResult::interferenceLens], spread (front),
+                     partSpread (front, RoomResult::lfePart), corner.roomScore, corner.lensScore[RoomResult::coverageLens],
+                     corner.lensScore[RoomResult::interferenceLens], spread (corner), partSpread (corner, RoomResult::lfePart));
+        check (std::abs (front.lensScore[RoomResult::coverageLens] - corner.lensScore[RoomResult::coverageLens]) > 3.0
+                 && std::abs (partSpread (front, RoomResult::lfePart) - partSpread (corner, RoomResult::lfePart)) > 1.0,
+               "moving the subwoofer to a back corner changes the coverage and where the LFE goes", corner.lensScore[RoomResult::coverageLens]);
+        check (spread (corner) < 0.1 && corner.lensScore[RoomResult::interferenceLens] > 99.0,
+               "an LFE unrelated to L C R: no interference, wherever the subwoofer is", corner.lensScore[RoomResult::interferenceLens]);
+
+        double lcrMoved = 0.0, lcrValues = 0.0;
+
+        for (size_t i = 0; i < front.seatPartDb[RoomResult::lcrPart].size(); ++i)
+        {
+            lcrMoved = std::max (lcrMoved, std::abs (front.seatPartDb[RoomResult::lcrPart][i] - corner.seatPartDb[RoomResult::lcrPart][i]));
+            lcrValues += 1.0;
+        }
+
+        check (lcrValues > 0.0 && lcrMoved < 1e-6, "moving a subwoofer leaves the L C R part of every seat as it was", lcrMoved);
+
+        double worstGrid = 0.0;
+
+        for (const auto& layer : corner.gridLayerDb)
+            for (double v : layer)
+                if (! std::isnan (v))
+                    worstGrid = std::max (worstGrid, std::abs (v));
+
+        check (worstGrid < 0.1, "an LFE unrelated to L C R: the interference layers stay flat over the whole floor", worstGrid);
     }
 
     // Each channel is played by its own speakers: bass only in L, an LFE identical to it,
@@ -2392,9 +2425,56 @@ static void testRoomPro()
         room.subs[0].gainDb = room.subs[1].gainDb = 6.0;
         const auto loud = RoomSimulator::rate (ProRoomModel::prepare (room, sharedAnalysis.grid), sharedAnalysis, sharedT, sim.tuning,
                                                PlaybackSimulator::Level::strong, 10.0);
-        std::printf ("  subwoofers 6 dB too loud, LFE identical to the screen: room %.1f -> %.1f, median seat %+.1f -> %+.1f dB\n",
-                     even.roomScore, loud.roomScore, even.medianDb, loud.medianDb);
-        check (std::abs (loud.medianDb - even.medianDb) > 0.5, "a subwoofer level offset stays after calibration", loud.medianDb);
+        double lfeRise = 0.0, lcrRise = 0.0;
+        const size_t n = even.seatPartDb[RoomResult::lfePart].size();
+
+        for (size_t i = 0; i < n; ++i)
+        {
+            lfeRise += (loud.seatPartDb[RoomResult::lfePart][i] - even.seatPartDb[RoomResult::lfePart][i]) / (double) n;
+            lcrRise = std::max (lcrRise, std::abs (loud.seatPartDb[RoomResult::lcrPart][i] - even.seatPartDb[RoomResult::lcrPart][i]));
+        }
+
+        std::printf ("  subwoofers 6 dB too loud, LFE identical to the screen: room %.1f -> %.1f, coverage %.1f -> %.1f, "
+                     "LFE alone %+.2f dB at every seat on average, L C R alone %.2f dB at most\n",
+                     even.roomScore, loud.roomScore, even.lensScore[RoomResult::coverageLens], loud.lensScore[RoomResult::coverageLens], lfeRise, lcrRise);
+        check (n > 0 && std::abs (lfeRise - 6.0) < 0.3 && lcrRise < 1e-6, "a subwoofer level offset stays after calibration, in the LFE part only", lfeRise);
+        check (std::abs (loud.lensScore[RoomResult::coverageLens] - even.lensScore[RoomResult::coverageLens]) > 2.0,
+               "subwoofers set 6 dB off their level change the coverage", loud.lensScore[RoomResult::coverageLens]);
+    }
+
+    // A fill speaker playing Lc / Rc moved: the L C R part changes, the LFE part does not
+    {
+        auto room = ProRoom::fromSpec (RoomSimulator::defaultRooms()[6]);
+        room.fillsOn = true;
+        room.numFills = 2;
+        room.linkFills = true;
+
+        for (auto& f : room.fills)
+        {
+            f.feed = 0;
+            f.fx = 0.5;
+            f.fy = 0.03;
+            f.fz = 0.5;
+        }
+
+        room.applyLinks();
+        const auto before = RoomSimulator::rate (ProRoomModel::prepare (room, sharedAnalysis.grid), sharedAnalysis, sharedT, sim.tuning,
+                                                 PlaybackSimulator::Level::strong, 10.0);
+        room.fills[0].fx = 0.8;
+        room.applyLinks();
+        const auto after = RoomSimulator::rate (ProRoomModel::prepare (room, sharedAnalysis.grid), sharedAnalysis, sharedT, sim.tuning,
+                                                PlaybackSimulator::Level::strong, 10.0);
+        double lcrMoved = 0.0, lfeMoved = 0.0;
+
+        for (size_t i = 0; i < before.seatPartDb[RoomResult::lcrPart].size(); ++i)
+        {
+            lcrMoved = std::max (lcrMoved, std::abs (after.seatPartDb[RoomResult::lcrPart][i] - before.seatPartDb[RoomResult::lcrPart][i]));
+            lfeMoved = std::max (lfeMoved, std::abs (after.seatPartDb[RoomResult::lfePart][i] - before.seatPartDb[RoomResult::lfePart][i]));
+        }
+
+        std::printf ("  Lc / Rc fills moved from half way to 80 %% of the length: L C R alone changes by up to %.1f dB at a seat, "
+                     "the LFE alone by %.2f dB\n", lcrMoved, lfeMoved);
+        check (lcrMoved > 0.5 && lfeMoved < 1e-6, "moving an Lc / Rc fill changes the L C R part, never the LFE part", lfeMoved);
     }
 
     // A large configured room: prepared in reasonable time

@@ -31,11 +31,31 @@ struct ProCamera
 /** Where a point of the room (metres) falls on a view of the given size. */
 juce::Point<float> projectRoomPoint (const ProRoom&, const ProCamera&, int width, int height, double x, double y, double z, float* depth = nullptr);
 
-/** A room drawn in 3D: walls, screen, speakers, seats coloured by their rating. Drag to turn, wheel to zoom, double-click to reset. */
+/** Colour of a bass change against the approved mix (dB), shared by the heads and the layered view:
+    grey within 0.5 dB, then blue to violet for a dip, yellow to red for a boost, full from 6 dB. */
+juce::Colour bassChangeColour (double db);
+
+/** A room drawn in 3D: walls, screen, speakers, and the heads coloured by the lens shown (the bass level, or the
+    interference, against the approved mix). Drag to turn, wheel to zoom, double-click to reset. */
 class Room3DView : public juce::Component
 {
 public:
+    /** The room, each seat's score in the lens shown (penalty 0..1) and the change its head is coloured by (dB). */
     void setRoom (const ProRoom& r, const std::vector<double>& seatPenalties, const std::vector<double>& seatChangeDb = {});
+
+    /** For the seat under the mouse: its level against the approved mix (all, L C R alone, LFE alone) and its interference. */
+    void setDetails (const std::array<std::vector<double>, RoomResult::numParts>& partDb, const std::vector<double>& interferenceDb)
+    {
+        if (partDb != parts || interferenceDb != interference)
+        {
+            parts = partDb;
+            interference = interferenceDb;
+            repaint();
+        }
+    }
+
+    /** What the heads' colour says, under the colour scale. */
+    void setCaption (const juce::String& text)      { if (text != caption) { caption = text; repaint(); } }
 
     /** The worst point found between the seats (extra points), drawn when there is one below every seat. */
     void setWorstSpot (std::optional<std::array<double, 3>> spot, double score)
@@ -58,14 +78,13 @@ public:
     /** Colour of a seat score (0..100), in many steps over the range where seats fall. */
     static juce::Colour seatColour (double score);
 
-    /** What each head receives: loudness of the bass (phon), level under 40 Hz (dB SPL). The brightness of a head follows its loudness. */
-    void setHeads (const std::vector<double>& heardPhon, const std::vector<double>& feltDb, const std::vector<double>& levelDb = {})
+    /** What each head receives: loudness of the bass (phon), level under 40 Hz (dB SPL), shown under the mouse. */
+    void setHeads (const std::vector<double>& heardPhon, const std::vector<double>& feltDb)
     {
-        if (heardPhon != heard || feltDb != felt || levelDb != levels)
+        if (heardPhon != heard || feltDb != felt)
         {
             heard = heardPhon;
             felt = feltDb;
-            levels = levelDb;
             repaint();
         }
     }
@@ -90,22 +109,26 @@ private:
     std::optional<std::array<double, 3>> worstSpot;
     double worstSpotScore = 100.0;
     std::vector<juce::Point<float>> seatPoints;     // where each seat was drawn
-    std::vector<double> heard, felt, levels;
+    std::vector<double> heard, felt;
+    std::array<std::vector<double>, RoomResult::numParts> parts;
+    std::vector<double> interference;
+    juce::String caption;
     int hovered = -1;
     std::shared_ptr<ProCamera> camera = std::make_shared<ProCamera>();
     double yawAtDrag = 0.0, pitchAtDrag = 0.0;
 };
 
 /** The three layers of the bass stacked in the room: infra (under 20 Hz), very low (20-60 Hz), low (60-120 Hz).
-    Each is a mesh over the floor: a boost lifts it, a dip lowers it, its colour says how much. Same camera as the 3D view. */
+    Each is a mesh over the floor, pinned to the walls at its neutral height: a boost lifts it, a dip lowers it, its
+    colour says how much. It shows the lens chosen: where the bass goes (all of it, L C R or the LFE) or the interference. */
 class RoomLayerView : public juce::Component
 {
 public:
     RoomLayerView();
     void resized() override;
 
-    /** The room and its results (nothing to show when either is null). */
-    void setData (const ProRoom&, const RoomPaths*, const RoomResult*);
+    /** The room and its results (nothing to show when either is null), in a lens, with a part of the bass for the coverage. */
+    void setData (const ProRoom&, const RoomPaths*, const RoomResult*, int lens, int part);
     void setHovered (int seat)                      { if (seat != hovered) { hovered = seat; repaint(); } }
 
     void paint (juce::Graphics&) override;
@@ -117,6 +140,7 @@ public:
 private:
     ProRoom room;
     bool hasData = false;
+    int lens = RoomResult::coverageLens, part = RoomResult::allParts;
     int columns = 0, rows = 0;
     std::vector<int> index;
     std::vector<std::array<double, 3>> nodes, seats;
@@ -231,6 +255,7 @@ private:
 
     void selectRoom (int index);
     void configChanged();
+    void showSelected();            // the selected room's results to the two views, in the lens chosen
     void startPreparing (const std::vector<double>& grid);
     void exportConfig();
     void importConfig();
@@ -261,7 +286,16 @@ private:
         void reset()    { inertia.reset(); slow = shown = -1.0; }
     };
     std::array<Smoothed, ProRooms::count> roomSmooth;
+    std::array<std::array<Smoothed, RoomResult::numLenses>, ProRooms::count> lensSmooth;
+    std::array<std::array<double, RoomResult::numLenses>, ProRooms::count> shownLens {};
     Smoothed proSmooth;
+
+    // The lens: where the bass goes (for the venue: all of it, L C R alone or the LFE alone),
+    // or the interference between the LFE and L C R (for the mix)
+    int lens = RoomResult::coverageLens, part = RoomResult::allParts;
+    std::array<juce::TextButton, RoomResult::numLenses> lensButtons;
+    std::array<juce::TextButton, RoomResult::numParts> partButtons;
+    juce::Rectangle<int> lensRow;
     bool hasBass = false, ready = false;
 
     // Layout

@@ -95,6 +95,7 @@ struct ProRoom
     std::array<ProSpeaker, 3> lcr;      // L, C, R
     bool linkLR = true;                 // R mirrors L across the room's centre line
     bool dualLCR = false;               // a second L C R set, back to back: mirrored through the centre of the room
+    bool screen = true;                 // a screen drawn on the front wall (a cinema); only a mark in the 3D view
     int numSubs = 2;
     std::array<ProSpeaker, maxSubs> subs;
     bool fillsOn = false;
@@ -183,8 +184,8 @@ struct ProRooms
     static ProRooms defaults();     // a small, a medium and a large room
 
     // 2: positions as a share of the room, links, materials; 3: shape, layouts, second L C R;
-    // 4: people, routing (centre %, divergences), more shapes
-    static constexpr int formatVersion = 4;
+    // 4: people, routing (centre %, divergences), more shapes; 5: the screen can be removed
+    static constexpr int formatVersion = 5;
     std::string toText() const;
     static bool fromText (const std::string&, ProRooms& out);    // false: not a Room Sim Pro file; `out` untouched
 

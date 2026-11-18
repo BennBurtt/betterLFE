@@ -75,9 +75,9 @@ struct RoomResult
     int worstProbe = -1;                                  // the extra point that scored lowest, if one did below every seat
 
     // Three layers of the bass, for the layered view: infra (under 20 Hz, ISO 7196;
-    // not in the score), very low (20-60 Hz) and low (60-120 Hz, up to the LFE's
-    // upper limit). The change of each against the approved mix, in dB; NaN where
-    // the mix has nothing in that layer.
+    // rated in Room Sim Pro only), very low (20-60 Hz) and low (60-120 Hz, up to
+    // the LFE's upper limit). Here the interference in each against the approved
+    // mix, in dB (the coverage is below); NaN where the mix has nothing in that layer.
     static constexpr int numLayers = 3;
     static constexpr double layerEdgesHz[numLayers + 1] = { 10.0, 20.0, 60.0, 120.0 };
     std::array<std::vector<double>, numLayers> seatLayerDb, gridLayerDb;
@@ -86,8 +86,27 @@ struct RoomResult
     // loudness (phon, the loudest band, ISO 226), and what is felt more than
     // heard: the level under 40 Hz, infra included (dB SPL)
     std::vector<double> seatBassDb, seatHeardPhon, seatFeltDb;
-    std::vector<double> seatLevelDb;            // the bass level at the seat against the stage, 20-120 Hz (coverage)
+    std::vector<double> seatLevelDb;            // the bass level at the seat against the approved mix, 20-120 Hz (coverage)
     double combinedScore = 100.0;                         // bass robustness x room score / 100
+
+    // Two lenses on a room (Room Sim Pro shows them apart; the room score above
+    // joins them). Coverage: where the bass goes, the level against the approved
+    // mix, room and placement included: for the venue. Interference: what the
+    // cross between the LFE and L C R does, against what it did in the approved
+    // mix, every speaker's own level and place left out: for the mix.
+    enum Lens { coverageLens, interferenceLens, numLenses };
+    std::array<std::vector<double>, numLenses> seatLensPenalty, probeLensPenalty;   // 0..1
+    std::array<double, numLenses> lensScore { { 100.0, 100.0 } }, lensP10 { { 100.0, 100.0 } }, lensWorstPointScore { { 100.0, 100.0 } };
+    std::array<int, numLenses> lensWorstProbe { { -1, -1 } };
+
+    // The bass split in its parts: all of it, L C R alone (every speaker playing
+    // them), the LFE alone (subwoofers, LFE fills). The level of each against the
+    // same part in the approved mix, 20-120 Hz per seat and per layer on the seats
+    // and the grid (seatLayerDb and gridLayerDb above are the interference).
+    // NaN where the mix has nothing of that part.
+    enum Part { allParts, lcrPart, lfePart, numParts };
+    std::array<std::vector<double>, numParts> seatPartDb;
+    std::array<std::array<std::vector<double>, numLayers>, numParts> seatCoverageLayerDb, gridCoverageLayerDb;
 };
 
 /** A room's calibrated paths, per seat and grid point, as averages over the band of that point.
@@ -116,18 +135,15 @@ struct RoomPaths
     std::vector<int> gridIndex;
     std::vector<std::array<double, 3>> gridPositions;
 
-    // The room as set up normally (no level offsets), calibrated: what each seat
-    // is measured against, so that the room's own colour is left out but a
-    // speaker set off its level is not. Empty: the same as p.
+    // Room Sim Pro: the room as set up normally (no level offsets), calibrated:
+    // used to place the extra points. Empty in Room Sim.
     std::vector<ChannelMatrix> pRef;
 
-    // false (Room Sim): only the interaction between the screen channels and
-    // the LFE counts; the colour each path gets from the room is left out.
-    // true (Room Sim Pro): the screen channels as mixed are the reference:
-    // the LFE's bass is expected where the screen's bass is, so the LFE path
-    // heard differently from the screen's (subwoofers placed elsewhere, set
-    // off their level, in another mode) counts, in proportion to the bass the
-    // mix gives the LFE.
+    // false (Room Sim): the room score is the interference between L C R and
+    // the LFE only; the colour each path gets from the room is left out.
+    // true (Room Sim Pro): the room score joins the interference and the
+    // coverage (the level against the approved mix, room and placement
+    // included), and the infra under 20 Hz is rated too.
     bool lcrReference = false;
 
     /** Adds h_a conj(h_b) (times `weight`) to one band point of a seat. */

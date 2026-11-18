@@ -231,6 +231,7 @@ std::vector<ProVenue> ProRoom::venues()
     {
         ProRoom r = fromSpec ({ v.name, v.name, v.length, v.width, v.height, 0.6 });
         r.shape = v.shape;
+        r.screen = false;           // not a cinema
         r.acoustics = 1;
         r.materials = v.materials;
         r.people = v.people;
@@ -268,6 +269,7 @@ std::vector<ProVenue> ProRoom::venues()
     {
         ProRoom r = fromSpec ({ "In the round, two L C R back to back", "In the round", 24.0, 24.0, 8.0, 0.6 });
         r.shape = round;
+        r.screen = false;
         r.acoustics = 1;
         r.materials = materialsOf ("plasterboard", "plasterboard", "plasterboard", "plasterboard", "concrete", "plasterboard");
         r.people = standingPeople;
@@ -796,7 +798,7 @@ bool ProRoom::operator== (const ProRoom& o) const
 {
     return name == o.name && counted == o.counted && shape == o.shape && same (length, o.length) && same (width, o.width) && same (height, o.height)
              && acoustics == o.acoustics && same (rt60, o.rt60) && materials == o.materials
-             && lcr == o.lcr && linkLR == o.linkLR && dualLCR == o.dualLCR && numSubs == o.numSubs && subs == o.subs
+             && lcr == o.lcr && linkLR == o.linkLR && dualLCR == o.dualLCR && screen == o.screen && numSubs == o.numSubs && subs == o.subs
              && fillsOn == o.fillsOn && linkFills == o.linkFills && numFills == o.numFills && fills == o.fills
              && same (centrePercent, o.centrePercent) && same (frontDivergence, o.frontDivergence) && same (rearDivergence, o.rearDivergence)
              && same (frDivergence, o.frDivergence)
@@ -889,7 +891,8 @@ std::string ProRooms::toText() const
                 << ProRoom::materialList()[(size_t) std::clamp (r.materials[(size_t) m], 0, (int) ProRoom::materialList().size() - 1)].key << "\n";
 
         out << k << "linkLR = " << (r.linkLR ? 1 : 0) << "\n"
-            << k << "dualLCR = " << (r.dualLCR ? 1 : 0) << "\n";
+            << k << "dualLCR = " << (r.dualLCR ? 1 : 0) << "\n"
+            << k << "screen = " << (r.screen ? 1 : 0) << "\n";
 
         const char* lcrNames[] = { "L", "C", "R" };
 
@@ -984,6 +987,7 @@ bool ProRooms::fromText (const std::string& text, ProRooms& out)
 
         reader.get (k + "linkLR", r.linkLR);
         reader.get (k + "dualLCR", r.dualLCR);
+        reader.get (k + "screen", r.screen);
 
         const char* lcrNames[] = { "L", "C", "R" };
 

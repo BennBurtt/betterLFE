@@ -325,6 +325,34 @@ namespace
 
             { "dip -9 dB", "creux -9 dB" }, { "+9 dB boost", "boost +9 dB" },
 
+            // The two lenses of Room Sim Pro
+            { "Screen", "Écran" },
+            { "A screen drawn on the front wall, for a cinema. Only a mark: it changes nothing in the computation.",
+              "Un écran dessiné sur le mur avant, pour un cinéma. Simple repère : il ne change rien au calcul." },
+            { "Where the bass goes", "Répartition du grave" }, { "LFE / L C R interference", "Interférences LFE / LCR" },
+            { "For the venue: the bass level at every point against the approved mix, the room and the placement of every speaker "
+              "included. Blue: the bass is lost; red: too much. For placing the subwoofers, the fills and L C R.",
+              "Pour le lieu : le niveau du grave en chaque point face au mix validé, salle et placement de chaque enceinte compris. "
+              "Bleu : le grave se perd ; rouge : il y en a trop. Pour placer les caissons, les rappels et les LCR." },
+            { "For the mix: what the LFE adds to or takes from L C R at every point, the room's modes included, against what it "
+              "did in the approved mix. A speaker placed or set badly is not in it; an LFE that shares nothing with L C R shows nothing.",
+              "Pour le mix : ce que le LFE ajoute aux LCR ou leur retire en chaque point, modes de la salle compris, face à ce qu'il "
+              "faisait dans le mix validé. Une enceinte mal placée ou mal réglée n'y entre pas ; un LFE qui ne partage rien avec les LCR ne montre rien." },
+            { "All", "Tout" }, { "All the bass heard.", "Tout le grave entendu." },
+            { "L C R alone, through every speaker that plays them (Lc / Rc fills included): a hole here comes from L C R or the fills.",
+              "Les LCR seuls, par toutes les enceintes qui les jouent (rappels Lc / Rc compris) : un trou ici vient des LCR ou des rappels." },
+            { "The LFE alone, through the subwoofers and the LFE fills: a hole here comes from them.",
+              "Le LFE seul, par les caissons et les rappels LFE : un trou ici vient d'eux." },
+            { "Heads: the bass they get against the approved mix", "Têtes : le grave reçu face au mix validé" },
+            { "Heads: the interference against the approved mix", "Têtes : l'interférence face au mix validé" },
+            { "Coverage", "Répartition" }, { "Interference", "Interférences" }, { "interference ", "interférence " },
+            { "all of it", "tout" },
+            { "Where the bass goes, against the approved mix", "Répartition du grave face au mix validé" },
+            { "Interference between the LFE and L C R, against the approved mix", "Interférence entre le LFE et les LCR, face au mix validé" },
+            { "Drag to turn, wheel to zoom, double-click to reset.", "Glisser pour tourner, molette pour zoomer, double-clic pour revenir." },
+            { "Drag to turn, wheel to zoom, double-click to reset. Point at a head for its details.  White: L C R   Orange: subwoofers   Blue: fills",
+              "Glisser pour tourner, molette pour zoomer, double-clic pour revenir. Pointer une tête pour son détail.  Blanc : LCR   Orange : caissons   Bleu : rappels" },
+
             // The fifteen cinema rooms
             { "Corridor room, live", "Salle couloir, vive" }, { "Small multiplex, live", "Petit multiplexe, vif" },
             { "Old cinema, near-cubic, live", "Ancien cinéma, presque cubique, vif" }, { "Narrow 120 seats", "Étroite 120 places" },

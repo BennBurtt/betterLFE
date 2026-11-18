@@ -380,10 +380,12 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
     RoomPaths::ChannelMatrix flat;
     flat.fill (cd (1.0, 0.0));
 
-    // The mix as approved, per band: as heard (all crosses) and with the LFE added in power
-    double approved[numBands] = {}, approvedPower[numBands] = {};
+    // The mix as approved, per band: as heard (all crosses), with the LFE added in
+    // power (no cross between the LFE and L C R), and its two parts on their own
+    // (L C R with their own crosses, the LFE)
+    double approved[numBands] = {}, approvedPower[numBands] = {}, approvedLcr[numBands] = {}, approvedLfe[numBands] = {};
     constexpr int numLayers = RoomResult::numLayers;
-    double approvedLayer[numLayers] = {}, approvedLayerPower[numLayers] = {};
+    double approvedLayer[numLayers] = {}, approvedLayerPower[numLayers] = {}, approvedLcrLayer[numLayers] = {}, approvedLfeLayer[numLayers] = {};
 
     const auto layerOf = [] (double hz)
     {
@@ -399,19 +401,25 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
         const auto g = (size_t) points[i];
         const int b = bandOf (a.grid[g]);
         const int layer = layerOf (a.grid[g]);
+        const double hz = a.grid[g];
+        const double lcr = played (flat, mix[i], true), lfe = mix[i][15].real();
+        const double all = std::max (0.0, played (flat, mix[i], false));
 
         if (layer >= 0)
         {
-            approvedLayerPower[layer] += a.grid[g] * (played (flat, mix[i], true) + mix[i][15].real());
-            approvedLayer[layer] += a.grid[g] * std::max (0.0, played (flat, mix[i], false));
+            approvedLayerPower[layer] += hz * (lcr + lfe);
+            approvedLayer[layer] += hz * all;
+            approvedLcrLayer[layer] += hz * lcr;
+            approvedLfeLayer[layer] += hz * lfe;
         }
 
         if (b < 0)
             continue;
 
-        const double hz = a.grid[g];
-        approvedPower[b] += hz * (played (flat, mix[i], true) + mix[i][15].real());
-        approved[b] += hz * std::max (0.0, played (flat, mix[i], false));
+        approvedPower[b] += hz * (lcr + lfe);
+        approved[b] += hz * all;
+        approvedLcr[b] += hz * lcr;
+        approvedLfe[b] += hz * lfe;
     }
 
     double approvedTotal = 0.0, approvedPowerTotal = 0.0;
@@ -450,6 +458,12 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
     for (auto& v : r.seatLayerDb)   v.assign ((size_t) room.seats, nothing);
     for (auto& v : r.gridLayerDb)   v.assign ((size_t) room.gridPoints, nothing);
 
+    for (auto& part : r.seatCoverageLayerDb)    for (auto& v : part) v.assign ((size_t) room.seats, nothing);
+    for (auto& part : r.gridCoverageLayerDb)    for (auto& v : part) v.assign ((size_t) room.gridPoints, nothing);
+    for (auto& v : r.seatPartDb)                v.assign ((size_t) room.seats, nothing);
+    for (auto& v : r.seatLensPenalty)           v.assign ((size_t) room.seats, 0.0);
+    for (auto& v : r.probeLensPenalty)          v.assign ((size_t) room.probes, 0.0);
+
     r.seatBassDb.assign ((size_t) room.seats, 0.0);
     r.seatLevelDb.clear();
     r.seatHeardPhon.assign ((size_t) room.seats, 0.0);
@@ -468,10 +482,25 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
         return levelBand < 0 ? -100.0 : t.bandSplDb[(size_t) levelBand] + 10.0 * std::log10 ((power + 1e-60) / (approved[levelBand] + 1e-60));
     };
 
+    // Each seat (then the extra points, then the floor grid). The power heard
+    // is split in three exact parts (sum over a, b of P_ab x S_ab):
+    //   L C R: the three channels through every speaker that plays them, their
+    //          crosses with each other included (fills against the speaker they
+    //          repeat, divergence);
+    //   LFE:   the LFE through every speaker that plays it (subwoofers, LFE fills);
+    //   the cross between the LFE and L C R: 2 Re sum_c P_c,LFE S_c,LFE, zero
+    //          when the mix's LFE shares nothing with L C R.
+    // Interference (lens 2) is what the cross does: the level heard against the
+    // two parts added in power, against the same ratio in the approved mix, so a
+    // speaker placed or set badly is left out. Coverage (lens 1) is the level
+    // heard against the approved mix, the room's colour and the placement
+    // included, also for each part on its own (where the L C R or the LFE goes).
+    const double partFloor = 1e-6 * (approvedPowerTotal + 1e-60);
+
     for (int seat = 0; seat < room.seats + room.probes + room.gridPoints; ++seat)
     {
-        double actual[numBands] = {}, inPower[numBands] = {};
-        double actualLayer[numLayers] = {}, inPowerLayer[numLayers] = {}, felt = 0.0;
+        double actual[numBands] = {}, inPower[numBands] = {}, lcrBand[numBands] = {}, lfeBand[numBands] = {};
+        double actualLayer[numLayers] = {}, inPowerLayer[numLayers] = {}, lcrLayer[numLayers] = {}, lfeLayer[numLayers] = {}, felt = 0.0;
 
         for (size_t i = 0; i < points.size(); ++i)
         {
@@ -483,34 +512,18 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
                 continue;
 
             const double hz = a.grid[g];
-            const size_t at = (size_t) seat * points.size() + i;
-            const auto& paths = room.p[at];
-            const auto& reference = room.pRef.empty() ? paths : room.pRef[at];
+            const auto& paths = room.p[(size_t) seat * points.size() + i];
             const auto& x = mix[i];
-            const double screenPart = played (reference, x, true);
-            double lfePart = reference[15].real() * x[15].real();
-
-            if (room.lcrReference)
-            {
-                // Pro: the LFE's bass expected where the screen's bass is, in the mix's own L C R proportions
-                double share = 0.0, total = 0.0;
-
-                for (int c = 0; c < 3; ++c)
-                {
-                    share += reference[(size_t) (c * nc + c)].real() * x[(size_t) (c * nc + c)].real();
-                    total += x[(size_t) (c * nc + c)].real();
-                }
-
-                const double screenMean = (reference[0].real() + reference[5].real() + reference[10].real()) / 3.0;
-                lfePart = x[15].real() * (total > 1e-30 ? share / total : screenMean);
-            }
-
+            const double lcr = played (paths, x, true);
+            const double lfe = paths[15].real() * x[15].real();
             const double here = std::max (0.0, played (paths, x, false));
 
             if (layer >= 0)
             {
-                inPowerLayer[layer] += hz * (screenPart + lfePart);
+                inPowerLayer[layer] += hz * (lcr + lfe);
                 actualLayer[layer] += hz * here;
+                lcrLayer[layer] += hz * lcr;
+                lfeLayer[layer] += hz * lfe;
             }
 
             if (hz < 40.0)
@@ -519,22 +532,35 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
             if (b < 0)
                 continue;
 
-            inPower[b] += hz * (screenPart + lfePart);
+            inPower[b] += hz * (lcr + lfe);
             actual[b] += hz * here;
+            lcrBand[b] += hz * lcr;
+            lfeBand[b] += hz * lfe;
         }
 
-        // Each layer against the stage, where the mix has something in it
-        double layerDb[numLayers];
+        // Each layer: the interference, and the coverage of the whole and of each part
+        double layerDb[numLayers], coverageDb[RoomResult::numParts][numLayers];
 
         for (int l = 0; l < numLayers; ++l)
-            layerDb[l] = approvedLayerPower[l] > 1e-6 * (approvedPowerTotal + 1e-60) && inPowerLayer[l] > 0.0
-                           ? limitedDb ((actualLayer[l] / inPowerLayer[l]) / (approvedLayer[l] / approvedLayerPower[l] + 1e-30))
-                           : nothing;
+        {
+            const bool inMix = approvedLayerPower[l] > partFloor && inPowerLayer[l] > 0.0;
+            layerDb[l] = inMix ? limitedDb ((actualLayer[l] / inPowerLayer[l]) / (approvedLayer[l] / approvedLayerPower[l] + 1e-30)) : nothing;
+            coverageDb[RoomResult::allParts][l] = inMix && approvedLayer[l] > partFloor ? limitedDb (actualLayer[l] / approvedLayer[l]) : nothing;
+            coverageDb[RoomResult::lcrPart][l] = inMix && approvedLcrLayer[l] > partFloor ? limitedDb (lcrLayer[l] / approvedLcrLayer[l]) : nothing;
+            coverageDb[RoomResult::lfePart][l] = inMix && approvedLfeLayer[l] > partFloor ? limitedDb (lfeLayer[l] / approvedLfeLayer[l]) : nothing;
+        }
 
         if (seat >= room.seats + room.probes)
         {
+            const auto k = (size_t) (seat - room.seats - room.probes);
+
             for (int l = 0; l < numLayers; ++l)
-                r.gridLayerDb[(size_t) l][(size_t) (seat - room.seats - room.probes)] = layerDb[l];
+            {
+                r.gridLayerDb[(size_t) l][k] = layerDb[l];
+
+                for (int part = 0; part < RoomResult::numParts; ++part)
+                    r.gridCoverageLayerDb[(size_t) part][(size_t) l][k] = coverageDb[part][l];
+            }
 
             continue;
         }
@@ -542,14 +568,12 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
         // Room Sim Pro: the infra (under 20 Hz) is rated too, with the threshold
         // proposed by Moller & Pedersen (2004) below 20 Hz: 97 dB at 10 Hz,
         // rising 11.9 dB per octave towards lower frequencies (about 97 dB(G),
-        // ISO 7196), listeners spread by 5 dB as above 20 Hz. Its contours of
-        // equal loudness are only tentative ("with great reservation"), so the
-        // dB that double its loudness are those of ISO 226:2023 at 20 Hz, the
-        // lowest standardised: infra is more compressed still, so this counts
-        // an infra change at least as much as one at 20 Hz.
+        // ISO 7196). The dB that double the loudness are taken from ISO 226 at
+        // 20 Hz, the lowest standardised: infra is more compressed still, so this
+        // counts an infra change at least as much as one at 20 Hz.
         double infraWeight = 0.0, infraRated = 0.0, infraCoverage = 0.0, infraHeard = 0.0;
 
-        if (room.lcrReference && approvedLayerPower[0] > 1e-6 * (approvedPowerTotal + 1e-60) && inPowerLayer[0] > 0.0)
+        if (room.lcrReference && approvedLayerPower[0] > partFloor && inPowerLayer[0] > 0.0)
         {
             double centre = 0.0, weight = 0.0;
 
@@ -580,22 +604,26 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
             infraWeight = approvedHere * infraHeard;
         }
 
-        // What the interaction adds at this seat, against what it added on the
-        // stage. Audibility and loudness are taken at the level the bass has
-        // at this seat, room peaks and dips included: the louder the
-        // listening level, the more of what the room does is heard.
+        // What the interference adds at this seat, against what it added in the
+        // approved mix; and how far the level is from the approved mix. Both
+        // judged the same way: audibility and loudness at the level the bass has
+        // at this seat, room peaks and dips included.
         double weights[numBands] = {}, rated[numBands] = {}, covered[numBands] = {}, weightTotal = 0.0, heardAtAll = 0.0;
-        double totalActual = 0.0, totalPower = 0.0;
+        double totalActual = 0.0, totalPower = 0.0, totalLcr = 0.0, totalLfe = 0.0, approvedLcrTotal = 0.0, approvedLfeTotal = 0.0;
 
         for (int b = 0; b < numBands; ++b)
         {
             totalActual += actual[b];
             totalPower += inPower[b];
+            totalLcr += lcrBand[b];
+            totalLfe += lfeBand[b];
+            approvedLcrTotal += approvedLcr[b];
+            approvedLfeTotal += approvedLfe[b];
 
             if (inPower[b] <= 0.0 || approvedPower[b] <= 0.0)
                 continue;
 
-            const double approvedHere = inPower[b] * approved[b] / approvedPower[b];     // this seat, with the stage's interaction
+            const double approvedHere = inPower[b] * approved[b] / approvedPower[b];     // this seat, with the approved mix's interference
             const double change = limitedDb ((actual[b] / inPower[b]) / (approved[b] / approvedPower[b] + 1e-30));
             const double spl = splAt (b, std::max (approvedHere, actual[b]));
             const double heard = audible (b, spl);
@@ -604,8 +632,6 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
 
             rated[b] = std::clamp ((std::abs (change) - allowed) / (doubling - allowed), 0.0, 1.0);
 
-            // Pro: coverage, the bass level at this seat against the stage, room colour included
-            // (back rows losing the bass, holes, boosts), judged the same way
             const double level = limitedDb (actual[b] / (approved[b] + 1e-60));
             covered[b] = std::clamp ((std::abs (level) - allowed) / (doubling - allowed), 0.0, 1.0);
             weights[b] = approvedHere * heard;
@@ -613,34 +639,41 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
             heardAtAll = std::max (heardAtAll, heard);
         }
 
-        double penalty = 0.0, coverage = 0.0;
+        double interference = 0.0, coverage = 0.0;
         weightTotal += infraWeight;
         heardAtAll = std::max (heardAtAll, infraHeard);
 
         for (int b = 0; b < numBands; ++b)
         {
-            penalty += weights[b] / (weightTotal + 1e-60) * rated[b];
+            interference += weights[b] / (weightTotal + 1e-60) * rated[b];
             coverage += weights[b] / (weightTotal + 1e-60) * covered[b];
         }
 
-        penalty += infraWeight / (weightTotal + 1e-60) * infraRated;
-        coverage += infraWeight / (weightTotal + 1e-60) * infraCoverage;
+        interference = std::min (1.0, interference + infraWeight / (weightTotal + 1e-60) * infraRated);
+        coverage = std::min (1.0, coverage + infraWeight / (weightTotal + 1e-60) * infraCoverage);
 
-        // Pro: the interaction and the coverage, both risks
-        if (room.lcrReference)
-            penalty = 1.0 - (1.0 - std::min (penalty, 1.0)) * (1.0 - std::clamp (tuning.coverageWeight, 0.0, 1.0) * std::min (coverage, 1.0));
-
+        // Room Sim: the interference only. Room Sim Pro: both, as two risks
+        const double penalty = room.lcrReference ? 1.0 - (1.0 - interference) * (1.0 - std::clamp (tuning.coverageWeight, 0.0, 1.0) * coverage)
+                                                 : interference;
         const double seatPenalty = std::min (penalty, 1.0) * heardAtAll;
         const double seatChange = totalPower > 0.0 ? limitedDb ((totalActual / totalPower) / (approvedTotal / (approvedPowerTotal + 1e-60) + 1e-30))
                                                    : 0.0;
 
         if (seat < room.seats)
         {
-            r.seatPenalty[(size_t) seat] = seatPenalty;
-            r.seatChangeDb[(size_t) seat] = seatChange;
+            const auto k = (size_t) seat;
+            r.seatPenalty[k] = seatPenalty;
+            r.seatChangeDb[k] = seatChange;
+            r.seatLensPenalty[RoomResult::coverageLens][k] = coverage * heardAtAll;
+            r.seatLensPenalty[RoomResult::interferenceLens][k] = interference * heardAtAll;
 
             for (int l = 0; l < numLayers; ++l)
-                r.seatLayerDb[(size_t) l][(size_t) seat] = layerDb[l];
+            {
+                r.seatLayerDb[(size_t) l][k] = layerDb[l];
+
+                for (int part = 0; part < RoomResult::numParts; ++part)
+                    r.seatCoverageLayerDb[(size_t) part][(size_t) l][k] = coverageDb[part][l];
+            }
 
             // What reaches this head: level, loudness of its loudest band, level under 40 Hz
             double phon = -100.0;
@@ -649,15 +682,21 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
                 if (actual[b] > 0.0 && approved[b] > 0.0)
                     phon = std::max (phon, PlaybackSimulator::iso226Phon (PlaybackSimulator::bandCentreHz[b], splAt (b, actual[b])));
 
-            r.seatBassDb[(size_t) seat] = splOfPower (totalActual);
+            r.seatBassDb[k] = splOfPower (totalActual);
             r.seatLevelDb.push_back (limitedDb (totalActual / (approvedTotal + 1e-60)));
-            r.seatHeardPhon[(size_t) seat] = phon;
-            r.seatFeltDb[(size_t) seat] = splOfPower (felt);
+            r.seatPartDb[RoomResult::allParts][k] = r.seatLevelDb.back();
+            r.seatPartDb[RoomResult::lcrPart][k] = approvedLcrTotal > partFloor ? limitedDb (totalLcr / approvedLcrTotal) : nothing;
+            r.seatPartDb[RoomResult::lfePart][k] = approvedLfeTotal > partFloor ? limitedDb (totalLfe / approvedLfeTotal) : nothing;
+            r.seatHeardPhon[k] = phon;
+            r.seatFeltDb[k] = splOfPower (felt);
         }
         else
         {
-            r.probePenalty[(size_t) (seat - room.seats)] = seatPenalty;
-            r.probeChangeDb[(size_t) (seat - room.seats)] = seatChange;
+            const auto k = (size_t) (seat - room.seats);
+            r.probePenalty[k] = seatPenalty;
+            r.probeChangeDb[k] = seatChange;
+            r.probeLensPenalty[RoomResult::coverageLens][k] = coverage * heardAtAll;
+            r.probeLensPenalty[RoomResult::interferenceLens][k] = interference * heardAtAll;
         }
     }
 
@@ -665,19 +704,31 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
         return r;
 
     // The score 10 % of the seats fall below, and the worst point found (extra points included)
+    const auto worstOf = [] (const std::vector<double>& seatPenalties, const std::vector<double>& probePenalties,
+                             double& p10, double& worstPoint, int& worstProbe)
     {
-        auto penalties = r.seatPenalty;
+        auto penalties = seatPenalties;
         std::sort (penalties.begin(), penalties.end(), std::greater<double>());
         const size_t at = std::min (penalties.size() - 1, (size_t) std::floor (0.1 * (double) penalties.size()));
-        r.p10Score = 100.0 * (1.0 - penalties[at]);
-        r.worstPointScore = 100.0 * (1.0 - penalties.front());
+        p10 = 100.0 * (1.0 - penalties[at]);
+        worstPoint = 100.0 * (1.0 - penalties.front());
+        worstProbe = -1;
 
-        for (size_t k = 0; k < r.probePenalty.size(); ++k)
-            if (100.0 * (1.0 - r.probePenalty[k]) < r.worstPointScore)
+        for (size_t k = 0; k < probePenalties.size(); ++k)
+            if (100.0 * (1.0 - probePenalties[k]) < worstPoint)
             {
-                r.worstPointScore = 100.0 * (1.0 - r.probePenalty[k]);
-                r.worstProbe = (int) k;
+                worstPoint = 100.0 * (1.0 - probePenalties[k]);
+                worstProbe = (int) k;
             }
+    };
+
+    worstOf (r.seatPenalty, r.probePenalty, r.p10Score, r.worstPointScore, r.worstProbe);
+
+    for (int lens = 0; lens < RoomResult::numLenses; ++lens)
+    {
+        worstOf (r.seatLensPenalty[(size_t) lens], r.probeLensPenalty[(size_t) lens], r.lensP10[(size_t) lens],
+                 r.lensWorstPointScore[(size_t) lens], r.lensWorstProbe[(size_t) lens]);
+        r.lensScore[(size_t) lens] = roomScoreOf (r.seatLensPenalty[(size_t) lens], tuning);
     }
 
     auto sorted = r.seatChangeDb;
