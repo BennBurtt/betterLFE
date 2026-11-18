@@ -4,6 +4,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "Lang.h"
 #include "../core/AlertTracker.h"
 #include "../core/LfeEngine.h"
 #include "../core/PlaybackSim.h"

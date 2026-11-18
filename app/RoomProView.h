@@ -11,6 +11,7 @@
 #include "../core/RoomPro.h"
 
 #include <array>
+#include <deque>
 #include <functional>
 #include <future>
 #include <memory>
@@ -128,8 +129,19 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent&) override;
+    bool keyPressed (const juce::KeyPress&) override;
+
+    /** Undo and redo the changes to the rooms (Option-Z, Option-Shift-Z), up to 30 steps. */
+    bool undo();
+    bool redo();
 
 private:
+    static constexpr size_t maxUndo = 30;
+    void rememberForUndo();
+    void restore (const ProRooms&);
+    std::deque<ProRooms> undoStack, redoStack;
+    double lastEditAt = 0.0;
+
     void selectRoom (int index);
     void configChanged();
     void startPreparing (const std::vector<double>& grid);
@@ -159,7 +171,7 @@ private:
     Room3DView view3d;
     RoomProEditor editor;
     juce::Viewport editorViewport;
-    juce::TextButton saveButton { "Save config..." }, loadButton { "Load config..." };
+    juce::TextButton saveButton { tr ("Save config...") }, loadButton { tr ("Load config...") };
     std::unique_ptr<juce::FileChooser> chooser;
 };
 

@@ -576,6 +576,31 @@ la main (exposition, défilé, galerie, tente, église, salon, régie), enceinte
 et rappels placés où l'on veut. **Son score n'entre pas dans le score global** ;
 il a le sien.
 
+**Chaque canal joue depuis ses propres enceintes.** L'analyse fournit la
+matrice interspectrale complète de L, C, R et du LFE (puissances et
+interspectres complexes de chaque paire). À chaque place, la salle est une
+matrice 4 × 4 de produits de chemins `H_a · conj(H_b)` (a, b ∈ {L, C, R, LFE}),
+moyennée sur la bande de chaque point ; la puissance entendue est
+`Σ_ab P_ab · S_ab`, où S est la matrice du mix. Ainsi, du grave seulement dans L
+n'est entendu que là où porte l'enceinte L : avec un LFE identique à L et un
+caisson à droite, les places de gauche bougent de 4,7 dB, celles de droite de
+0,8 dB (vérifié). Room Sim joue aussi chaque canal d'écran par sa propre
+enceinte. En Pro, la référence est le mix d'écran tel quel ; le grave du LFE
+y est attendu là où est celui de l'écran, dans les proportions L / C / R du
+mix. Étalonnage : chaque groupe d'enceintes (L, C, R, caissons) est réglé
+séparément au niveau de la régie ; les rappels gardent leur niveau face à
+l'enceinte d'écran de leur côté.
+
+**Divergence (comme le panner de Pro Tools).** Une matrice de routage répartit
+les canaux sur les groupes d'enceintes, en puissance : *Centre %* (part de C
+jouée par l'enceinte centrale, le reste en centre fantôme dans L et R, −3 dB
+chacun à 0 %) ; *Front* (100 : chaque canal sur son enceinte ; 0 : chaque canal
+réparti également sur L, C et R) ; *Rear* (100 : les rappels gauches jouent
+Lc, les droits Rc ; plus bas, les deux côtés partagent leurs signaux) ;
+*F / R* (plus bas, une part des canaux d'écran part vers les rappels). Les
+rappels jouent Lc / Rc = L ou R + C à −3 dB, ou le LFE. Vérifié : routage
+unitaire à 100, −3 dB en L et R à Centre 0 %, 1/√3 partout à Front 0.
+
 **Même note que Room Sim, une référence plus exigeante.** Même modèle modal
 (modes jusqu'à 160 Hz), même note place par place et même score de salle
 (`RoomSimulator::rate`), mêmes réglages Dev, même niveau d'écoute, même
@@ -651,9 +676,23 @@ Décroissance de chaque mode par les surfaces qu'il touche, comme pour la
 boîte, la paroi pesée par la part du mode qui la longe :
 `δ = c / (16 V) · Σ (moyenne de ψ² sur la surface / moyenne dans le volume) · S · α'`
 (rapport 1 / (1 − m²/j'²) pour la paroi, plafonné à 4 ; 2 ou 1 pour le sol et
-le plafond). Une salle « arrondie » (coins arrondis, ovale) n'a pas de modes
-en forme close ; elle demanderait un calcul numérique de la forme du sol, non
-fait à ce jour.
+le plafond).
+
+**Sols ovale, à coins arrondis, en L : calcul numérique.** La hauteur reste
+séparable (sol et plafond plats) ; les modes du plan du sol sont trouvés par
+Rayleigh-Ritz : les modes de Neumann (parois rigides) rendent stationnaire
+`∫ ∇u·∇v = k² ∫ u v` sur le sol, sans condition à imposer à la paroi
+(naturelle). Fonctions d'essai : les modes en cosinus du rectangle englobant
+(jusqu'à 1,5 fois le nombre d'onde gardé, 700 au plus) ; intégrales exactes
+en travers (chaque colonne du sol est un intervalle), règle du point milieu
+en long ; puis `K c = k² M c`, résolu par Cholesky et réduction de Householder
++ QL implicite (EISPACK tred2 / tql2). Les fonctions presque nulles sur le sol
+(norme réelle < 0,5) sont écartées comme parasites. Vérifié : un « ovale »
+de 10 × 10 m (un cercle) donne son premier mode à 20,10 Hz, la valeur exacte
+de Bessel. Formes : ovale inscrit, coins arrondis (rayon = 1/4 du petit côté),
+L (le quart arrière droit retiré). Temps : 0,6 à 0,8 s pour 20 × 13 m. La
+décroissance de chaque mode suit la part du mode le long de la paroi, comme
+pour la salle ronde.
 
 **On règle d'abord la salle, puis on place les enceintes.** Les positions sont
 gardées en proportion de la salle (le rang de sièges aussi) et affichées en
@@ -701,8 +740,6 @@ les modes se recouvrent et le résultat est une moyenne.
 | Dalles de plafond acoustique suspendues | 0,25 | 0,50 | estimation (0,3 à 0,7 à 125 Hz) |
 | Laine minérale 100 mm au mur | 0,15 | 0,35 | estimation (données types) |
 | Pièges à basses (membranes accordées) | 0,60 | 0,70 | estimation (données types) |
-| Public en fauteuils rembourrés | 0,30 | 0,60 | [34], 63 Hz divisé par 2 |
-| Public debout (environ 1 par m²) | 0,10 | 0,20 | estimation |
 | Bardage ou toit en tôle d'acier | 0,20 | 0,15 | estimation (loi de masse) |
 | Toile de tente (membrane PVC) | 0,80 | 0,70 | estimation (loi de masse) |
 | Côté ouvert (pas de mur) | 1,00 | 1,00 | exact : rien ne revient |
@@ -717,6 +754,26 @@ grave : vu de l'intérieur, ce qui traverse est perdu, d'où un α élevé tiré
 la loi de masse. L'idée : avec une photo et les dimensions au mètre près, on
 choisit les matériaux et on obtient une salle plausible ; si l'on connaît le
 TR60 mesuré, le régler à la main reste plus juste.
+
+**Matériaux par famille et par surface.** La liste est rangée par famille
+(maçonnerie et pierre, plaques et panneaux, verre, revêtements de sol,
+tissus, traitement acoustique, structures légères, ouvertures), par ordre
+alphabétique dans la langue affichée, et chaque surface ne propose que ce qui
+peut y aller : pas de côté ouvert au sol ni au plafond, pas de moquette au
+mur. **Le public n'est plus un matériau** : on choisit des personnes assises
+(0,30 / 0,60 par m², Beranek [34], 63 Hz divisé par 2) ou debout (0,10 / 0,20,
+estimation) ; leur absorption s'ajoute à celle du sol sur la surface qu'occupe
+le public (vérifié : petite galerie 0,70 s vide, 0,53 s avec un public assis).
+
+**Presets propres à Room Sim Pro** (matériaux aux bons endroits) :
+expositions (petite galerie, white cube, salle de musée en pierre, hall
+d'exposition, hall de centre des congrès, rotonde ovale, galerie en L),
+défilés (showroom, halle industrielle, hangar, tente, salle de bal de palace :
+public de part et d'autre du podium), boutiques (petite boutique, magasin de
+mode, flagship store, concept store à coins arrondis, atrium de centre
+commercial), autres lieux (tente, église, salon, régie, salle ronde avec deux
+L C R dos à dos). TR60 d'Eyring à 63 Hz de 0,3 s (tentes) à 6 s (rotonde en
+plâtre et pierre).
 
 **Sept lieux hors cinéma** (point de départ, matériaux compris ; TR60
 d'Eyring à 63 Hz) : galerie « white cube » 20 × 12 × 5 m (1,13 s), halle
@@ -761,11 +818,19 @@ la toile en clair, ouverte vers l'observateur ; L, C, R en blanc, caissons en
 orange, rappels en bleu, places colorées selon leur note. Glisser pour
 tourner, molette pour zoomer, double-clic pour revenir à la vue de départ.
 
+**Confort.** Un double-clic sur un potentiomètre le remet à sa valeur par
+défaut, prise en proportion de la salle pour les positions (une enceinte au
+milieu revient au milieu de la largeur réglée). Option-Z annule,
+Option-Maj-Z rétablit, jusqu'à 30 pas (un geste continu compte pour un pas).
+Changer un lien ou une disposition ne fait plus remonter la colonne des
+réglages. Le drapeau en haut à gauche passe l'interface en français ou en
+anglais ; la fenêtre se reconstruit dans la langue choisie, qui est gardée.
+
 **Mémoire, export, import.** Les trois salles sont gardées entre deux
 lancements (réglage `roomPro`), et « Save config... » / « Load config... »
 écrivent et lisent un fichier `.subguardrooms`. Format texte, une ligne
 `roomN.champ = valeur` par réglage sous l'en-tête `SubGUARD Room Sim Pro`,
-version 3 : positions en proportion de la salle (`roomN.L.x = 0.03`), liens
+version 4 (personnes, routage, nouvelles formes ; un fichier de version 3 qui avait le public en matériau de sol est converti) : positions en proportion de la salle (`roomN.L.x = 0.03`), liens
 (`linkLR`, `linkFills`), mode de décroissance (`acoustics`), matériaux par leur
 nom stable (`roomN.material.floor = concrete`), forme (`shape`), second jeu
 L C R (`dualLCR`), disposition du public (`audienceLayout`, `aisle`,

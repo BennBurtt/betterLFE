@@ -46,6 +46,15 @@ struct LaunchOptions
     juce::String openCard;          // --card <name>: start with that panel open (for snapshots)
 };
 
+/** A small flag at the top left: the interface language. A click switches between French and English. */
+class LanguageFlag : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    std::function<void()> onClick;
+    void paint (juce::Graphics&) override;
+    void mouseUp (const juce::MouseEvent& e) override     { if (contains (e.getPosition()) && onClick) onClick(); }
+};
+
 class MainComponent : public juce::Component,
                       private juce::Timer,
                       private juce::ChangeListener
@@ -56,8 +65,13 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    bool keyPressed (const juce::KeyPress&) override;
+
+    /** Set by the window: switch the language and rebuild the content in it. */
+    std::function<void()> onLanguageToggle;
 
 private:
+    LanguageFlag languageFlag;
     enum CardId { sourceCard, spectrumCard, alertCard, transientsCard, chainsCard, devCard, numCards };
 
     void timerCallback() override;
@@ -105,10 +119,10 @@ private:
     RoomSimulator roomSim;
     RoomSimView roomView;
     RoomSimResult roomResult;
-    juce::TextButton roomButton { "Room Sim" };
+    juce::TextButton roomButton { tr ("Room Sim") };
     bool roomMode = false;
     RoomProView proView;
-    juce::TextButton proButton { "Room Sim Pro" };
+    juce::TextButton proButton { tr ("Room Sim Pro") };
     bool proMode = false;
 
     // Rooms that count in the score: ticked in Playback chains or in Room Sim
@@ -119,45 +133,45 @@ private:
 
     // One button per panel; a panel opens over the analyzer, one at a time
     std::array<juce::TextButton, numCards> cardButtons;
-    std::array<Card, numCards> cards { { Card ("Source & Format"), Card ("Spectrum"), Card ("Phase Alert"),
-                                         Card ("Transients"), Card ("Playback chains"), Card ("Dev: algorithm settings") } };
+    std::array<Card, numCards> cards { { Card (tr ("Source & Format")), Card (tr ("Spectrum")), Card (tr ("Phase Alert")),
+                                         Card (tr ("Transients")), Card (tr ("Playback chains")), Card (tr ("Dev: algorithm settings")) } };
     int openCard = -1;
 
-    juce::Label formatLabel { {}, "Channel Format:" }, deviceLabel { {}, "Input Device:" },
-                fpsLabel { {}, "Refresh Rate:" }, windowLabel { {}, "Time / Frequency:" },
-                rangeLabel { {}, "Level range:" }, statusLabel;
+    juce::Label formatLabel { {}, tr ("Channel Format:") }, deviceLabel { {}, tr ("Input Device:") },
+                fpsLabel { {}, tr ("Refresh Rate:") }, windowLabel { {}, tr ("Time / Frequency:") },
+                rangeLabel { {}, tr ("Level range:") }, statusLabel;
     juce::ComboBox formatBox, deviceBox, fpsBox, windowBox, rangeBox, alertModeBox;
     std::array<juce::TextButton, 3> levelButtons;       // Soft, Medium, Strong
-    juce::ToggleButton lfeGainToggle { "LFE +10 dB (theatre level)" }, animationToggle { "Background animation" },
-                       peakHoldToggle { "Peak hold" }, tiltToggle { "Bass tilt (old display)" },
-                       levelWeightToggle { "Weigh by level balance" };
-    LabelledSlider inertia { "Inertia:", 0, 100, 1, 50 }, integration { "Integration:", 0.5, 5.0, 0.1, 2.0 },
-                   decay { "Decay:", 0.1, 4.0, 0.05, 1.0 };
-    juce::ToggleButton transientToggle { "Transient check on" };
-    LabelledSlider tAttack { "Attack:", 0, 100, 1, 40 }, tHoldProfile { "Hold:", 0, 100, 1, 25 },
-                   tRelease { "Release:", 0, 100, 1, 50 }, tSensitivity { "Sensitivity:", 0, 100, 1, 70 },
-                   tSearch { "Search range (how far off the LFE may be):", 5, 500, 5, 250 },
-                   tMatch { "Likeness needed for a phase reading:", 0, 1, 0.05, 0.3 },
-                   tHold { "Display time:", 1, 20, 0.5, 4 };
-    juce::TextButton transientDefaultsButton { "Defaults" };
+    juce::ToggleButton lfeGainToggle { tr ("LFE +10 dB (theatre level)") }, animationToggle { tr ("Background animation") },
+                       peakHoldToggle { tr ("Peak hold") }, tiltToggle { tr ("Bass tilt (old display)") },
+                       levelWeightToggle { tr ("Weigh by level balance") };
+    LabelledSlider inertia { tr ("Inertia:"), 0, 100, 1, 50 }, integration { tr ("Integration:"), 0.5, 5.0, 0.1, 2.0 },
+                   decay { tr ("Decay:"), 0.1, 4.0, 0.05, 1.0 };
+    juce::ToggleButton transientToggle { tr ("Transient check on") };
+    LabelledSlider tAttack { tr ("Attack:"), 0, 100, 1, 40 }, tHoldProfile { tr ("Hold:"), 0, 100, 1, 25 },
+                   tRelease { tr ("Release:"), 0, 100, 1, 50 }, tSensitivity { tr ("Sensitivity:"), 0, 100, 1, 70 },
+                   tSearch { tr ("Search range (how far off the LFE may be):"), 5, 500, 5, 250 },
+                   tMatch { tr ("Likeness needed for a phase reading:"), 0, 1, 0.05, 0.3 },
+                   tHold { tr ("Display time:"), 1, 20, 0.5, 4 };
+    juce::TextButton transientDefaultsButton { tr ("Defaults") };
     ChainsView chainsView;
-    LabelledSlider scoreSpeed { "Score speed:", 0, 1, 0.05, 0 };
+    LabelledSlider scoreSpeed { tr ("Score speed:"), 0, 1, 0.05, 0 };
 
     // Dev panel: every choice of the score, adjustable
-    LabelledSlider dTolSoft { "Tolerance, Soft:", 0.5, 4.5, 0.1, 3 }, dTolMedium { "Tolerance, Medium:", 0.5, 4.5, 0.1, 2 },
-                   dTolStrong { "Tolerance, Strong:", 0.5, 4.5, 0.1, 1 },
-                   dLate { "Weight, cinema sub late:", 0, 1, 0.05, 0.5 }, dEarly { "Weight, cinema sub early:", 0, 1, 0.05, 0.5 },
-                   dCeiling { "LFE dependence, ceiling:", 0, 1, 0.01, 1.0 }, dInfraWeight { "Infra-bass weight:", 0, 1, 0.05, 0.30 },
-                   dInfraLo { "Infra-bass up to:", 10, 40, 1, 25 }, dInfraHi { "Full weight from:", 40, 100, 1, 40 },
-                   dLevelWeight { "LFE level dependence, weight in score:", 0, 0.5, 0.01, 0.20 },
-                   dLevelRed { "LFE level dependence, red at a mean of:", 0.5, 12, 0.1, 3 },
-                   dWorstWeight { "Room score, weight of the worst seats:", 0, 1, 0.01, 0.25 },
-                   dWorstShare { "Room score, worst seats (share):", 0.02, 0.5, 0.01, 0.10 };
+    LabelledSlider dTolSoft { tr ("Tolerance, Soft:"), 0.5, 4.5, 0.1, 3 }, dTolMedium { tr ("Tolerance, Medium:"), 0.5, 4.5, 0.1, 2 },
+                   dTolStrong { tr ("Tolerance, Strong:"), 0.5, 4.5, 0.1, 1 },
+                   dLate { tr ("Weight, cinema sub late:"), 0, 1, 0.05, 0.5 }, dEarly { tr ("Weight, cinema sub early:"), 0, 1, 0.05, 0.5 },
+                   dCeiling { tr ("LFE dependence, ceiling:"), 0, 1, 0.01, 1.0 }, dInfraWeight { tr ("Infra-bass weight:"), 0, 1, 0.05, 0.30 },
+                   dInfraLo { tr ("Infra-bass up to:"), 10, 40, 1, 25 }, dInfraHi { tr ("Full weight from:"), 40, 100, 1, 40 },
+                   dLevelWeight { tr ("LFE level dependence, weight in score:"), 0, 0.5, 0.01, 0.20 },
+                   dLevelRed { tr ("LFE level dependence, red at a mean of:"), 0.5, 12, 0.1, 3 },
+                   dWorstWeight { tr ("Room score, weight of the worst seats:"), 0, 1, 0.01, 0.25 },
+                   dWorstShare { tr ("Room score, worst seats (share):"), 0.02, 0.5, 0.01, 0.10 };
     juce::Label devLoudnessLabel;       // what the listening level makes of the bass playing now
-    juce::TextButton devDefaultsButton { "Defaults" };
+    juce::TextButton devDefaultsButton { tr ("Defaults") };
     std::vector<LabelledSlider*> devSliders();
     void applyDevSettings();
-    juce::TextButton resetButton { "Reset" };
+    juce::TextButton resetButton { tr ("Reset") };
 
     // Listening level, left of Reset: always shown, a click opens the choice
     juce::TextButton listeningButton;

@@ -32,20 +32,49 @@ class MainWindow : public juce::DocumentWindow
 {
 public:
     explicit MainWindow (const LaunchOptions& options)
-        : DocumentWindow ("SubGUARD", theme::window, DocumentWindow::allButtons)
+        : DocumentWindow ("SubGUARD", theme::window, DocumentWindow::allButtons), launchOptions (options)
     {
         setUsingNativeTitleBar (true);
-        setContentOwned (new MainComponent (options), true);
+        setLanguage (savedLanguage());
+        build();
         setResizable (true, false);
         setResizeLimits (1000, 780, 10000, 10000);
         centreWithSize (getWidth(), getHeight());
         setVisible (true);
     }
 
+    void build()
+    {
+        auto* content = new MainComponent (launchOptions);
+        content->onLanguageToggle = [this]
+        {
+            // Rebuilt in the other language, same size: every label follows
+            juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainWindow> (this)]
+            {
+                if (safe == nullptr)
+                    return;
+
+                const auto size = safe->getContentComponent() != nullptr ? safe->getContentComponent()->getBounds() : juce::Rectangle<int>();
+                const auto next = currentLanguage() == Language::french ? Language::english : Language::french;
+                safe->clearContentComponent();
+                setLanguage (next);
+                saveLanguage (next);
+                safe->build();
+
+                if (! size.isEmpty())
+                    safe->getContentComponent()->setSize (size.getWidth(), size.getHeight());
+            });
+        };
+        setContentOwned (content, true);
+    }
+
     void closeButtonPressed() override
     {
         juce::JUCEApplicationBase::quit();
     }
+
+private:
+    LaunchOptions launchOptions;
 };
 
 class SubGuardApplication : public juce::JUCEApplication

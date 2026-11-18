@@ -448,7 +448,7 @@ void SpectrumPlot::paint (juce::Graphics& g)
 
     g.setColour (theme::dimText);
     g.setFont (uiFont (15.0f));
-    g.drawText ("SubGUARD Analyzer : 5Hz - 150Hz", getLocalBounds().removeFromTop (28), juce::Justification::centred);
+    g.drawText (tr ("SubGUARD Analyzer : 5Hz - 150Hz"), getLocalBounds().removeFromTop (28), juce::Justification::centred);
 
     // Left axis: a line every 12 dB
     g.setFont (uiFont (12.0f));
@@ -460,7 +460,7 @@ void SpectrumPlot::paint (juce::Graphics& g)
     {
         juce::Graphics::ScopedSaveState state (g);
         g.addTransform (juce::AffineTransform::rotation (-juce::MathConstants<float>::halfPi, 10.0f, area.getCentreY()));
-        g.drawText (tilt ? "Level (dB, tilted)" : "Level (dBFS)", juce::Rectangle<float> (-60.0f, area.getCentreY() - 8.0f, 140.0f, 16.0f),
+        g.drawText (tilt ? tr ("Level (dB, tilted)") : tr ("Level (dBFS)"), juce::Rectangle<float> (-60.0f, area.getCentreY() - 8.0f, 140.0f, 16.0f),
                     juce::Justification::centred);
     }
 
@@ -498,7 +498,7 @@ void SpectrumPlot::paint (juce::Graphics& g)
                     box.removeFromTop (size), juce::Justification::centred, false);
         g.setColour (colour.withAlpha (0.32f));
         g.setFont (uiFont (juce::jmax (11.0f, size * 0.11f), true));
-        g.drawText ("ROBUSTNESS", box, juce::Justification::centredTop, false);
+        g.drawText (tr ("ROBUSTNESS"), box, juce::Justification::centredTop, false);
     }
 
     // Grid
@@ -627,7 +627,7 @@ void SpectrumPlot::paint (juce::Graphics& g)
         g.fillRoundedRectangle (legend, 4.0f);
         g.setFont (uiFont (12.0f, true));
 
-        for (const auto& item : { std::pair<const char*, juce::Colour> { "LCR sum", theme::facade }, { "LFE", theme::lfe } })
+        for (const auto& item : { std::pair<juce::String, juce::Colour> { tr ("LCR sum"), theme::facade }, { "LFE", theme::lfe } })
         {
             auto cell = legend.removeFromLeft (item.second == theme::facade ? 88.0f : 62.0f);
             g.setColour (item.second);
@@ -647,8 +647,8 @@ void SpectrumPlot::paint (juce::Graphics& g)
         g.setColour (juce::Colours::white.withAlpha (0.55f));
         g.fillRect (hoverX, area.getY(), 1.0f, area.getHeight());
 
-        const auto text = juce::String (hz, 1) + " Hz     LCR " + juce::String (shown (facadeDb[nearest], hz), 1)
-                            + " dB     LFE " + juce::String (shown (lfeDb[nearest], hz), 1) + " dB";
+        const auto text = juce::String (hz, 1) + tr (" Hz     LCR ") + juce::String (shown (facadeDb[nearest], hz), 1)
+                            + tr (" dB     LFE ") + juce::String (shown (lfeDb[nearest], hz), 1) + " dB";
         const float width = 290.0f;
         auto box = juce::Rectangle<float> (juce::jlimit (area.getX() + 4.0f, area.getRight() - width - 4.0f, hoverX + 10.0f),
                                            area.getY() + 32.0f, width, 22.0f);
@@ -708,7 +708,7 @@ void TransientStrip::paint (juce::Graphics& g)
 
     g.setColour (theme::dimText);
     g.setFont (uiFont (12.0f));
-    g.drawFittedText ("Transients\nmix vs LFE", 4, 0, FrequencyAxis::leftMargin + 30, getHeight(), juce::Justification::centredLeft, 2);
+    g.drawFittedText (tr ("Transients\nmix vs LFE"), 4, 0, FrequencyAxis::leftMargin + 30, getHeight(), juce::Justification::centredLeft, 2);
 
     const auto box = getLocalBounds().toFloat().withTrimmedLeft ((float) FrequencyAxis::leftMargin + 36.0f)
                                                .withTrimmedRight ((float) FrequencyAxis::rightMargin).reduced (6.0f, 6.0f);
@@ -723,8 +723,8 @@ void TransientStrip::paint (juce::Graphics& g)
     auto scaleRow = inner.removeFromBottom (14.0f);
     g.setColour (juce::Colour (0xff777777));
     g.setFont (uiFont (10.0f));
-    g.drawText ("early -" + juce::String ((int) range) + " ms", scaleRow.removeFromLeft (84.0f), juce::Justification::centredLeft);
-    g.drawText ("late +" + juce::String ((int) range) + " ms", scaleRow.removeFromRight (84.0f), juce::Justification::centredRight);
+    g.drawText (tr ("early -") + juce::String ((int) range) + " ms", scaleRow.removeFromLeft (84.0f), juce::Justification::centredLeft);
+    g.drawText (tr ("late +") + juce::String ((int) range) + " ms", scaleRow.removeFromRight (84.0f), juce::Justification::centredRight);
     const auto scale = scaleRow;
     const float mid = scale.getCentreX(), y = scale.getCentreY();
     g.setColour (juce::Colour (0xff555555));
@@ -735,7 +735,7 @@ void TransientStrip::paint (juce::Graphics& g)
     {
         g.setColour (juce::Colour (0xff777777));
         g.setFont (uiFont (12.0f));
-        g.drawText ("Transient check off. Solo in your DAW what you want to check, then switch it on in the Transients panel.",
+        g.drawText (tr ("Transient check off. Solo in your DAW what you want to check, then switch it on in the Transients panel."),
                     inner, juce::Justification::centredLeft);
         return;
     }
@@ -746,7 +746,7 @@ void TransientStrip::paint (juce::Graphics& g)
     {
         g.setColour (juce::Colour (0xff555555));
         g.setFont (uiFont (12.0f));
-        g.drawText ("waiting for an attack in the mix", inner, juce::Justification::centredLeft);
+        g.drawText (tr ("waiting for an attack in the mix"), inner, juce::Justification::centredLeft);
         return;
     }
 
@@ -760,8 +760,8 @@ void TransientStrip::paint (juce::Graphics& g)
 
     if (! e.inLfe)
     {
-        verdict = "Attack in the mix: nothing in the LFE within " + juce::String ((int) range) + " ms";
-        detail = "Widen the search range in the Transients panel if the LFE may be further off.";
+        verdict = tr ("Attack in the mix: nothing in the LFE within ") + juce::String ((int) range) + " ms";
+        detail = tr ("Widen the search range in the Transients panel if the LFE may be further off.");
     }
     else if (fine (e))
     {
@@ -774,19 +774,19 @@ void TransientStrip::paint (juce::Graphics& g)
 
         if (std::abs (e.delayMs) > tolerance)
         {
-            verdict = (e.delayMs > 0.0 ? "LFE late " : "LFE early ") + juce::String (std::abs (e.delayMs), 1) + plusMinus;
+            verdict = (e.delayMs > 0.0 ? tr ("LFE late ") : tr ("LFE early ")) + juce::String (std::abs (e.delayMs), 1) + plusMinus;
             colour = orange;
         }
-        else if (phaseDegrees > 120.0)  { verdict = "Aligned, polarity inverted";   colour = red; }
-        else if (phaseDegrees < 60.0)   { verdict = "Aligned, in phase";            colour = amber; }
+        else if (phaseDegrees > 120.0)  { verdict = tr ("Aligned, polarity inverted");   colour = red; }
+        else if (phaseDegrees < 60.0)   { verdict = tr ("Aligned, in phase");            colour = amber; }
         else
         {
-            verdict = "Aligned, phase shifted " + juce::String ((int) std::lround (phaseDegrees)) + degree;
+            verdict = tr ("Aligned, phase shifted ") + juce::String ((int) std::lround (phaseDegrees)) + degree;
             colour = orange;
         }
 
         const double sumDb = 10.0 * std::log10 (juce::jmax (1e-3, 1.0 + e.interactionNow));
-        detail = "likeness " + juce::String (e.match, 2) + "   sum " + (sumDb >= 0.0 ? "+" : "") + juce::String (sumDb, 1) + " dB";
+        detail = tr ("likeness ") + juce::String (e.match, 2) + tr ("   sum ") + (sumDb >= 0.0 ? "+" : "") + juce::String (sumDb, 1) + " dB";
     }
     else if (e.lfeAttack)
     {
@@ -795,23 +795,23 @@ void TransientStrip::paint (juce::Graphics& g)
 
         if (std::abs (e.attackDelayMs) > attackToleranceMs)
         {
-            verdict = (e.attackDelayMs > 0.0 ? "LFE attack late " : "LFE attack early ") + about
+            verdict = (e.attackDelayMs > 0.0 ? tr ("LFE attack late ") : tr ("LFE attack early ")) + about
                         + juce::String ((int) std::lround (std::abs (e.attackDelayMs))) + " ms";
             colour = orange;
         }
         else
         {
-            verdict = "LFE attack on time (within " + juce::String ((int) attackToleranceMs) + " ms)";
+            verdict = tr ("LFE attack on time (within ") + juce::String ((int) attackToleranceMs) + " ms)";
             colour = amber;
         }
 
-        detail = "timed attack against attack: the LFE does not carry the same sound as the mix (likeness "
-                   + juce::String (e.match, 2) + "), no phase reading";
+        detail = tr ("timed attack against attack: the LFE does not carry the same sound as the mix (likeness ")
+                   + juce::String (e.match, 2) + tr ("), no phase reading");
     }
     else
     {
-        verdict = "In the LFE, timing not measurable";
-        detail = "likeness " + juce::String (e.match, 2);
+        verdict = tr ("In the LFE, timing not measurable");
+        detail = tr ("likeness ") + juce::String (e.match, 2);
         colour = amber;
     }
 
@@ -860,13 +860,13 @@ void CorrelationPlot::paint (juce::Graphics& g)
     g.setColour (theme::dimText);
     g.setFont (uiFont (12.0f));
 
-    for (const auto& tick : { std::pair<double, const char*> { 1.0, "+1 in" }, { 0.0, "0" }, { -1.0, "-1 out" } })
+    for (const auto& tick : { std::pair<double, juce::String> { 1.0, "+1 in" }, { 0.0, "0" }, { -1.0, tr ("-1 out") } })
         g.drawText (tick.second, juce::Rectangle<float> (0.0f, yFor (tick.first) - 8.0f, (float) FrequencyAxis::leftMargin - 8.0f, 16.0f),
                     juce::Justification::centredRight);
 
     FrequencyAxis::drawLabels (g, area);
     g.setColour (theme::dimText);
-    g.drawText ("Frequency (Hz)", juce::Rectangle<float> (area.getX(), area.getBottom() + 20.0f, area.getWidth(), 18.0f),
+    g.drawText (tr ("Frequency (Hz)"), juce::Rectangle<float> (area.getX(), area.getBottom() + 20.0f, area.getWidth(), 18.0f),
                 juce::Justification::centred);
 
     g.setColour (theme::outline);
@@ -1072,7 +1072,7 @@ void ChainsView::paint (juce::Graphics& g)
         area.removeFromTop (8.0f);
     };
 
-    heading ("Bass on each playback system against the mix as approved (cinema, sub on time, in polarity), 20-120 Hz");
+    heading (tr ("Bass on each playback system against the mix as approved (cinema, sub on time, in polarity), 20-120 Hz"));
 
     const double delays[] = { -5.0, -2.5, 0.0, 2.5, 5.0 };
     // The subwoofer nearer or further than it should be: metres first, the time it makes in brackets
@@ -1083,11 +1083,11 @@ void ChainsView::paint (juce::Graphics& g)
                                             : (ms > 0.0 ? "+" : "-") + juce::String (std::abs (ms) * 0.001 * PlaybackSimulator::speedOfSound, 1)
                                                 + " m (" + (ms > 0.0 ? "+" : "-") + juce::String (std::abs (ms), 1) + " ms)");
 
-    table (distances, { "Cinema, sub in polarity", "Cinema, sub inverted" },
+    table (distances, { tr ("Cinema, sub in polarity"), tr ("Cinema, sub inverted") },
            [&] (int r, int c) { return cinema (delays[c], r == 1); });
 
     const double corners[] = { 60.0, 80.0, 100.0 };
-    table ({ "60 Hz", "80 Hz", "100 Hz", "Stereo, no LFE" }, { "Bass managed", "+ encoder LFE filter" },
+    table ({ "60 Hz", "80 Hz", "100 Hz", tr ("Stereo, no LFE") }, { tr ("Bass managed"), tr ("+ encoder LFE filter") },
            [&] (int r, int c) { return c < 3 ? home (corners[c], r == 1) : stereo(); },
            [] (int r, int c) { return c < 3 || r == 0; });
 
@@ -1109,24 +1109,24 @@ void ChainsView::paint (juce::Graphics& g)
 
     if (t.hasBass && ! t.worstRoom.empty() && t.interaction > 0.02)
     {
-        worst = "     worst: room " + juce::String (t.worstRoom) + " (room score " + juce::String (juce::roundToInt (100.0 * (1.0 - t.interaction))) + ")";
+        worst = tr ("     worst: room ") + tr (juce::String (t.worstRoom)) + tr (" (room score ") + juce::String (juce::roundToInt (100.0 * (1.0 - t.interaction))) + ")";
     }
     else if (t.hasBass && t.worstChain >= 0 && t.interaction > 0.02)
     {
         const auto& c = t.chains[(size_t) t.worstChain];
-        worst = "     worst system: " + juce::String (c.name) + " (" + (c.changeDb >= 0.0 ? "+" : "") + juce::String (c.changeDb, 1) + " dB)";
+        worst = tr ("     worst system: ") + tr (juce::String (c.name)) + " (" + (c.changeDb >= 0.0 ? "+" : "") + juce::String (c.changeDb, 1) + " dB)";
     }
 
-    line ("Robustness", t.hasBass ? juce::String (juce::roundToInt (t.robustness)) + " / 100     interaction x LFE dependence" : none,
+    line (tr ("Robustness"), t.hasBass ? juce::String (juce::roundToInt (t.robustness)) + tr (" / 100     interaction x LFE dependence") : none,
           t.hasBass && t.robustness < 50.0);
 
-    line ("  from interaction", t.hasBass ? juce::String (juce::roundToInt (100.0 * (1.0 - t.interaction))) + " / 100" + worst : none,
+    line (tr ("  from interaction"), t.hasBass ? juce::String (juce::roundToInt (100.0 * (1.0 - t.interaction))) + " / 100" + worst : none,
           t.hasBass && t.interaction > 0.5);
 
-    line ("  from LFE dependence (audible)", t.hasBass ? juce::String (juce::roundToInt (100.0 * (1.0 - t.dependence)))
-                                                 + " / 100     LFE " + (t.lfeBalanceDb >= 0.0 ? "+" : "") + juce::String (t.lfeBalanceDb, 1)
-                                                 + " dB against the screen, carries " + juce::String (juce::roundToInt (100.0 * t.lfeShare))
-                                                 + " % of the bass"
+    line (tr ("  from LFE dependence (audible)"), t.hasBass ? juce::String (juce::roundToInt (100.0 * (1.0 - t.dependence)))
+                                                 + tr (" / 100     LFE ") + (t.lfeBalanceDb >= 0.0 ? "+" : "") + juce::String (t.lfeBalanceDb, 1)
+                                                 + tr (" dB against the screen, carries ") + juce::String (juce::roundToInt (100.0 * t.lfeShare))
+                                                 + tr (" % of the bass")
                                              : none,
           t.hasBass && t.lfeBalanceDb > PlaybackSimulator::balanceWarningDb);
 
@@ -1136,7 +1136,7 @@ void ChainsView::paint (juce::Graphics& g)
         auto row = area.removeFromTop (rowHeight + 2.0f);
         g.setColour (theme::dimText);
         g.setFont (uiFont (12.5f));
-        g.drawText ("LFE level dependence", row.removeFromLeft (labelWidth + 40.0f), juce::Justification::centredLeft);
+        g.drawText (tr ("LFE level dependence"), row.removeFromLeft (labelWidth + 40.0f), juce::Justification::centredLeft);
 
         const double severity = t.hasBass ? juce::jlimit (0.0, 1.0, t.levelDependence) : 0.0;
         const auto quiet = juce::Colour (0xff2a2a2a), lightOrange = juce::Colour (0xffffb347), orange = juce::Colour (0xffff8a00),
@@ -1157,13 +1157,13 @@ void ChainsView::paint (juce::Graphics& g)
         if (t.hasBass)
         {
             const double dev = t.levelDeviationDb;
-            text = "mean " + juce::String (t.levelMeanDb, 1) + " dB  (max " + (dev >= 0.0 ? "+" : "") + juce::String (dev, 1) + ")";
+            text = tr ("mean ") + juce::String (t.levelMeanDb, 1) + tr (" dB  (max ") + (dev >= 0.0 ? "+" : "") + juce::String (dev, 1) + ")";
 
             if (severity <= 0.05)
-                note = "over all systems and subwoofer levels: the bass moves no more than it should";
+                note = tr ("over all systems and subwoofer levels: the bass moves no more than it should");
             else
-                note = dev < 0.0 ? "over all systems and subwoofer levels: cancellation risk when the subwoofer is off its level"
-                                 : "over all systems and subwoofer levels: boost risk when the subwoofer is off its level";
+                note = dev < 0.0 ? tr ("over all systems and subwoofer levels: cancellation risk when the subwoofer is off its level")
+                                 : tr ("over all systems and subwoofer levels: boost risk when the subwoofer is off its level");
         }
 
         g.setColour (severity > 0.3 ? juce::Colours::white : theme::text);
@@ -1182,8 +1182,8 @@ void ChainsView::paint (juce::Graphics& g)
     area.removeFromTop (6.0f);
     g.setColour (theme::dimText.withAlpha (0.8f));
     g.setFont (uiFont (11.0f));
-    g.drawFittedText ("Electrical models: delay, polarity, filters and level, plus the rooms ticked below (modal simulation, Room Sim tab). "
-                      "Real rooms are not boxes: a score of 100 does not protect against a given room's own faults.",
+    g.drawFittedText (tr ("Electrical models: delay, polarity, filters and level, plus the rooms ticked below (modal simulation, Room Sim tab). "
+                      "Real rooms are not boxes: a score of 100 does not protect against a given room's own faults."),
                       area.removeFromTop (30.0f).toNearestInt(), juce::Justification::topLeft, 2);
 }
 
@@ -1229,7 +1229,7 @@ void RoomSimView::paint (juce::Graphics& g)
         auto big = top.removeFromLeft (230.0f);
         g.setColour (theme::dimText);
         g.setFont (uiFont (12.0f));
-        g.drawText ("Bass robustness", big.removeFromTop (16.0f), juce::Justification::centredLeft);
+        g.drawText (tr ("Bass robustness"), big.removeFromTop (16.0f), juce::Justification::centredLeft);
         g.setColour (hasScore ? ChainsView::colourFor (1.0 - robustness / 100.0) : theme::dimText);
         g.setFont (uiFont (34.0f, true));
         g.drawText (hasScore ? juce::String (juce::roundToInt (robustness)) : juce::String ("--"), big, juce::Justification::centredLeft);
@@ -1237,10 +1237,10 @@ void RoomSimView::paint (juce::Graphics& g)
         top.removeFromRight (230.0f);      // room for the Soft / Medium / Strong selector
         g.setColour (theme::dimText);
         g.setFont (uiFont (11.5f));
-        g.drawFittedText ("Fifteen rooms, twenty seats each (rectangular rooms, modal sum). Each dot is a seat: what the LFE / screen "
+        g.drawFittedText (tr ("Fifteen rooms, twenty seats each (rectangular rooms, modal sum). Each dot is a seat: what the LFE / screen "
                           "interaction does to its bass, against the mix as approved. The room's own colour is left out: a "
                           "decorrelated LFE puts every dot on 0. Ticked rooms count in the score (click a row). "
-                          "Result = bass robustness x room score.",
+                          "Result = bass robustness x room score."),
                           top.toNearestInt(), juce::Justification::centredLeft, 3);
     }
 
@@ -1252,19 +1252,19 @@ void RoomSimView::paint (juce::Graphics& g)
         auto head = area.removeFromTop (16.0f);
         g.setColour (theme::dimText);
         g.setFont (uiFont (11.0f));
-        g.drawText ("Room", head.removeFromLeft (nameWidth), juce::Justification::centredLeft);
-        g.drawText ("Result", head.removeFromRight (resultWidth), juce::Justification::centred);
-        g.drawText ("Room", head.removeFromRight (scoreWidth), juce::Justification::centred);
+        g.drawText (tr ("Room"), head.removeFromLeft (nameWidth), juce::Justification::centredLeft);
+        g.drawText (tr ("Result"), head.removeFromRight (resultWidth), juce::Justification::centred);
+        g.drawText (tr ("Room"), head.removeFromRight (scoreWidth), juce::Justification::centred);
         g.drawText ("-12 dB", head.removeFromLeft (60.0f), juce::Justification::centredLeft);
         g.drawText ("+12 dB", head.removeFromRight (60.0f), juce::Justification::centredRight);
-        g.drawText ("seats: bass change from the LFE / screen interaction", head, juce::Justification::centred);
+        g.drawText (tr ("seats: bass change from the LFE / screen interaction"), head, juce::Justification::centred);
     }
 
     if (! result.hasBass || result.rooms.empty())
     {
         g.setColour (theme::dimText);
         g.setFont (uiFont (13.0f));
-        g.drawText ("Waiting for bass", area, juce::Justification::centred);
+        g.drawText (tr ("Waiting for bass"), area, juce::Justification::centred);
         return;
     }
 
@@ -1304,7 +1304,7 @@ void RoomSimView::paint (juce::Graphics& g)
         auto name = row.removeFromLeft (nameWidth - 24.0f);
         g.setColour (counted ? theme::text : theme::dimText);
         g.setFont (uiFont (12.5f, counted));
-        g.drawText (juce::String (room.spec.name), name.removeFromTop (row.getHeight() * 0.55f), juce::Justification::bottomLeft);
+        g.drawText (tr (juce::String (room.spec.name)), name.removeFromTop (row.getHeight() * 0.55f), juce::Justification::bottomLeft);
         g.setColour (theme::dimText);
         g.setFont (uiFont (10.0f));
         g.drawText (juce::String (room.spec.length, 0) + " x " + juce::String (room.spec.width, 0) + " x " + juce::String (room.spec.height, 1)
@@ -1409,7 +1409,7 @@ void HistoryStrip::paint (juce::Graphics& g)
 
     auto area = getLocalBounds().toFloat().withTrimmedLeft ((float) FrequencyAxis::leftMargin + 36.0f)
                                           .withTrimmedRight ((float) FrequencyAxis::rightMargin).reduced (0.0f, 5.0f);
-    const char* names[] = { "Alert", "Robustness", "LFE-dependent" };
+    const juce::String names[] = { tr ("Alert"), tr ("Robustness"), tr ("LFE-dependent") };
     const int lanes = 3;
     const float lane = area.getHeight() / (float) lanes;
 
@@ -1557,7 +1557,7 @@ void HistoryStrip::paint (juce::Graphics& g)
 
     g.setColour (juce::Colour (0xff777777));
     g.setFont (uiFont (10.0f));
-    g.drawText ("now", juce::Rectangle<float> (area.getRight() + 1.0f, area.getY(), 22.0f, 12.0f), juce::Justification::centredLeft);
+    g.drawText (tr ("now"), juce::Rectangle<float> (area.getRight() + 1.0f, area.getY(), 22.0f, 12.0f), juce::Justification::centredLeft);
 }
 
 } // namespace subguard

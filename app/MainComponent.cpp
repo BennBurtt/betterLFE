@@ -81,6 +81,7 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
    #endif
 
     addAndMakeVisible (header);
+    addAndMakeVisible (languageFlag);
     addAndMakeVisible (spectrum);
     addAndMakeVisible (transientStrip);
     addAndMakeVisible (correlation);
@@ -88,7 +89,7 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
     addChildComponent (roomView);
 
     roomButton.setClickingTogglesState (true);
-    roomButton.setTooltip ("Room Sim: the bass seat by seat in fifteen cinema rooms, from a live corridor room to a treated IMAX.");
+    roomButton.setTooltip (tr ("Room Sim: the bass seat by seat in fifteen cinema rooms, from a live corridor room to a treated IMAX."));
     roomButton.onClick = [this]
     {
         roomMode = roomButton.getToggleState();
@@ -106,10 +107,13 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
     addChildComponent (proView);
     proView.onConfigChanged = [this] { saveState(); };
     proButton.setClickingTogglesState (true);
-    proButton.setTooltip ("Room Sim Pro: three rooms of your own, every speaker placed freely, with fill speakers. Its own score, not part of the global one.");
+    proButton.setTooltip (tr ("Room Sim Pro: three rooms of your own, every speaker placed freely, with fill speakers. Its own score, not part of the global one."));
     proButton.onClick = [this]
     {
         proMode = proButton.getToggleState();
+
+        if (proMode)
+            proView.grabKeyboardFocus();
 
         if (proMode)
         {
@@ -120,12 +124,17 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
         resized();
     };
     addAndMakeVisible (proButton);
+
+    languageFlag.setTooltip (currentLanguage() == Language::french ? tr ("Interface en français. Cliquer : English.")
+                                                                   : tr ("Interface in English. Click: français."));
+    languageFlag.onClick = [this] { if (onLanguageToggle) onLanguageToggle(); };
+    setWantsKeyboardFocus (true);
     buildCards();
 
     for (auto* speaker : { &header.left, &header.centre, &header.right })
     {
         speaker->onToggle = [this] { updateSpeakers(); };
-        speaker->setTooltip ("Click: solo. Option-click: mute.");
+        speaker->setTooltip (tr ("Click: solo. Option-click: mute."));
     }
 
     loadState();
@@ -146,12 +155,12 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
                                                if (granted)
                                                    safe->openDevices();
                                                else
-                                                   safe->updateStatus ("Audio input permission denied");
+                                                   safe->updateStatus (tr ("Audio input permission denied"));
                                            });
     }
     else
     {
-        statusLabel.setText ("Demo signal (no audio device)", juce::dontSendNotification);
+        statusLabel.setText (tr ("Demo signal (no audio device)"), juce::dontSendNotification);
     }
 
     setSize (1200, 1000);
@@ -207,22 +216,22 @@ void MainComponent::buildCards()
             selectDevice (deviceBox.getText());
     };
 
-    deviceBox.setTextWhenNothingSelected ("No input device");
+    deviceBox.setTextWhenNothingSelected (tr ("No input device"));
     deviceBox.onChange = [this]
     {
         if (! restoring && deviceBox.getSelectedId() > 0)
             selectDevice (deviceBox.getText());
     };
 
-    fpsBox.addItem ("90 FPS", 90);
-    fpsBox.addItem ("60 FPS", 60);
-    fpsBox.addItem ("30 FPS", 30);
+    fpsBox.addItem (tr ("90 FPS"), 90);
+    fpsBox.addItem (tr ("60 FPS"), 60);
+    fpsBox.addItem (tr ("30 FPS"), 30);
     fpsBox.setSelectedId (60, juce::dontSendNotification);
     fpsBox.onChange = [this] { startTimerHz (fpsBox.getSelectedId()); };
 
-    windowBox.addItem (juce::String::fromUTF8 ("Fast (0.5 s \xc2\xb7 4 Hz)"), 1);
-    windowBox.addItem (juce::String::fromUTF8 ("Normal (1 s \xc2\xb7 2 Hz)"), 2);
-    windowBox.addItem (juce::String::fromUTF8 ("Ultra (2 s \xc2\xb7 1 Hz)"), 3);
+    windowBox.addItem (tr (juce::String::fromUTF8 ("Fast (0.5 s \xc2\xb7 4 Hz)")), 1);
+    windowBox.addItem (tr (juce::String::fromUTF8 ("Normal (1 s \xc2\xb7 2 Hz)")), 2);
+    windowBox.addItem (tr (juce::String::fromUTF8 ("Ultra (2 s \xc2\xb7 1 Hz)")), 3);
     windowBox.setSelectedId (2, juce::dontSendNotification);
     windowBox.onChange = [this] { analysis.setWindow (windowSeconds()); };
 
@@ -232,22 +241,22 @@ void MainComponent::buildCards()
     rangeBox.setSelectedId (96, juce::dontSendNotification);
     rangeBox.onChange = [this] { spectrum.setFloorDb (-(double) rangeBox.getSelectedId()); };
 
-    alertModeBox.addItem ("In phase and out of phase", 1);
-    alertModeBox.addItem ("Out of phase only", 2);
+    alertModeBox.addItem (tr ("In phase and out of phase"), 1);
+    alertModeBox.addItem (tr ("Out of phase only"), 2);
     alertModeBox.setSelectedId (1, juce::dontSendNotification);
-    alertModeBox.setTooltip ("Out of phase only: alert just where the LFE works against the screen channel.");
+    alertModeBox.setTooltip (tr ("Out of phase only: alert just where the LFE works against the screen channel."));
 
 
     peakHoldToggle.setToggleState (true, juce::dontSendNotification);
     peakHoldToggle.onClick = [this] { spectrum.setPeakHold (peakHoldToggle.getToggleState()); };
-    tiltToggle.setTooltip ("Display tilt of the first version: -12 dB at 20 Hz. Off: levels are true dBFS.");
+    tiltToggle.setTooltip (tr ("Display tilt of the first version: -12 dB at 20 Hz. Off: levels are true dBFS."));
     tiltToggle.onClick = [this] { spectrum.setTilt (tiltToggle.getToggleState()); };
-    levelWeightToggle.setTooltip ("Off: the alert follows the correlation alone, however quiet the LFE is.\n"
-                                  "On: an LFE much quieter (or louder) than the screen channel counts less.");
+    levelWeightToggle.setTooltip (tr ("Off: the alert follows the correlation alone, however quiet the LFE is.\n"
+                                  "On: an LFE much quieter (or louder) than the screen channel counts less."));
 
 
-    lfeGainToggle.setTooltip ("On: the LFE counts 10 dB louder than a screen channel, as a cinema plays it. Off: as recorded.\n"
-                              "It applies everywhere: spectrum, alerts, playback chains and score.");
+    lfeGainToggle.setTooltip (tr ("On: the LFE counts 10 dB louder than a screen channel, as a cinema plays it. Off: as recorded.\n"
+                              "It applies everywhere: spectrum, alerts, playback chains and score."));
     lfeGainToggle.setToggleState (true, juce::dontSendNotification);
     animationToggle.setToggleState (true, juce::dontSendNotification);
     animationToggle.onClick = [this] { header.setAnimationEnabled (animationToggle.getToggleState()); };
@@ -256,11 +265,11 @@ void MainComponent::buildCards()
     integration.format = [] (double v) { return juce::String (v, 1) + " s"; };
     // Level selector, above the spectrum on the right: one choice sets both
     // the phase alert threshold and how strict the robustness score is.
-    const char* levelNames[] = { "Soft", "Medium", "Strong" };
-    const char* levelTips[] = {
-        "Soft: phase alert from a correlation of 0.90; the score tolerates 3 dB of change before counting it.",
-        "Medium: phase alert from 0.75; the score tolerates 2 dB.",
-        "Strong: phase alert from 0.50; the score counts changes from 1 dB, about the smallest audible one."
+    const juce::String levelNames[] = { tr ("Soft"), tr ("Medium"), tr ("Strong") };
+    const juce::String levelTips[] = {
+        tr ("Soft: phase alert from a correlation of 0.90; the score tolerates 3 dB of change before counting it."),
+        tr ("Medium: phase alert from 0.75; the score tolerates 2 dB."),
+        tr ("Strong: phase alert from 0.50; the score counts changes from 1 dB, about the smallest audible one.")
     };
 
     for (int i = 0; i < 3; ++i)
@@ -276,8 +285,8 @@ void MainComponent::buildCards()
     }
     decay.format = [] (double v) { return juce::String (v, 2) + " s"; };
 
-    scoreSpeed.format = [] (double v) { return v <= 0.0 ? juce::String ("0 (fast)") : juce::String (v, 2); };
-    scoreSpeed.setTooltip ("0: the score follows the mix as it does now. Towards 1: more and more inertia, up to about ten seconds.");
+    scoreSpeed.format = [] (double v) { return v <= 0.0 ? juce::String (tr ("0 (fast)")) : juce::String (v, 2); };
+    scoreSpeed.setTooltip (tr ("0: the score follows the mix as it does now. Towards 1: more and more inertia, up to about ten seconds."));
 
     for (auto* slider : { &inertia, &integration, &decay, &scoreSpeed })
         slider->refresh();
@@ -295,18 +304,18 @@ void MainComponent::buildCards()
     tMatch.format = [] (double v)       { return juce::String (v, 2); };
     tHold.format = [] (double v)        { return juce::String (v, 1) + " s"; };
 
-    transientToggle.setTooltip ("Off by default. Solo in your DAW what you want to check (a kick and its LFE send, for instance), then switch this on.");
-    tAttack.setTooltip ("How fast a rise must be to count as a transient: the time over which the peak is watched. "
-                        "Low: only sharp hits. High: slower swells count too.");
-    tHoldProfile.setTooltip ("After a transient, no new one for this long: a kick, its click and its cymbal stay one hit.");
-    tRelease.setTooltip ("How long the tail of a hit hides what follows. Higher: a ringing tail is not taken for new transients. "
-                         "Lower: quieter hits soon after a loud one are found.");
-    tSensitivity.setTooltip ("How small a rise counts as a transient. Higher: more transients found, and more false ones.");
-    tSearch.setTooltip ("The LFE is looked for this far before and after each attack of the mix. Wider finds a very late LFE; "
-                        "narrower is more precise on dense music and on weak hits.");
-    tMatch.setTooltip ("Above this likeness between mix and LFE, the delay and polarity come from the correlation (precise). "
-                       "Below, the two attacks are timed against each other (coarse, no phase).");
-    tHold.setTooltip ("How long a verdict stays on screen.");
+    transientToggle.setTooltip (tr ("Off by default. Solo in your DAW what you want to check (a kick and its LFE send, for instance), then switch this on."));
+    tAttack.setTooltip (tr ("How fast a rise must be to count as a transient: the time over which the peak is watched. "
+                        "Low: only sharp hits. High: slower swells count too."));
+    tHoldProfile.setTooltip (tr ("After a transient, no new one for this long: a kick, its click and its cymbal stay one hit."));
+    tRelease.setTooltip (tr ("How long the tail of a hit hides what follows. Higher: a ringing tail is not taken for new transients. "
+                         "Lower: quieter hits soon after a loud one are found."));
+    tSensitivity.setTooltip (tr ("How small a rise counts as a transient. Higher: more transients found, and more false ones."));
+    tSearch.setTooltip (tr ("The LFE is looked for this far before and after each attack of the mix. Wider finds a very late LFE; "
+                        "narrower is more precise on dense music and on weak hits."));
+    tMatch.setTooltip (tr ("Above this likeness between mix and LFE, the delay and polarity come from the correlation (precise). "
+                       "Below, the two attacks are timed against each other (coarse, no phase)."));
+    tHold.setTooltip (tr ("How long a verdict stays on screen."));
 
     for (auto* slider : { &tAttack, &tHoldProfile, &tRelease, &tSensitivity, &tSearch, &tMatch, &tHold })
     {
@@ -337,7 +346,7 @@ void MainComponent::buildCards()
 
 
     // Reset: the history strip and the score start afresh
-    resetButton.setTooltip ("Clears the history strip and restarts the score.");
+    resetButton.setTooltip (tr ("Clears the history strip and restarts the score."));
     resetButton.onClick = [this]
     {
         history.clear();
@@ -359,8 +368,8 @@ void MainComponent::buildCards()
     };
     addAndMakeVisible (resetButton);
 
-    listeningButton.setTooltip ("Listening level: the sound pressure a screen channel gives with the calibration signal at -20 dBFS RMS "
-                                "(85 dB(C) in a cinema). It sets what is audible and how loud the bass is heard, which the score follows.");
+    listeningButton.setTooltip (tr ("Listening level: the sound pressure a screen channel gives with the calibration signal at -20 dBFS RMS "
+                                "(85 dB(C) in a cinema). It sets what is audible and how loud the bass is heard, which the score follows."));
     listeningButton.onClick = [this] { showListeningMenu(); };
     setListeningLevel (listeningDbC);
     addAndMakeVisible (listeningButton);
@@ -445,7 +454,7 @@ void MainComponent::buildCards()
               });
 
     // Rooms of the Room Sim that count in the score
-    roomTicksLabel.setText ("Rooms in the score (modal simulation, see the Room Sim tab):", juce::dontSendNotification);
+    roomTicksLabel.setText (tr ("Rooms in the score (modal simulation, see the Room Sim tab):"), juce::dontSendNotification);
     roomTicksLabel.setFont (uiFont (12.0f, true));
     roomTicksLabel.setColour (juce::Label::textColourId, theme::dimText);
 
@@ -454,8 +463,8 @@ void MainComponent::buildCards()
 
         for (size_t i = 0; i < specs.size(); ++i)
         {
-            auto tick = std::make_unique<juce::ToggleButton> (juce::String (specs[i].shortName));
-            tick->setTooltip (juce::String (specs[i].name) + ": " + juce::String (specs[i].length, 0) + " x " + juce::String (specs[i].width, 0)
+            auto tick = std::make_unique<juce::ToggleButton> (tr (juce::String (specs[i].shortName)));
+            tick->setTooltip (tr (juce::String (specs[i].name)) + ": " + juce::String (specs[i].length, 0) + " x " + juce::String (specs[i].width, 0)
                               + " x " + juce::String (specs[i].height, 1) + " m, RT60 " + juce::String (specs[i].rt60, 2) + " s");
             tick->setToggleState (roomSelected[i], juce::dontSendNotification);
             tick->onClick = [this, i] { setRoomSelected ((int) i, roomTicks[i]->getToggleState()); };
@@ -495,14 +504,14 @@ void MainComponent::buildCards()
         devLoudnessLabel.setJustificationType (juce::Justification::topLeft);
         devLoudnessLabel.setMinimumHorizontalScale (1.0f);
 
-        dTolSoft.setTooltip ("How many dB a band may change on a playback system before it starts to count, at each level.");
-        dCeiling.setTooltip ("How much of the score a bass entirely in the LFE can take away. At 1.00 'LFE alone' scores near 2; about 0.80 puts it near 20.");
-        dInfraWeight.setTooltip ("What bass under the 'infra-bass up to' frequency still counts for in the LFE dependence; it rises to 1 at 'full weight from'.");
-        dLevelWeight.setTooltip ("The most the LFE level dependence can take off the score.");
-        dLevelRed.setTooltip ("Mean difference from the expected bass at which the LFE level dependence box is fully red.");
-        dWorstWeight.setTooltip ("Room Sim and Room Sim Pro: room score = (1 - weight) x mean seat score + weight x score of the worst seats. "
-                                 "0 is the plain mean.");
-        dWorstShare.setTooltip ("Which seats count as the worst ones: this share of the seats, at least one.");
+        dTolSoft.setTooltip (tr ("How many dB a band may change on a playback system before it starts to count, at each level."));
+        dCeiling.setTooltip (tr ("How much of the score a bass entirely in the LFE can take away. At 1.00 'LFE alone' scores near 2; about 0.80 puts it near 20."));
+        dInfraWeight.setTooltip (tr ("What bass under the 'infra-bass up to' frequency still counts for in the LFE dependence; it rises to 1 at 'full weight from'."));
+        dLevelWeight.setTooltip (tr ("The most the LFE level dependence can take off the score."));
+        dLevelRed.setTooltip (tr ("Mean difference from the expected bass at which the LFE level dependence box is fully red."));
+        dWorstWeight.setTooltip (tr ("Room Sim and Room Sim Pro: room score = (1 - weight) x mean seat score + weight x score of the worst seats. "
+                                 "0 is the plain mean."));
+        dWorstShare.setTooltip (tr ("Which seats count as the worst ones: this share of the seats, at least one."));
 
         for (auto* slider : devSliders())
         {
@@ -556,7 +565,7 @@ void MainComponent::buildCards()
         addChildComponent (card);
     }
 
-    const char* names[] = { "Source", "Spectrum", "Phase Alert", "Transients", "Playback chains", "Dev" };
+    const juce::String names[] = { tr ("Source"), tr ("Spectrum"), tr ("Phase Alert"), tr ("Transients"), tr ("Playback chains"), tr ("Dev") };
 
     for (int i = 0; i < numCards; ++i)
     {
@@ -594,6 +603,59 @@ void MainComponent::positionCards()
     }
 }
 
+bool MainComponent::keyPressed (const juce::KeyPress& key)
+{
+    // Option-Z / Option-Shift-Z: undo and redo in Room Sim Pro
+    if (proMode)
+        return proView.keyPressed (key);
+
+    return false;
+}
+
+void LanguageFlag::paint (juce::Graphics& g)
+{
+    // The flag of the language shown: France, or the United Kingdom for English
+    auto r = getLocalBounds().toFloat().reduced (1.0f);
+    juce::Path clip;
+    clip.addRoundedRectangle (r, 2.5f);
+    g.saveState();
+    g.reduceClipRegion (clip);
+
+    if (currentLanguage() == Language::french)
+    {
+        const float w = r.getWidth() / 3.0f;
+        g.setColour (juce::Colour (0xff0055a4));
+        g.fillRect (r.withWidth (w));
+        g.setColour (juce::Colours::white);
+        g.fillRect (r.withX (r.getX() + w).withWidth (w));
+        g.setColour (juce::Colour (0xffef4135));
+        g.fillRect (r.withX (r.getX() + 2.0f * w).withWidth (w));
+    }
+    else
+    {
+        g.setColour (juce::Colour (0xff012169));
+        g.fillRect (r);
+        const auto diagonal = [&] (float thickness, juce::Colour colour)
+        {
+            g.setColour (colour);
+            g.drawLine (r.getX(), r.getY(), r.getRight(), r.getBottom(), thickness);
+            g.drawLine (r.getX(), r.getBottom(), r.getRight(), r.getY(), thickness);
+        };
+        diagonal (4.0f, juce::Colours::white);
+        diagonal (1.5f, juce::Colour (0xffc8102e));
+        g.setColour (juce::Colours::white);
+        g.fillRect (r.withSizeKeepingCentre (r.getWidth(), 6.0f));
+        g.fillRect (r.withSizeKeepingCentre (6.0f, r.getHeight()));
+        g.setColour (juce::Colour (0xffc8102e));
+        g.fillRect (r.withSizeKeepingCentre (r.getWidth(), 3.0f));
+        g.fillRect (r.withSizeKeepingCentre (3.0f, r.getHeight()));
+    }
+
+    g.restoreState();
+    g.setColour (juce::Colours::black.withAlpha (isMouseOver() ? 0.2f : 0.6f));
+    g.drawRoundedRectangle (r, 2.5f, 1.0f);
+}
+
 void MainComponent::paint (juce::Graphics& g)
 {
     g.fillAll (theme::window);
@@ -603,6 +665,8 @@ void MainComponent::resized()
 {
     auto area = getLocalBounds();
     header.setBounds (area.removeFromTop (juce::jmax (110, juce::jmin (headerHeight, getHeight() / 6))));
+    languageFlag.setBounds (header.getX() + 10, header.getY() + 8, 30, 20);
+    languageFlag.toFront (false);
 
     auto bar = area.removeFromTop (barHeight).reduced (10, 6);
     const int widths[numCards] = { 90, 90, 104, 100, 140, 60 };
@@ -709,7 +773,7 @@ void MainComponent::updateStatus (const juce::String& error)
 
     if (error.isNotEmpty())
     {
-        text = "Error: " + error;
+        text = tr ("Error: ") + error;
         colour = juce::Colour (0xffff6b6b);
     }
     else if (auto* device = deviceManager.getCurrentAudioDevice())
@@ -719,13 +783,13 @@ void MainComponent::updateStatus (const juce::String& error)
 
         if (active < channelsNeeded())
         {
-            text = "Needs " + juce::String (channelsNeeded()) + " channels, device gives " + juce::String (active);
+            text = tr ("Needs ") + juce::String (channelsNeeded()) + tr (" channels, device gives ") + juce::String (active);
             colour = juce::Colour (0xffffb347);
         }
     }
     else
     {
-        text = "No input device open";
+        text = tr ("No input device open");
         colour = juce::Colour (0xffffb347);
     }
 
@@ -783,7 +847,7 @@ double MainComponent::windowSeconds() const
 void MainComponent::setListeningLevel (double dbC)
 {
     listeningDbC = juce::jlimit (70.0, 90.0, std::round (dbC));
-    listeningButton.setButtonText ("Listening " + juce::String ((int) listeningDbC) + " dB(C)");
+    listeningButton.setButtonText (tr ("Listening ") + juce::String ((int) listeningDbC) + " dB(C)");
     simulator.tuning.listeningLevelDbC = listeningDbC;
 }
 
@@ -791,11 +855,11 @@ void MainComponent::showListeningMenu()
 {
     // 76 to 85 dB(C), the levels of dubbing stages, stand out; the rest is dimmed
     juce::PopupMenu menu;
-    menu.addSectionHeader ("Listening level: a screen channel at -20 dBFS RMS gives");
+    menu.addSectionHeader (tr ("Listening level: a screen channel at -20 dBFS RMS gives"));
 
     for (int db = 90; db >= 70; --db)
     {
-        juce::PopupMenu::Item item (juce::String (db) + " dB(C)" + (db == 85 ? "   cinema calibration" : ""));
+        juce::PopupMenu::Item item (juce::String (db) + " dB(C)" + (db == 85 ? tr ("   cinema calibration") : ""));
         item.itemID = db;
         item.isTicked = db == (int) listeningDbC;
         item.colour = (db >= 76 && db <= 85) ? juce::Colours::white : juce::Colour (0xff8a8a8a);
@@ -1072,18 +1136,18 @@ void MainComponent::timerCallback()
         if (cards[devCard].isVisible())
         {
             // What the listening level makes of the bass playing now, band by band
-            juce::String text = "Bass playing now, per band:  ";
+            juce::String text = tr ("Bass playing now, per band:  ");
             const char* bands[] = { "20-30 Hz", "30-60 Hz", "60-90 Hz", "90-120 Hz" };
 
             for (size_t b = 0; b < 4; ++b)
                 text << bands[b] << "  " << (! t.hasBass ? juce::String ("--")
-                                                         : juce::String (juce::roundToInt (t.bandSplDb[b])) + " dB SPL, "
-                                                             + (t.bandPhon[b] < 20.0 ? juce::String ("under 20 phon")
-                                                                                     : juce::String (juce::roundToInt (t.bandPhon[b])) + " phon")
-                                                             + ", " + juce::String (t.bandDoublingDb[b], 1) + " dB double it")
+                                                         : juce::String (juce::roundToInt (t.bandSplDb[b])) + tr (" dB SPL, ")
+                                                             + (t.bandPhon[b] < 20.0 ? juce::String (tr ("under 20 phon"))
+                                                                                     : juce::String (juce::roundToInt (t.bandPhon[b])) + tr (" phon"))
+                                                             + ", " + juce::String (t.bandDoublingDb[b], 1) + tr (" dB double it"))
                      << (b == 1 ? "\n" + juce::String ("                                              ") : (b < 3 ? "      " : ""));
 
-            text = text.replace ("Bass playing now, per band:  ", "Bass now:  ").replace ("                                              ", "                  ");
+            text = text.replace (tr ("Bass playing now, per band:  "), tr ("Bass now:  ")).replace ("                                              ", "                  ");
 
             devLoudnessLabel.setText (text, juce::dontSendNotification);
         }

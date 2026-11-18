@@ -267,12 +267,12 @@ void Room3DView::paint (juce::Graphics& g)
                                                                                               bar.getBottom() + 1.0f, 32.0f, 12.0f),
                     juce::Justification::centred);
 
-    g.drawText ("Seat score", legend.withTrimmedTop (12.0f), juce::Justification::centredLeft);
+    g.drawText (tr ("Seat score"), legend.withTrimmedTop (12.0f), juce::Justification::centredLeft);
 
     // The seat under the mouse
     if (hovered >= 0 && hovered < (int) seatPoints.size() && rated)
     {
-        juce::String text = "Seat " + juce::String (hovered + 1) + ":  " + juce::String (juce::roundToInt (100.0 * (1.0 - penalties[(size_t) hovered]))) + " %";
+        juce::String text = tr ("Seat ") + juce::String (hovered + 1) + ":  " + juce::String (juce::roundToInt (100.0 * (1.0 - penalties[(size_t) hovered]))) + " %";
 
         if (hovered < (int) changes.size())
             text << ",  " << (changes[(size_t) hovered] >= 0.0 ? "+" : "") << juce::String (changes[(size_t) hovered], 1) << " dB";
@@ -291,7 +291,7 @@ void Room3DView::paint (juce::Graphics& g)
 
     g.setColour (theme::dimText);
     g.setFont (uiFont (10.5f));
-    g.drawText ("Drag to turn, wheel to zoom, double-click to reset. Point at a seat for its score.  White: L C R   Orange: subwoofers   Blue: fills",
+    g.drawText (tr ("Drag to turn, wheel to zoom, double-click to reset. Point at a seat for its score.  White: L C R   Orange: subwoofers   Blue: fills"),
                 getLocalBounds().reduced (8, 4).removeFromTop (14), juce::Justification::centredLeft);
 }
 
@@ -524,9 +524,11 @@ juce::Slider& RoomProEditor::knob (const juce::String& label, double min, double
         slider->setDoubleClickReturnValue (true, fallback());
 
     auto* raw = slider.get();
-    slider->onDragStart = [this] { if (onGestureStart) onGestureStart(); };
     slider->onValueChange = [this, raw, set]
     {
+        if (onGestureStart)
+            onGestureStart();
+
         set (raw->getValue());
         changed (false);
     };
@@ -1073,10 +1075,11 @@ RoomProView::RoomProView()
 
     for (int i = 0; i < ProRooms::count; ++i)
     {
-        countedTicks[(size_t) i] = std::make_unique<juce::ToggleButton> ("Counts");
-        countedTicks[(size_t) i]->setTooltip ("This room counts in the Room Sim Pro score.");
+        countedTicks[(size_t) i] = std::make_unique<juce::ToggleButton> (tr ("Counts"));
+        countedTicks[(size_t) i]->setTooltip (tr ("This room counts in the Room Sim Pro score."));
         countedTicks[(size_t) i]->onClick = [this, i]
         {
+            rememberForUndo();
             config.rooms[(size_t) i].counted = countedTicks[(size_t) i]->getToggleState();
             configChanged();
         };
@@ -1089,6 +1092,8 @@ RoomProView::RoomProView()
     addAndMakeVisible (editorViewport);
 
     editor.onChange = [this] { configChanged(); };
+    editor.onGestureStart = [this] { rememberForUndo(); };
+    setWantsKeyboardFocus (true);
     editor.onStructureChange = [this]
     {
         configChanged();
@@ -1096,14 +1101,17 @@ RoomProView::RoomProView()
         {
             if (safe != nullptr)
             {
+                // Rebuilt in place: the column stays where it was
+                const auto position = safe->editorViewport.getViewPosition();
                 safe->editor.rebuild();
                 safe->resized();
+                safe->editorViewport.setViewPosition (position);
             }
         });
     };
 
-    saveButton.setTooltip ("Save the three rooms to a file.");
-    loadButton.setTooltip ("Load three rooms from a file.");
+    saveButton.setTooltip (tr ("Save the three rooms to a file."));
+    loadButton.setTooltip (tr ("Load three rooms from a file."));
     saveButton.onClick = [this] { exportConfig(); };
     loadButton.onClick = [this] { importConfig(); };
     addAndMakeVisible (saveButton);
@@ -1220,7 +1228,7 @@ void RoomProView::paint (juce::Graphics& g)
         auto big = top.removeFromLeft (230.0f);
         g.setColour (theme::dimText);
         g.setFont (uiFont (12.0f));
-        g.drawText ("Room Sim Pro score", big.removeFromTop (16.0f), juce::Justification::centredLeft);
+        g.drawText (tr ("Room Sim Pro score"), big.removeFromTop (16.0f), juce::Justification::centredLeft);
         const bool show = hasBass && shownPro >= 0.0;
         g.setColour (show ? ChainsView::colourFor (1.0 - shownPro / 100.0) : theme::dimText);
         g.setFont (uiFont (34.0f, true));
@@ -1230,8 +1238,8 @@ void RoomProView::paint (juce::Graphics& g)
         top.removeFromRight (230.0f);       // save and load
         g.setColour (theme::dimText);
         g.setFont (uiFont (11.5f));
-        g.drawFittedText ("Three rooms of your own, outside the cinema layout. Same rating as Room Sim and the same Dev settings and "
-                          "listening level. Ticked rooms count in this score, which is not part of the global one. Electrical robustness "
+        g.drawFittedText (tr ("Three rooms of your own, outside the cinema layout. Same rating as Room Sim and the same Dev settings and "
+                          "listening level. Ticked rooms count in this score, which is not part of the global one. Electrical robustness ")
                           + juce::String (juce::roundToInt (electrical)) + ".",
                           top.toNearestInt(), juce::Justification::centredLeft, 3);
     }
@@ -1261,11 +1269,11 @@ void RoomProView::paint (juce::Graphics& g)
         g.drawText (juce::String (room.name), inner.removeFromTop (18.0f), juce::Justification::centredLeft);
         g.setColour (theme::dimText);
         g.setFont (uiFont (10.5f));
-        g.drawText ((room.shape == ProRoom::round ? "Round, " + juce::String (room.width, 1) + " m across, " + juce::String (room.height, 1) + " m high"
+        g.drawText ((room.shape == ProRoom::round ? tr ("Round, ") + juce::String (room.width, 1) + tr (" m across, ") + juce::String (room.height, 1) + tr (" m high")
                                                   : juce::String (room.length, 1) + " x " + juce::String (room.width, 1) + " x " + juce::String (room.height, 1) + " m")
                       + ",  RT60 "
-                      + juce::String (room.rt60At (63.0), 2) + " s,  " + juce::String ((int) room.seatPositions().size()) + " seats"
-                      + (room.fillsOn ? ",  fills" : ""),
+                      + juce::String (room.rt60At (63.0), 2) + " s,  " + juce::String ((int) room.seatPositions().size()) + tr (" seats")
+                      + (room.fillsOn ? tr (",  fills") : ""),
                     inner.removeFromTop (14.0f), juce::Justification::centredLeft);
 
         // Seats on a -12..+12 dB line
@@ -1294,7 +1302,7 @@ void RoomProView::paint (juce::Graphics& g)
         g.drawText (hasBass && ready ? juce::String (juce::roundToInt (combined)) : juce::String ("--"), resultBox, juce::Justification::centred);
         g.setColour (theme::text);
         g.setFont (uiFont (11.0f));
-        g.drawText (computing ? juce::String ("computing...") : "room " + juce::String (juce::roundToInt (shownRoom[(size_t) i])),
+        g.drawText (computing ? juce::String (tr ("computing...")) : tr ("room ") + juce::String (juce::roundToInt (shownRoom[(size_t) i])),
                     scores, juce::Justification::centred);
     }
 }
@@ -1326,13 +1334,88 @@ void RoomProView::resized()
     area.removeFromRight (10);
     view3d.setBounds (area);
     editorViewport.setBounds (settings);
-    editor.setSize (RoomProEditor::preferredWidth, 100);
+    editor.setSize (RoomProEditor::preferredWidth, juce::jmax (100, editor.getHeight()));     // never shrunk first: that would scroll to the top
     editor.resized();
     editor.setSize (RoomProEditor::preferredWidth, editor.preferredHeight());
 }
 
+void RoomProView::rememberForUndo()
+{
+    // One step per gesture: changes less than 0.6 s apart (a knob being turned) make a single step
+    const double t = now();
+
+    if (t - lastEditAt > 0.6)
+    {
+        undoStack.push_back (config);
+
+        while (undoStack.size() > maxUndo)
+            undoStack.pop_front();
+
+        redoStack.clear();
+    }
+
+    lastEditAt = t;
+}
+
+void RoomProView::restore (const ProRooms& state)
+{
+    const auto position = editorViewport.getViewPosition();
+    config = state;
+
+    for (int i = 0; i < ProRooms::count; ++i)
+        countedTicks[(size_t) i]->setToggleState (config.rooms[(size_t) i].counted, juce::dontSendNotification);
+
+    editor.setRoom (&config.rooms[(size_t) selected]);
+    resized();
+    editorViewport.setViewPosition (position);
+    lastEditAt = 0.0;
+    configChanged();
+}
+
+bool RoomProView::undo()
+{
+    if (undoStack.empty())
+        return false;
+
+    redoStack.push_back (config);
+    const auto previous = undoStack.back();
+    undoStack.pop_back();
+    restore (previous);
+    return true;
+}
+
+bool RoomProView::redo()
+{
+    if (redoStack.empty())
+        return false;
+
+    undoStack.push_back (config);
+    const auto next = redoStack.back();
+    redoStack.pop_back();
+    restore (next);
+    return true;
+}
+
+bool RoomProView::keyPressed (const juce::KeyPress& key)
+{
+    // Option-Z: undo; Option-Shift-Z: redo (Cmd works too)
+    const auto mods = key.getModifiers();
+
+    if ((mods.isAltDown() || mods.isCommandDown()) && juce::CharacterFunctions::toLowerCase ((juce::juce_wchar) key.getKeyCode()) == 'z')
+    {
+        if (mods.isShiftDown())     redo();
+        else                        undo();
+
+        return true;
+    }
+
+    return false;
+}
+
 void RoomProView::mouseDown (const juce::MouseEvent& e)
 {
+    grabKeyboardFocus();
+
     for (int i = 0; i < ProRooms::count; ++i)
         if (cards[(size_t) i].contains (e.position))
             selectRoom (i);
@@ -1340,7 +1423,7 @@ void RoomProView::mouseDown (const juce::MouseEvent& e)
 
 void RoomProView::exportConfig()
 {
-    chooser = std::make_unique<juce::FileChooser> ("Save the Room Sim Pro rooms",
+    chooser = std::make_unique<juce::FileChooser> (tr ("Save the Room Sim Pro rooms"),
                                                    juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("Rooms.subguardrooms"),
                                                    "*.subguardrooms");
     chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
@@ -1356,7 +1439,7 @@ void RoomProView::exportConfig()
 
 void RoomProView::importConfig()
 {
-    chooser = std::make_unique<juce::FileChooser> ("Load Room Sim Pro rooms",
+    chooser = std::make_unique<juce::FileChooser> (tr ("Load Room Sim Pro rooms"),
                                                    juce::File::getSpecialLocation (juce::File::userDocumentsDirectory), "*.subguardrooms");
     chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                           [this] (const juce::FileChooser& fc)
