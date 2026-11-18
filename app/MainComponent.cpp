@@ -61,7 +61,7 @@ void LabelledSlider::resized()
 {
     auto area = getLocalBounds();
     auto top = area.removeFromTop (20);
-    valueLabel.setBounds (top.removeFromRight (120));
+    valueLabel.setBounds (top.removeFromRight (84));
     caption.setBounds (top);
     slider.setBounds (area);
 }
@@ -360,6 +360,7 @@ void MainComponent::buildCards()
 
         chainInertia.clear();
         slowScore = -1.0;
+        proView.resetScores();
         displayedScore = -1;
 
         analysis.requestReset();
@@ -499,10 +500,15 @@ void MainComponent::buildCards()
         dLate.format = dEarly.format = dCeiling.format = dInfraWeight.format = dLevelWeight.format = dWorstWeight.format = plain;
         dWorstShare.format = [] (double v) { return juce::String (juce::roundToInt (100.0 * v)) + " %"; };
         dInfraLo.format = dInfraHi.format = hz;
-        devLoudnessLabel.setFont (uiFont (11.5f));
-        devLoudnessLabel.setColour (juce::Label::textColourId, theme::dimText);
-        devLoudnessLabel.setJustificationType (juce::Justification::topLeft);
-        devLoudnessLabel.setMinimumHorizontalScale (1.0f);
+        const juce::String sectionTitles[] = { tr ("Tolerances (Soft, Medium, Strong)"), tr ("Cinema subwoofer off its place"), tr ("LFE dependence"),
+                                               tr ("Infra-bass"), tr ("Rooms (Room Sim and Room Sim Pro)") };
+
+        for (size_t i = 0; i < devSections.size(); ++i)
+        {
+            devSections[i].setText (sectionTitles[i], juce::dontSendNotification);
+            devSections[i].setFont (uiFont (12.5f, true));
+            devSections[i].setColour (juce::Label::textColourId, juce::Colour (0xff7fb8ea));
+        }
 
         dTolSoft.setTooltip (tr ("How many dB a band may change on a playback system before it starts to count, at each level."));
         dCeiling.setTooltip (tr ("How much of the score a bass entirely in the LFE can take away. At 1.00 'LFE alone' scores near 2; about 0.80 puts it near 20."));
@@ -543,25 +549,41 @@ void MainComponent::buildCards()
             card.addAndMakeVisible (slider);
 
         card.addAndMakeVisible (devDefaultsButton);
-        card.addAndMakeVisible (devLoudnessLabel);
+        card.addAndMakeVisible (devLoudness);
+
+        for (auto& section : devSections)
+            card.addAndMakeVisible (section);
+
         card.onLayout = [this] (juce::Rectangle<int> r)
         {
-            auto bottom = r.removeFromBottom (48);
-            devDefaultsButton.setBounds (bottom.removeFromRight (100).removeFromTop (26).withTrimmedLeft (10));
-            devLoudnessLabel.setBounds (bottom);
-            auto leftColumn = r.removeFromLeft (r.getWidth() / 2).withTrimmedRight (10);
-            auto rightColumn = r.withTrimmedLeft (10);
-            int index = 0;
+            // Two columns of titled groups, then the table of the bass playing now
+            auto bottom = r.removeFromBottom (100);
+            devDefaultsButton.setBounds (bottom.removeFromRight (100).removeFromBottom (26).withTrimmedLeft (10));
+            devLoudness.setBounds (bottom.withTrimmedRight (12));
+            r.removeFromBottom (8);
+            auto left = r.removeFromLeft (r.getWidth() / 2).withTrimmedRight (14);
+            auto right = r.withTrimmedLeft (14);
 
-            for (auto* slider : devSliders())
+            const auto group = [this] (juce::Rectangle<int>& column, size_t title, std::initializer_list<LabelledSlider*> sliders)
             {
-                auto& column = index++ < 7 ? leftColumn : rightColumn;
-                slider->setBounds (column.removeFromTop (46));
-                column.removeFromTop (4);
-            }
+                devSections[title].setBounds (column.removeFromTop (22));
 
+                for (auto* slider : sliders)
+                {
+                    slider->setBounds (column.removeFromTop (40));
+                    column.removeFromTop (2);
+                }
+
+                column.removeFromTop (8);
+            };
+
+            group (left, 0, { &dTolSoft, &dTolMedium, &dTolStrong });
+            group (left, 1, { &dLate, &dEarly });
+            group (left, 2, { &dCeiling, &dLevelWeight, &dLevelRed });
+            group (right, 3, { &dInfraWeight, &dInfraLo, &dInfraHi });
+            group (right, 4, { &dWorstWeight, &dWorstShare });
         };
-        card.setSize (680, 454);
+        card.setSize (760, 590);
         addChildComponent (card);
     }
 
@@ -610,6 +632,71 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
         return proView.keyPressed (key);
 
     return false;
+}
+
+void LoudnessTable::set (const Translation& t)
+{
+    hasBass = t.hasBass;
+
+    for (size_t b = 0; b < 4; ++b)
+    {
+        spl[b] = t.bandSplDb[b];
+        phon[b] = t.bandPhon[b];
+        doubling[b] = t.bandDoublingDb[b];
+    }
+
+    repaint();
+}
+
+void LoudnessTable::paint (juce::Graphics& g)
+{
+    auto area = getLocalBounds().toFloat();
+    g.setColour (juce::Colour (0xff222428));
+    g.fillRoundedRectangle (area, 5.0f);
+    area = area.reduced (10.0f, 6.0f);
+
+    g.setColour (juce::Colour (0xff7fb8ea));
+    g.setFont (uiFont (12.5f, true));
+    g.drawText (tr ("Bass playing now, at the listening level"), area.removeFromTop (18.0f), juce::Justification::centredLeft);
+
+    // A header row, then one row per band
+    const juce::String headers[] = { tr ("Band"), tr ("Level"), tr ("Loudness"), tr ("dB to double it") };
+    const char* bands[] = { "20-30 Hz", "30-60 Hz", "60-90 Hz", "90-120 Hz" };
+    const float columnWidth = area.getWidth() / 5.0f, rowHeight = (area.getHeight() - 2.0f) / 3.0f;
+
+    const auto cell = [&] (int row, int column, const juce::String& text, bool header)
+    {
+        g.setColour (header ? theme::dimText : theme::text);
+        g.setFont (uiFont (header ? 11.0f : 12.0f, ! header));
+        const auto r = juce::Rectangle<float> (area.getX() + columnWidth * (float) column, area.getY() + rowHeight * (float) row,
+                                               columnWidth, rowHeight);
+        g.drawText (text, r, column == 0 ? juce::Justification::centredLeft : juce::Justification::centred);
+    };
+
+    // Transposed: bands across, quantities down, so that four bands fit on one line
+    cell (0, 0, headers[0], true);
+
+    for (int b = 0; b < 4; ++b)
+        cell (0, b + 1, bands[b], true);
+
+    const juce::String rowNames[] = { headers[1], headers[2] + " / " + headers[3] };
+
+    for (int row = 0; row < 2; ++row)
+    {
+        cell (row + 1, 0, rowNames[row], true);
+
+        for (int b = 0; b < 4; ++b)
+        {
+            juce::String text = "--";
+
+            if (hasBass)
+                text = row == 0 ? juce::String (juce::roundToInt (spl[(size_t) b])) + " dB SPL"
+                                : (phon[(size_t) b] < 20.0 ? tr ("under 20 phon") : juce::String (juce::roundToInt (phon[(size_t) b])) + tr (" phon"))
+                                    + " / " + juce::String (doubling[(size_t) b], 1) + " dB";
+
+            cell (row + 1, b + 1, text, false);
+        }
+    }
 }
 
 void LanguageFlag::paint (juce::Graphics& g)
@@ -1075,7 +1162,7 @@ void MainComponent::timerCallback()
         // Room Sim Pro: its own score, from the electrical translation (before any Room Sim folding)
         if (proMode)
             proView.update (measured, info.translation, simulator.tuning, currentLevel(),
-                            lfeGainToggle.getToggleState() ? lfeInBandGainDb : 0.0);
+                            lfeGainToggle.getToggleState() ? lfeInBandGainDb : 0.0, dt, scoreSpeed.value());
 
         // Room Sim: computed when shown or when ticked rooms count in the score
         if (roomMode || std::find (roomSelected.begin(), roomSelected.end(), true) != roomSelected.end())
@@ -1133,20 +1220,7 @@ void MainComponent::timerCallback()
         if (cards[devCard].isVisible())
         {
             // What the listening level makes of the bass playing now, band by band
-            juce::String text = tr ("Bass playing now, per band:  ");
-            const char* bands[] = { "20-30 Hz", "30-60 Hz", "60-90 Hz", "90-120 Hz" };
-
-            for (size_t b = 0; b < 4; ++b)
-                text << bands[b] << "  " << (! t.hasBass ? juce::String ("--")
-                                                         : juce::String (juce::roundToInt (t.bandSplDb[b])) + tr (" dB SPL, ")
-                                                             + (t.bandPhon[b] < 20.0 ? juce::String (tr ("under 20 phon"))
-                                                                                     : juce::String (juce::roundToInt (t.bandPhon[b])) + tr (" phon"))
-                                                             + ", " + juce::String (t.bandDoublingDb[b], 1) + tr (" dB double it"))
-                     << (b == 1 ? "\n" + juce::String ("                                              ") : (b < 3 ? "      " : ""));
-
-            text = text.replace (tr ("Bass playing now, per band:  "), tr ("Bass now:  ")).replace ("                                              ", "                  ");
-
-            devLoudnessLabel.setText (text, juce::dontSendNotification);
+            devLoudness.set (t);
         }
 
         spectrum.setScore ((double) displayedScore);

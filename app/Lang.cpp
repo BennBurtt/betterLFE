@@ -295,6 +295,16 @@ namespace
             { "As with pink noise and a sound level meter: each speaker group is set for the same total energy from 20 to 120 Hz (direct and reverberant sound together, which below the Schroeder frequency are the same modes). A live room therefore gets lower gains than a dead one.",
               "Comme au bruit rose et au sonomètre : chaque groupe d'enceintes est réglé pour la même énergie totale de 20 à 120 Hz (son direct et réverbéré ensemble, qui sous la fréquence de Schroeder sont les mêmes modes). Une salle vive reçoit donc des gains plus bas qu'une salle mate." },
 
+            { "Soft:", "Soft :" }, { "Medium:", "Medium :" }, { "Strong:", "Strong :" },
+            { "Weight when late:", "Poids en retard :" }, { "Weight when early:", "Poids en avance :" }, { "Ceiling:", "Plafond :" },
+            { "Weight:", "Poids :" }, { "Up to:", "Jusqu'à :" }, { "Level dependence, weight:", "Dépendance au niveau, poids :" },
+            { "Level dependence, red at:", "Dépendance au niveau, rouge à :" }, { "Worst seats, weight:", "Pires places, poids :" },
+            { "Worst seats, share:", "Pires places, part :" },
+            { "Tolerances (Soft, Medium, Strong)", "Tolérances (Soft, Medium, Strong)" }, { "Cinema subwoofer off its place", "Sub de cinéma mal placé" },
+            { "LFE dependence", "Dépendance au LFE" }, { "Infra-bass", "Infra-grave" }, { "Rooms (Room Sim and Room Sim Pro)", "Salles (Room Sim et Room Sim Pro)" },
+            { "Bass playing now, at the listening level", "Grave joué maintenant, au niveau d'écoute" }, { "Band", "Bande" }, { "Level", "Niveau" },
+            { "Loudness", "Sonie" }, { "dB to double it", "dB pour la doubler" },
+
             // The fifteen cinema rooms
             { "Corridor room, live", "Salle couloir, vive" }, { "Small multiplex, live", "Petit multiplexe, vif" },
             { "Old cinema, near-cubic, live", "Ancien cinéma, presque cubique, vif" }, { "Narrow 120 seats", "Étroite 120 places" },

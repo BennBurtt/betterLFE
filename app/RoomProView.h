@@ -8,6 +8,7 @@
 
 #include "Widgets.h"
 #include "Lang.h"
+#include "../core/Inertia.h"
 #include "../core/RoomPro.h"
 
 #include <array>
@@ -137,8 +138,12 @@ public:
     std::function<void()> onConfigChanged;      // to save it
 
     /** Each frame while shown. `electrical` is the playback simulation without any room. */
+    /** `seconds`: time since the last call; `scoreSpeed`: the Score speed setting (0..1), the same smoothing as the global score. */
     void update (const Analysis&, const Translation& electrical, const PlaybackSimulator::Tuning&,
-                 PlaybackSimulator::Level, double lfeGainDb);
+                 PlaybackSimulator::Level, double lfeGainDb, double seconds, double scoreSpeed);
+
+    /** Restarts the shown scores (the Reset button). */
+    void resetScores();
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -177,6 +182,18 @@ private:
     std::array<RoomResult, ProRooms::count> results;
     std::array<double, ProRooms::count> shownRoom { { 100.0, 100.0, 100.0 } };
     double proScore = 100.0, shownPro = -1.0, electrical = 100.0;
+
+    // The same smoothing as the global score: display inertia, then Score speed,
+    // then the number only moves once it has really moved (1.5 points)
+    struct Smoothed
+    {
+        Inertia inertia;
+        double slow = -1.0, shown = -1.0;
+        double update (double value, double seconds, double scoreSpeed);
+        void reset()    { inertia.reset(); slow = shown = -1.0; }
+    };
+    std::array<Smoothed, ProRooms::count> roomSmooth;
+    Smoothed proSmooth;
     bool hasBass = false, ready = false;
 
     // Layout

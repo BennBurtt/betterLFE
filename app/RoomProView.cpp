@@ -1194,8 +1194,33 @@ void RoomProView::startPreparing (const std::vector<double>& grid)
     });
 }
 
+double RoomProView::Smoothed::update (double value, double seconds, double scoreSpeed)
+{
+    const double v = inertia.update (value, seconds);
+
+    // Score speed: an extra, plain smoothing on top, up to about ten seconds
+    if (scoreSpeed > 0.0 && slow >= 0.0)
+        slow += (1.0 - std::exp (-seconds / (10.0 * scoreSpeed * scoreSpeed))) * (v - slow);
+    else
+        slow = v;
+
+    if (shown < 0.0 || std::abs (slow - shown) >= 1.5)
+        shown = (double) juce::roundToInt (slow);
+
+    return shown;
+}
+
+void RoomProView::resetScores()
+{
+    for (auto& r : roomSmooth)
+        r.reset();
+
+    proSmooth.reset();
+    shownPro = -1.0;
+}
+
 void RoomProView::update (const Analysis& a, const Translation& electricalTranslation, const PlaybackSimulator::Tuning& tuning,
-                          PlaybackSimulator::Level level, double lfeGainDb)
+                          PlaybackSimulator::Level level, double lfeGainDb, double seconds, double scoreSpeed)
 {
     // Collect a finished preparation, start the next one when the settings have settled
     if (job.valid() && job.wait_for (std::chrono::seconds (0)) == std::future_status::ready)
@@ -1203,12 +1228,21 @@ void RoomProView::update (const Analysis& a, const Translation& electricalTransl
         paths = job.get();
         pathsGrid = jobGrid;
         ready = true;
+
+        // New rooms: their scores start from what they are, not from the old ones
+        for (auto& r : roomSmooth)
+            r.reset();
+
+        proSmooth.reset();
     }
 
     if (! job.valid() && ! a.grid.empty() && (dirty || a.grid != pathsGrid) && now() - changedAt > 0.25)
         startPreparing (a.grid);
 
     hasBass = electricalTranslation.hasBass;
+
+    if (! hasBass)
+        resetScores();      // as the global score: no bass, nothing to hold on to
     electrical = electricalTranslation.robustness;
 
     if (ready && hasBass && a.grid == pathsGrid)
@@ -1222,13 +1256,13 @@ void RoomProView::update (const Analysis& a, const Translation& electricalTransl
             results[(size_t) i] = RoomSimulator::rate (paths[(size_t) i], a, electricalTranslation, tuning, level, lfeGainDb);
             rooms.rooms.push_back (results[(size_t) i]);
             counted.push_back (config.rooms[(size_t) i].counted);
-            shownRoom[(size_t) i] += 0.1 * (results[(size_t) i].roomScore - shownRoom[(size_t) i]);
+            shownRoom[(size_t) i] = roomSmooth[(size_t) i].update (results[(size_t) i].roomScore, seconds, scoreSpeed);
         }
 
         auto withRooms = electricalTranslation;
         RoomSimulator::applyToScore (withRooms, rooms, counted, tuning.levelDependenceWeight);
         proScore = withRooms.robustness;
-        shownPro = shownPro < 0.0 ? proScore : shownPro + 0.1 * (proScore - shownPro);
+        shownPro = proSmooth.update (proScore, seconds, scoreSpeed);
 
         if (! dirty)
         {

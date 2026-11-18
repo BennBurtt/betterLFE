@@ -46,6 +46,18 @@ struct LaunchOptions
     juce::String openCard;          // --card <name>: start with that panel open (for snapshots)
 };
 
+/** Dev panel: the bass playing now at the listening level, band by band, as a small table. */
+class LoudnessTable : public juce::Component
+{
+public:
+    void set (const Translation& t);
+    void paint (juce::Graphics&) override;
+
+private:
+    bool hasBass = false;
+    std::array<double, 4> spl {}, phon {}, doubling {};
+};
+
 /** A small flag at the top left: the interface language. A click switches between French and English. */
 class LanguageFlag : public juce::Component, public juce::SettableTooltipClient
 {
@@ -158,16 +170,18 @@ private:
     LabelledSlider scoreSpeed { tr ("Score speed:"), 0, 1, 0.05, 0 };
 
     // Dev panel: every choice of the score, adjustable
-    LabelledSlider dTolSoft { tr ("Tolerance, Soft:"), 0.5, 4.5, 0.1, 3 }, dTolMedium { tr ("Tolerance, Medium:"), 0.5, 4.5, 0.1, 2 },
-                   dTolStrong { tr ("Tolerance, Strong:"), 0.5, 4.5, 0.1, 1 },
-                   dLate { tr ("Weight, cinema sub late:"), 0, 1, 0.05, 0.5 }, dEarly { tr ("Weight, cinema sub early:"), 0, 1, 0.05, 0.5 },
-                   dCeiling { tr ("LFE dependence, ceiling:"), 0, 1, 0.01, 1.0 }, dInfraWeight { tr ("Infra-bass weight:"), 0, 1, 0.05, 0.30 },
-                   dInfraLo { tr ("Infra-bass up to:"), 10, 40, 1, 25 }, dInfraHi { tr ("Full weight from:"), 40, 100, 1, 40 },
-                   dLevelWeight { tr ("LFE level dependence, weight in score:"), 0, 0.5, 0.01, 0.20 },
-                   dLevelRed { tr ("LFE level dependence, red at a mean of:"), 0.5, 12, 0.1, 3 },
-                   dWorstWeight { tr ("Room score, weight of the worst seats:"), 0, 1, 0.01, 0.25 },
-                   dWorstShare { tr ("Room score, worst seats (share):"), 0.02, 0.5, 0.01, 0.10 };
-    juce::Label devLoudnessLabel;       // what the listening level makes of the bass playing now
+    // (grouped under section titles, so the captions stay short)
+    LabelledSlider dTolSoft { tr ("Soft:"), 0.5, 4.5, 0.1, 3 }, dTolMedium { tr ("Medium:"), 0.5, 4.5, 0.1, 2 },
+                   dTolStrong { tr ("Strong:"), 0.5, 4.5, 0.1, 1 },
+                   dLate { tr ("Weight when late:"), 0, 1, 0.05, 0.5 }, dEarly { tr ("Weight when early:"), 0, 1, 0.05, 0.5 },
+                   dCeiling { tr ("Ceiling:"), 0, 1, 0.01, 1.0 }, dInfraWeight { tr ("Weight:"), 0, 1, 0.05, 0.30 },
+                   dInfraLo { tr ("Up to:"), 10, 40, 1, 25 }, dInfraHi { tr ("Full weight from:"), 40, 100, 1, 40 },
+                   dLevelWeight { tr ("Level dependence, weight:"), 0, 0.5, 0.01, 0.20 },
+                   dLevelRed { tr ("Level dependence, red at:"), 0.5, 12, 0.1, 3 },
+                   dWorstWeight { tr ("Worst seats, weight:"), 0, 1, 0.01, 0.25 },
+                   dWorstShare { tr ("Worst seats, share:"), 0.02, 0.5, 0.01, 0.10 };
+    std::array<juce::Label, 5> devSections;
+    LoudnessTable devLoudness;          // what the listening level makes of the bass playing now
     juce::TextButton devDefaultsButton { tr ("Defaults") };
     std::vector<LabelledSlider*> devSliders();
     void applyDevSettings();

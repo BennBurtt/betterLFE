@@ -953,7 +953,7 @@ void CorrelationPlot::paint (juce::Graphics& g)
 void Card::paint (juce::Graphics& g)
 {
     const auto bounds = getLocalBounds().toFloat().reduced (1.0f);
-    g.setColour (juce::Colour (0xf21a1a1a));
+    g.setColour (juce::Colour (0xff1b1b1d));      // opaque: what is behind does not show through
     g.fillRoundedRectangle (bounds, 8.0f);
     g.setColour (juce::Colour (0xff5a5a5a));
     g.drawRoundedRectangle (bounds, 8.0f, 1.0f);
