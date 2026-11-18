@@ -27,7 +27,7 @@
 //
 // FROM dB TO PERCEPTION
 //   The difference between a system and the reference is taken per band, in dB.
-//   ISO 226:2003 gives how many dB double the loudness of a low tone around
+//   ISO 226:2023 gives how many dB double the loudness of a low tone around
 //   80 phon: 5.0 dB at 25 Hz, 5.5 dB at 40 Hz, 6.4 dB at 70 Hz, 6.9 dB at 100 Hz
 //   (10 dB at 1 kHz). Each band is then rated
 //
@@ -115,7 +115,7 @@ struct Translation
     // bass simply follows the power sum, how much more (a boost out of a
     // cancellation) or less (a cancellation setting in) the bass moves.
     // Loudness of the reference bass in each rating band, at the chosen
-    // listening level (ISO 226:2003): its level in phon, and how many dB
+    // listening level (ISO 226:2023): its level in phon, and how many dB
     // double it there. This is what turns a level change into a sensation.
     std::array<double, ChainResult::numBands> bandSplDb {}, bandPhon {}, bandDoublingDb {};
 
@@ -180,7 +180,7 @@ public:
     static constexpr double balanceWarningDb = 6.0;     // LFE this far above the screen: the bass then follows each room's subwoofer level
 
     // What losing the LFE costs in a stereo downmix depends on frequency. Below
-    // about 25 Hz a tone is close to the threshold of hearing (78.5 dB SPL at
+    // about 25 Hz a tone is close to the threshold of hearing (78.1 dB SPL at
     // 20 Hz, 68.7 dB at 25 Hz in ISO 226) and no television, soundbar or small
     // loudspeaker reproduces it: it is felt in a cinema, and its absence
     // changes little in the downmix: it counts for a quarter. From about 60 Hz up (threshold 37.5 dB at
@@ -193,7 +193,7 @@ public:
     static constexpr double levelDependenceWeight = 0.20;
 
     // Rating bands and, for each, the level change that doubles loudness
-    // (ISO 226:2003 around 80 phon, at 25, 40, 70 and 100 Hz).
+    // (ISO 226:2023 around 80 phon, at 25, 40, 70 and 100 Hz).
     static constexpr double bandLimits[ChainResult::numBands + 1] = { 20.0, 30.0, 60.0, 90.0, 120.0 };
     static constexpr double doublingDb[ChainResult::numBands] = { 5.0, 5.5, 6.4, 6.9 };
 
@@ -258,11 +258,11 @@ public:
     static constexpr double referenceDbfs = -20.0;      // RMS level of the calibration signal
     static constexpr double bandCentreHz[ChainResult::numBands] = { 25.0, 40.0, 70.0, 100.0 };
 
-    /** ISO 226:2003: sound pressure level of a pure tone at `hz` (20..125) heard at `phon`, and the reverse. */
+    /** ISO 226:2023: sound pressure level of a pure tone at `hz` (20..125) heard at `phon`, and the reverse. */
     static double iso226Spl (double hz, double phon);
     static double iso226Phon (double hz, double splDb);
 
-    /** ISO 226:2003 threshold of hearing (Tf), free field, binaural, 18-25 years: the median listener. */
+    /** ISO 226:2023 threshold of hearing (Tf, as in ISO 389-7:2019), free field, binaural, 18-25 years: the median listener. */
     static double hearingThresholdDb (double hz);
 
     /** Share of listeners for whom a band at `splDb`, centred on `hz`, is above threshold:

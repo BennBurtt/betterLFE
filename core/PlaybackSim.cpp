@@ -77,20 +77,24 @@ namespace
 }
 
 //==============================================================================
-// ISO 226:2003, normal equal-loudness-level contours:
+// ISO 226:2023, normal equal-loudness-level contours, Formulas (1) and (2):
 //
-//   Lp = (10 / af) . log10 (Af) - Lu + 94
-//   Af = 4.47e-3 . (10^(0.025 LN) - 1.15) + (0.4 . 10^((Tf + Lu) / 10 - 9))^af
+//   Lf = (10 / af) lg [ (4e-10)^(0.3 - af) (10^(0.03 LN) - 10^0.072) + 10^(af (Tf + LU) / 10) ] - LU
+//   LN = (100 / 3) lg [ (10^(af (Lf + LU) / 10) - 10^(af (Tf + LU) / 10)) / (4e-10)^(0.3 - af) + 10^0.072 ]
 //
-// with the standard's table of af, Lu, Tf at the preferred frequencies.
-// Between them the three parameters are interpolated in log frequency.
+// (0.3: the loudness exponent at 1 kHz; 0.072 = 0.3 x 2.4 dB / 10, the
+// threshold at 1 kHz; 4e-10 = (20 uPa / 1 Pa)^2), with Table 1 of the
+// standard (af, LU, Tf; Tf as in ISO 389-7:2019). Valid from 20 to 90 phon,
+// informative below 20 phon. Between the preferred frequencies the three
+// parameters are interpolated in log frequency. The 2023 edition differs
+// from the 2003 one by up to 0.6 dB (ISO 226:2023, Note 3).
 namespace
 {
     struct Iso226Row { double hz, alpha, lu, tf; };
 
-    constexpr Iso226Row iso226Table[] = { { 20.0,  0.532, -31.6, 78.5 }, { 25.0,  0.506, -27.2, 68.7 }, { 31.5, 0.480, -23.0, 59.5 },
-                                          { 40.0,  0.455, -19.1, 51.1 }, { 50.0,  0.432, -15.9, 44.0 }, { 63.0, 0.409, -13.0, 37.5 },
-                                          { 80.0,  0.387, -10.3, 31.5 }, { 100.0, 0.367, -8.1,  26.5 }, { 125.0, 0.349, -6.2, 22.1 } };
+    constexpr Iso226Row iso226Table[] = { { 20.0,  0.635, -31.5, 78.1 }, { 25.0,  0.602, -27.2, 68.7 }, { 31.5, 0.569, -23.1, 59.5 },
+                                          { 40.0,  0.537, -19.3, 51.1 }, { 50.0,  0.509, -16.1, 44.0 }, { 63.0, 0.482, -13.1, 37.5 },
+                                          { 80.0,  0.456, -10.4, 31.5 }, { 100.0, 0.433, -8.2,  26.5 }, { 125.0, 0.412, -6.3, 22.1 } };
 
     Iso226Row iso226At (double hz)
     {
@@ -111,21 +115,25 @@ namespace
 
         return iso226Table[last];
     }
+
+    constexpr double iso226Reference = 4e-10;       // (p0 / 1 Pa)^2, p0 = 20 uPa
 }
 
 double PlaybackSimulator::iso226Spl (double hz, double phon)
 {
     const auto r = iso226At (hz);
-    const double af = 4.47e-3 * (std::pow (10.0, 0.025 * phon) - 1.15) + std::pow (0.4 * std::pow (10.0, (r.tf + r.lu) / 10.0 - 9.0), r.alpha);
-    return 10.0 / r.alpha * std::log10 (af) - r.lu + 94.0;
+    const double inner = std::pow (iso226Reference, 0.3 - r.alpha) * (std::pow (10.0, 0.03 * phon) - std::pow (10.0, 0.072))
+                       + std::pow (10.0, r.alpha * (r.tf + r.lu) / 10.0);
+    return 10.0 / r.alpha * std::log10 (inner) - r.lu;
 }
 
 double PlaybackSimulator::iso226Phon (double hz, double splDb)
 {
     const auto r = iso226At (hz);
-    const double af = std::pow (10.0, (splDb + r.lu - 94.0) * r.alpha / 10.0);
-    const double inner = (af - std::pow (0.4 * std::pow (10.0, (r.tf + r.lu) / 10.0 - 9.0), r.alpha)) / 4.47e-3 + 1.15;
-    return inner > 0.0 ? 40.0 * std::log10 (inner) : -100.0;      // far below the threshold of hearing
+    const double inner = (std::pow (10.0, r.alpha * (splDb + r.lu) / 10.0) - std::pow (10.0, r.alpha * (r.tf + r.lu) / 10.0))
+                           / std::pow (iso226Reference, 0.3 - r.alpha)
+                       + std::pow (10.0, 0.072);
+    return inner > 0.0 ? 100.0 / 3.0 * std::log10 (inner) : -100.0;      // far below the threshold of hearing
 }
 
 double PlaybackSimulator::hearingThresholdDb (double hz)

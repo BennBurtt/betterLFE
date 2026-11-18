@@ -1380,8 +1380,14 @@ static void testPlaybackChains()
                "listening level: 9 dB lower is heard much quieter in the bass", a85.bandPhon[1] - a76.bandPhon[1]);
     }
     {
-        // Audibility (ISO 226:2003 threshold, listeners spread by 5 dB)
-        check (std::abs (PlaybackSimulator::hearingThresholdDb (20.0) - 78.5) < 1e-9
+        // ISO 226:2023: at the threshold a tone is at 2.4 phon (the 1 kHz threshold), and Table 1 gives back itself
+        check (std::abs (PlaybackSimulator::iso226Phon (40.0, 51.1) - 2.4) < 1e-9 && std::abs (PlaybackSimulator::iso226Spl (63.0, 2.4) - 37.5) < 1e-9,
+               "ISO 226:2023: the threshold of hearing is 2.4 phon at every frequency", PlaybackSimulator::iso226Phon (40.0, 51.1));
+        check (std::abs (PlaybackSimulator::iso226Phon (50.0, PlaybackSimulator::iso226Spl (50.0, 60.0)) - 60.0) < 1e-9,
+               "ISO 226:2023: Formula (2) is the inverse of Formula (1)", PlaybackSimulator::iso226Phon (50.0, PlaybackSimulator::iso226Spl (50.0, 60.0)));
+
+        // Audibility (ISO 226:2023 threshold, as ISO 389-7:2019; listeners spread by 5 dB)
+        check (std::abs (PlaybackSimulator::hearingThresholdDb (20.0) - 78.1) < 1e-9
                  && std::abs (PlaybackSimulator::hearingThresholdDb (63.0) - 37.5) < 1e-9, "threshold of hearing: ISO 226 values", 0.0);
         check (std::abs (PlaybackSimulator::audibleShare (40.0, PlaybackSimulator::hearingThresholdDb (40.0), 5.0) - 0.5) < 1e-9,
                "at the threshold, half the listeners hear it", 0.0);

@@ -231,10 +231,10 @@ s'écarte-t-il de ce qui a été validé, selon la façon dont il est diffusé ?
 | La restitution varie largement d'une salle à l'autre, et surtout entre l'auditorium et la salle ; l'écart est sévère dans le grave | Rapport SMPTE TC-25CSS 2014 [10], Hill et al. [11] | Le retard et la polarité du sub sont simulés. Le niveau du sub ne l'est pas : il varie d'une salle à l'autre, et c'est précisément pourquoi le grave ne doit pas reposer sur le LFE |
 | Le LFE est optionnel à la réception, ne doit porter que de l'information d'appoint, et ne doit pas porter tout le grave du programme | UIT-R BS.775 [12] | Un LFE qui porte l'essentiel du grave est un défaut du mix |
 | Les downmix deux canaux omettent le LFE | Dolby [13], UIT-R BS.775 [12] | La stéréo sans LFE est un système de lecture à part entière |
-| Dans le grave, les courbes d'isosonie sont resserrées : de petits écarts de niveau s'entendent beaucoup | ISO 226:2003 [14], Leembruggen & Newell [15] | Les dB sont convertis en sensation, bande par bande |
+| Dans le grave, les courbes d'isosonie sont resserrées : de petits écarts de niveau s'entendent beaucoup | ISO 226:2023 [14], Leembruggen & Newell [15] | Les dB sont convertis en sensation, bande par bande |
 | Un écart de niveau commence à s'entendre vers 1 dB | psychoacoustique classique [16] | En dessous de 1 dB, aucune pénalité |
 
-### 3.2 Des dB à la sensation (ISO 226:2003)
+### 3.2 Des dB à la sensation (ISO 226:2023)
 
 La sonie double tous les 10 phones. À 1 kHz cela fait 10 dB ; dans le grave,
 bien moins. Calcul à partir de la formule et des paramètres de la norme, autour
@@ -263,12 +263,19 @@ niveaux des auditoriums de mixage).
 2. Le grave de référence de chaque bande a un niveau RMS en dBFS ; son niveau
    de pression est `niveau d'écoute + (dBFS + 20)`. Le LFE y entre avec son
    gain de lecture (+10 dB si la case est cochée).
-3. ISO 226:2003 [14] donne le niveau d'isosonie `LN` (phones) d'un son pur de
-   cette fréquence à cette pression, par sa formule :
-   `Lp = (10/αf)·log10(Af) − LU + 94`, avec
-   `Af = 4,47·10⁻³·(10^(0,025·LN) − 1,15) + (0,4·10^((Tf+LU)/10 − 9))^αf`
-   et les paramètres `αf`, `LU`, `Tf` de la norme (interpolés en fréquence
-   logarithmique aux centres de bande 25, 40, 70 et 100 Hz).
+3. ISO 226:2023 [14] donne le niveau d'isosonie `LN` (phones) d'un son pur de
+   cette fréquence à cette pression, par ses formules (1) et (2) :
+   `Lf = (10/αf)·lg[(4·10⁻¹⁰)^(0,3−αf)·(10^(0,03·LN) − 10^0,072) + 10^(αf·(Tf+LU)/10)] − LU`
+   et l'inverse
+   `LN = (100/3)·lg[(10^(αf·(Lf+LU)/10) − 10^(αf·(Tf+LU)/10)) / (4·10⁻¹⁰)^(0,3−αf) + 10^0,072]`,
+   avec les paramètres `αf`, `LU`, `Tf` de sa table 1 (interpolés en fréquence
+   logarithmique entre les tiers d'octave). 0,3 est l'exposant de sonie à
+   1 kHz (0,25 dans l'édition 2003), 0,072 = 0,3 × 2,4 dB / 10 le seuil à
+   1 kHz. Valable de 20 à 90 phones, indicative en dessous de 20 phones.
+   L'édition 2023 diffère de celle de 2003 de 0,6 dB au plus ; son seuil à
+   20 Hz est descendu de 78,5 à 78,1 dB, comme ISO 389-7:2019. Vérifié : au
+   seuil, un son pur est à 2,4 phones à toutes les fréquences, et la formule
+   (2) est bien l'inverse de la (1).
 4. Doubler la sensation, c'est monter de 10 phones : le nombre de dB par
    doublement est `Lp(LN + 10) − Lp(LN)`, pris entre 20 et 80 phones (la norme
    couvre 20 à 90).
@@ -283,7 +290,7 @@ de calibrage est prise égale à son niveau de pression.
 **Audibilité.** Un grave que personne n'entend ne compte pas ; un grave au
 seuil compte pour la part des spectateurs qui l'entendent.
 
-1. Seuil : le seuil d'audition d'ISO 226:2003 [14] (colonne `Tf` : 78,5 dB SPL
+1. Seuil : le seuil d'audition d'ISO 226:2023 [14] (colonne `Tf` : 78,1 dB SPL
    à 20 Hz, 68,7 à 25 Hz, 51,1 à 40 Hz, 37,5 à 63 Hz, 26,5 à 100 Hz). C'est
    le seuil médian de jeunes auditeurs otologiquement normaux, en champ libre
    et binaural ; il est identique à celui d'ISO 389-7 [28], et de 20 à 250 Hz
@@ -376,7 +383,7 @@ Pour chaque système et chaque bande (20–30, 30–60, 60–90, 90–120 Hz) :
 2. `pénalité de bande = borne((|écart| − T) / (D − T), 0, 1)`, avec `D` le
    nombre de dB qui double la sonie dans cette bande, calculé par ISO 226 au
    niveau réel de la bande au niveau d'écoute choisi (voir 3.2 ; vers 80 phones
-   il vaut environ 5,0 ; 5,5 ; 6,4 ; 6,9 dans les quatre bandes), et
+   il vaut environ 5,0 ; 5,6 ; 6,4 ; 7,0 dans les quatre bandes), et
    `T` la tolérance du niveau choisi (voir 3.6). Zéro jusqu'à `T`, 1 quand la
    bande est entendue deux fois plus forte ou deux fois plus faible.
 3. `pénalité du système = Σ part de la bande × pénalité de bande`, la part étant
@@ -423,7 +430,7 @@ pour rien.
 | Bruit large bande 20–120 Hz | — | 2 |
 
 Les bornes viennent de trois constats (voir 3.8 bis) : le seuil d'audition
-monte très vite vers le bas (78,5 dB SPL à 20 Hz, 68,7 dB à 25 Hz, 37,5 dB à
+monte très vite vers le bas (78,1 dB SPL à 20 Hz, 68,7 dB à 25 Hz, 37,5 dB à
 63 Hz [14]) ; sous 20–25 Hz la sensation passe de l'écoute au ressenti
 corporel [25] ; et les appareils sur lesquels s'écoute un downmix ne
 descendent pas là : un téléviseur qui atteint 60 Hz est déjà un bon
@@ -480,9 +487,9 @@ grave de près de 6 dB entre un sub en polarité et un sub inversé.
 | Élément | Statut |
 |---|---|
 | LFE à +10 dB, omission du LFE en downmix, rôle d'appoint du LFE | Normes [9][12][13] |
-| Conversion dB → sensation (5,0 à 6,9 dB par doublement) | Calculé depuis ISO 226:2003 [14] |
-| Seuil d'audition | ISO 226:2003 [14] / ISO 389-7 [28], point par point sur la grille, niveau pris sur un filtre auditif [29] |
-| Dispersion des seuils (écart-type 5 dB) | Ordre de grandeur publié [25][30] ; ISO 28961 [27] en donne la distribution exacte (non consultée, payante) |
+| Conversion dB → sensation (5,0 à 7,0 dB par doublement vers 80 phones) | Calculé depuis ISO 226:2023 [14] |
+| Seuil d'audition | ISO 226:2023 [14] / ISO 389-7:2019 [28], point par point sur la grille, niveau pris sur un filtre auditif [29] |
+| Dispersion des seuils (écart-type 5 dB) | Ordre de grandeur publié [25][30] ; les niveaux d'isosonie mesurés qui fondent ISO 226:2023 ont eux-mêmes un écart-type d'environ 5 à 6 dB [37]. ISO 28961 [27] donne la distribution exacte des seuils, fréquence par fréquence : non consultée (payante), la valeur uniforme de 5 dB reste une approximation |
 | Tolérances des trois niveaux (3 ; 2 ; 1 dB) | Choix ; 1 dB est l'ordre de grandeur admis du plus petit écart audible [16] |
 | Filtres de bass management (Linkwitz-Riley 24 dB/oct) | Modèle courant, variable selon les appareils |
 | Filtre d'encodeur (Butterworth 8ᵉ ordre à 120 Hz) | Modèle : le filtre LFE de Dolby Digital Plus n'est pas public |
@@ -502,7 +509,7 @@ grave de près de 6 dB entre un sub en polarité et un sub inversé.
 | EBU Tech 3343 / UIT-R BS.1770 [19] | Le LFE est exclu de la mesure de sonie : un grave placé dans le LFE échappe au contrôle de loudness |
 | Netflix, spécifications de mixage [20] | Un stéréo fabriqué à la main peut inclure le LFE, replié entre −8 et −12 dB et filtré à 200 Hz ou moins |
 
-| ISO 226:2003 [14] | Seuil d'audition : 78,5 dB SPL à 20 Hz, 68,7 dB à 25 Hz, 37,5 dB à 63 Hz |
+| ISO 226:2023 [14] | Seuil d'audition : 78,1 dB SPL à 20 Hz, 68,7 dB à 25 Hz, 37,5 dB à 63 Hz ; applicable aux bandes de bruit d'un tiers d'octave ou plus étroites (note 1) |
 | Møller & Pedersen 2004 [25] | Sous 20 Hz environ, le son perd son caractère tonal ; le ressenti corporel (vibration) apparaît 20 à 25 dB au-dessus du seuil d'audition |
 | Mesures de téléviseurs et de petites enceintes [26] | Extension dans le grave : 60 Hz est déjà une bonne valeur pour un téléviseur ; les petits haut-parleurs coupent vers 150 Hz |
 
@@ -1055,7 +1062,8 @@ du son) : bruit blanc ou rose, aucune ; grondement grave (sous 90 Hz), 1 à 3.
     accompanying picture*, annexe sur le canal LFE.
 13. Dolby Laboratories, *Dolby Digital Professional Encoding Guidelines* et
     *5.1-Channel Production Guidelines*.
-14. ISO 226:2003, *Acoustics — Normal equal-loudness-level contours*.
+14. ISO 226:2023, *Acoustics — Normal equal-loudness-level contours*
+    (remplace l'édition 2003 ; formules (1) et (2), table 1, notes 1 à 3).
 15. G. Leembruggen, P. Newell, « Why does cinema sound quality mostly fail to
     realise its potential? », *Proc. Institute of Acoustics*, 2015.
 16. E. Zwicker, H. Fastl, *Psychoacoustics: Facts and Models*, Springer
@@ -1106,6 +1114,9 @@ du son) : bruit blanc ou rose, aucune ; grondement grave (sous 90 Hz), 1 à 3.
     §9.2 (modes d'une cavité cylindrique).
 36. L. N. Trefethen, J. A. C. Weideman, « The exponentially convergent
     trapezoidal rule », *SIAM Review* 56(3), 385–458 (2014).
+37. Y. Suzuki, H. Takeshima, K. Kurakata, « Revision of ISO 226 "Normal
+    Equal-Loudness-Level Contours" from 2003 to 2023 edition: the background
+    and results », *Acoust. Sci. & Tech.* 45(1), 2024.
 
 
 ## Niveau du LFE et réglages
