@@ -328,7 +328,7 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
         return -1;
     };
 
-    if (m.cLC.size() != a.grid.size() || room.p.size() != (size_t) room.seats * points.size())
+    if (m.cLC.size() != a.grid.size() || room.p.size() != (size_t) (room.seats + room.probes) * points.size())
         return r;
 
     // The mix's cross-spectral matrix (L, C, R, LFE) at each band point, the
@@ -424,8 +424,10 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
 
     r.seatChangeDb.assign ((size_t) room.seats, 0.0);
     r.seatPenalty.assign ((size_t) room.seats, 0.0);
+    r.probeChangeDb.assign ((size_t) room.probes, 0.0);
+    r.probePenalty.assign ((size_t) room.probes, 0.0);
 
-    for (int seat = 0; seat < room.seats; ++seat)
+    for (int seat = 0; seat < room.seats + room.probes; ++seat)
     {
         double actual[numBands] = {}, inPower[numBands] = {};
 
@@ -497,9 +499,39 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
         for (int b = 0; b < numBands; ++b)
             penalty += weights[b] / (weightTotal + 1e-60) * rated[b];
 
-        r.seatPenalty[(size_t) seat] = std::min (penalty, 1.0) * heardAtAll;
-        r.seatChangeDb[(size_t) seat] = totalPower > 0.0 ? limitedDb ((totalActual / totalPower) / (approvedTotal / (approvedPowerTotal + 1e-60) + 1e-30))
-                                                         : 0.0;
+        const double seatPenalty = std::min (penalty, 1.0) * heardAtAll;
+        const double seatChange = totalPower > 0.0 ? limitedDb ((totalActual / totalPower) / (approvedTotal / (approvedPowerTotal + 1e-60) + 1e-30))
+                                                   : 0.0;
+
+        if (seat < room.seats)
+        {
+            r.seatPenalty[(size_t) seat] = seatPenalty;
+            r.seatChangeDb[(size_t) seat] = seatChange;
+        }
+        else
+        {
+            r.probePenalty[(size_t) (seat - room.seats)] = seatPenalty;
+            r.probeChangeDb[(size_t) (seat - room.seats)] = seatChange;
+        }
+    }
+
+    if (r.seatChangeDb.empty())
+        return r;
+
+    // The score 10 % of the seats fall below, and the worst point found (extra points included)
+    {
+        auto penalties = r.seatPenalty;
+        std::sort (penalties.begin(), penalties.end(), std::greater<double>());
+        const size_t at = std::min (penalties.size() - 1, (size_t) std::floor (0.1 * (double) penalties.size()));
+        r.p10Score = 100.0 * (1.0 - penalties[at]);
+        r.worstPointScore = 100.0 * (1.0 - penalties.front());
+
+        for (size_t k = 0; k < r.probePenalty.size(); ++k)
+            if (100.0 * (1.0 - r.probePenalty[k]) < r.worstPointScore)
+            {
+                r.worstPointScore = 100.0 * (1.0 - r.probePenalty[k]);
+                r.worstProbe = (int) k;
+            }
     }
 
     auto sorted = r.seatChangeDb;

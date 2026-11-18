@@ -69,6 +69,10 @@ struct RoomResult
     std::vector<double> seatPenalty;            // per seat, 0..1
     double worstDb = 0.0, medianDb = 0.0, bestDb = 0.0;   // seats sorted by change
     double roomScore = 100.0;                             // 0..100: seat scores, the worst seats weighed more (see rate)
+    double p10Score = 100.0;                              // the seat score that 10 % of the seats fall below
+    std::vector<double> probePenalty, probeChangeDb;      // Pro: extra points around the riskiest seats (not in the room score)
+    double worstPointScore = 100.0;                       // the lowest score found, seats and extra points together
+    int worstProbe = -1;                                  // the extra point that scored lowest, if one did below every seat
     double combinedScore = 100.0;                         // bass robustness x room score / 100
 };
 
@@ -83,7 +87,13 @@ struct RoomPaths
     RoomSpec spec;
     int seats = 0;
     std::vector<int> points;                                // grid indices inside 20-120 Hz
-    std::vector<ChannelMatrix> p;                           // [seat * points.size() + i]
+    std::vector<ChannelMatrix> p;                           // [seat * points.size() + i]; the probes follow the seats
+
+    // Room Sim Pro: extra points around the seats where the room plays the LFE
+    // path most differently from the screen path, to look for a worse spot
+    // than the seats themselves. Rated, shown, not in the room score.
+    int probes = 0;
+    std::vector<std::array<double, 3>> probePositions;
 
     // The room as set up normally (no level offsets), calibrated: what each seat
     // is measured against, so that the room's own colour is left out but a

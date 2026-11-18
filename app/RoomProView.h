@@ -12,6 +12,7 @@
 
 #include <array>
 #include <deque>
+#include <optional>
 #include <functional>
 #include <future>
 #include <memory>
@@ -25,6 +26,17 @@ class Room3DView : public juce::Component
 {
 public:
     void setRoom (const ProRoom& r, const std::vector<double>& seatPenalties, const std::vector<double>& seatChangeDb = {});
+
+    /** The worst point found between the seats (extra points), drawn when there is one below every seat. */
+    void setWorstSpot (std::optional<std::array<double, 3>> spot, double score)
+    {
+        if (spot != worstSpot || score != worstSpotScore)
+        {
+            worstSpot = spot;
+            worstSpotScore = score;
+            repaint();
+        }
+    }
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
     void mouseExit (const juce::MouseEvent&) override;
@@ -41,6 +53,8 @@ private:
 
     ProRoom room;
     std::vector<double> penalties, changes;
+    std::optional<std::array<double, 3>> worstSpot;
+    double worstSpotScore = 100.0;
     std::vector<juce::Point<float>> seatPoints;     // where each seat was drawn
     int hovered = -1;
     double yaw = 0.0, pitch = 0.32, zoom = 1.0;

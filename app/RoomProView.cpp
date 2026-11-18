@@ -249,6 +249,21 @@ void Room3DView::paint (juce::Graphics& g)
         }
     }
 
+    // The worst point found between the seats
+    if (worstSpot.has_value())
+    {
+        const auto& w = *worstSpot;
+        const auto at = project (w[0], w[1], w[2]);
+        const auto colour = juce::Colour (0xffff5ad2);
+        g.setColour (colour.withAlpha (0.25f));
+        g.fillEllipse (at.x - 11.0f, at.y - 11.0f, 22.0f, 22.0f);
+        g.setColour (colour);
+        g.drawEllipse (at.x - 7.0f, at.y - 7.0f, 14.0f, 14.0f, 2.0f);
+        g.setFont (uiFont (10.5f, true));
+        g.drawText (tr ("worst point ") + juce::String (juce::roundToInt (worstSpotScore)) + " %",
+                    juce::Rectangle<float> (at.x + 10.0f, at.y - 8.0f, 140.0f, 16.0f), juce::Justification::centredLeft);
+    }
+
     // Seat colour scale
     auto legend = getLocalBounds().reduced (10, 8).removeFromBottom (32).removeFromRight (260).toFloat();
     auto bar = legend.removeFromTop (10.0f);
@@ -1143,6 +1158,7 @@ void RoomProView::selectRoom (int index)
     selected = juce::jlimit (0, ProRooms::count - 1, index);
     editor.setRoom (&config.rooms[(size_t) selected]);
     view3d.setRoom (config.rooms[(size_t) selected], results[(size_t) selected].seatPenalty, results[(size_t) selected].seatChangeDb);
+    view3d.setWorstSpot (std::nullopt, 100.0);
     resized();
     repaint();
 }
@@ -1152,6 +1168,7 @@ void RoomProView::configChanged()
     dirty = true;
     changedAt = now();
     view3d.setRoom (config.rooms[(size_t) selected], {});
+    view3d.setWorstSpot (std::nullopt, 100.0);
     repaint();
 
     if (onConfigChanged)
@@ -1211,7 +1228,14 @@ void RoomProView::update (const Analysis& a, const Translation& electricalTransl
         shownPro = shownPro < 0.0 ? proScore : shownPro + 0.1 * (proScore - shownPro);
 
         if (! dirty)
-            view3d.setRoom (config.rooms[(size_t) selected], results[(size_t) selected].seatPenalty, results[(size_t) selected].seatChangeDb);
+        {
+            const auto& res = results[(size_t) selected];
+            const auto& p = paths[(size_t) selected];
+            view3d.setRoom (config.rooms[(size_t) selected], res.seatPenalty, res.seatChangeDb);
+            view3d.setWorstSpot (res.worstProbe >= 0 && res.worstProbe < (int) p.probePositions.size()
+                                   ? std::optional<std::array<double, 3>> (p.probePositions[(size_t) res.worstProbe]) : std::nullopt,
+                                 res.worstPointScore);
+        }
     }
 
     repaint (0, 0, getWidth(), view3d.getY());     // the score and the cards; the 3D view repaints itself
@@ -1301,9 +1325,26 @@ void RoomProView::paint (juce::Graphics& g)
         g.setFont (uiFont (15.0f, true));
         g.drawText (hasBass && ready ? juce::String (juce::roundToInt (combined)) : juce::String ("--"), resultBox, juce::Justification::centred);
         g.setColour (theme::text);
-        g.setFont (uiFont (11.0f));
-        g.drawText (computing ? juce::String (tr ("computing...")) : tr ("room ") + juce::String (juce::roundToInt (shownRoom[(size_t) i])),
-                    scores, juce::Justification::centred);
+
+        if (computing || ! (ready && hasBass))
+        {
+            g.setFont (uiFont (11.0f));
+            g.drawText (computing ? juce::String (tr ("computing...")) : tr ("room ") + juce::String (juce::roundToInt (shownRoom[(size_t) i])),
+                        scores, juce::Justification::centred);
+        }
+        else
+        {
+            // Room score, then the 10th percentile and the worst point found (extra points between the seats included)
+            auto lines = scores.reduced (0.0f, 4.0f);
+            const float h = lines.getHeight() / 3.0f;
+            g.setFont (uiFont (11.0f, true));
+            g.drawText (tr ("room ") + juce::String (juce::roundToInt (shownRoom[(size_t) i])), lines.removeFromTop (h), juce::Justification::centred);
+            g.setFont (uiFont (9.5f));
+            g.setColour (theme::dimText);
+            g.drawText ("P10 " + juce::String (juce::roundToInt (res.p10Score)), lines.removeFromTop (h), juce::Justification::centred);
+            g.setColour (res.worstProbe >= 0 ? juce::Colour (0xffff5ad2) : theme::dimText);
+            g.drawText (tr ("worst ") + juce::String (juce::roundToInt (res.worstPointScore)), lines, juce::Justification::centred);
+        }
     }
 }
 

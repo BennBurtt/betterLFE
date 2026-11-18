@@ -2164,6 +2164,28 @@ static void testRoomPro()
         }
     }
 
+    // Extra points around the riskiest seats, the 10th percentile and the worst point found
+    {
+        const auto loudApart = scene (0.0, 0.0);
+        const auto loudApartT = sim.compute (loudApart);
+        auto room = ProRoom::fromSpec (RoomSimulator::defaultRooms()[6]);
+        room.numSubs = 1;
+        room.subs[0].fx = 0.98;
+        room.subs[0].fy = 0.02;
+        const auto paths = ProRoomModel::prepare (room, loudApart.grid);
+        const auto rated = RoomSimulator::rate (paths, loudApart, loudApartT, sim.tuning, PlaybackSimulator::Level::strong, 10.0);
+        double worstSeat = 100.0;
+
+        for (double p : rated.seatPenalty)
+            worstSeat = std::min (worstSeat, 100.0 * (1.0 - p));
+
+        std::printf ("  %d seats + %d extra points: room %.1f, P10 %.1f, worst seat %.1f, worst point found %.1f%s\n", paths.seats, paths.probes,
+                     rated.roomScore, rated.p10Score, worstSeat, rated.worstPointScore, rated.worstProbe >= 0 ? " (between the seats)" : "");
+        check (paths.probes > 0 && (int) rated.probePenalty.size() == paths.probes && rated.worstPointScore <= worstSeat + 1e-9
+                 && rated.p10Score >= worstSeat - 1e-9,
+               "extra points are rated; the worst point found is at most the worst seat; P10 between", rated.worstPointScore);
+    }
+
     // Room score: the worst seats weigh more
     {
         std::vector<double> penalties (20, 0.0);

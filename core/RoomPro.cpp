@@ -1759,12 +1759,6 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
         for (size_t k = 0; k < numModes; ++k)
             atSource[s][k] = shape (r, modes[k], sources[s].position);
 
-    std::vector<double> atSeats ((size_t) paths.seats * numModes);
-
-    for (int seat = 0; seat < paths.seats; ++seat)
-        for (size_t k = 0; k < numModes; ++k)
-            atSeats[(size_t) seat * numModes + k] = shape (r, modes[k], seats[(size_t) seat]) * modes[k].scale;
-
     // Which groups have speakers, and whether a level offset makes the set-up differ from the calibrated one
     bool used[ng] = {}, offset[ng] = {};
 
@@ -1796,89 +1790,104 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
             subs[i].push_back ({ 2.0 * pi * lo * std::pow (hi / lo, (j + 0.5) / count), 1.0 / count });
     }
 
-    // Group responses at every seat, averaged over each band as products: G_g conj(G_h)
+    // Group responses at a set of points, averaged over each band as products: G_g conj(G_h)
     using GroupMatrix = std::array<cd, ng * ng>;
-    std::vector<GroupMatrix> actual ((size_t) paths.seats * n, GroupMatrix {}), nominal = actual;
-    std::vector<std::vector<cd>> groupAt (ng, std::vector<cd> (numModes)), groupNominalAt = groupAt;
-    std::vector<cd> term (numModes);
-
-    for (size_t i = 0; i < n; ++i)
+    const auto computeGroups = [&] (const std::vector<Point>& points, std::vector<GroupMatrix>& actual, std::vector<GroupMatrix>& nominal)
     {
-        for (const auto& sub : subs[i])
-        {
-            const double w = sub.w;
+        std::vector<double> atSeats (points.size() * numModes);
 
-            // The speakers of a group summed mode by mode first (delays and levels included):
-            // each seat then costs one sum over the modes per group
-            for (int g = 0; g < ng; ++g)
-            {
-                std::fill (groupAt[(size_t) g].begin(), groupAt[(size_t) g].end(), cd());
-                std::fill (groupNominalAt[(size_t) g].begin(), groupNominalAt[(size_t) g].end(), cd());
-            }
-
-            for (size_t s = 0; s < sources.size(); ++s)
-            {
-                const cd delay = std::polar (1.0, -w * sources[s].delayMs * 0.001);
-                const cd gain = delay * sources[s].gain, nominalGain = delay * sources[s].nominalWeight;
-                auto& sum = groupAt[(size_t) sources[s].group];
-                auto& nominalSum = groupNominalAt[(size_t) sources[s].group];
-
-                for (size_t k = 0; k < numModes; ++k)
-                {
-                    sum[k] += atSource[s][k] * gain;
-                    nominalSum[k] += atSource[s][k] * nominalGain;
-                }
-            }
-
+        for (int seat = 0; seat < (int) points.size(); ++seat)
             for (size_t k = 0; k < numModes; ++k)
-                term[k] = 1.0 / cd (modes[k].omega2 - w * w, 2.0 * modes[k].damping * w);
+                atSeats[(size_t) seat * numModes + k] = shape (r, modes[k], points[(size_t) seat]) * modes[k].scale;
 
-            for (int seat = 0; seat < paths.seats; ++seat)
+        // Group responses at every seat, averaged over each band as products: G_g conj(G_h)
+        actual.assign (points.size() * n, GroupMatrix {});
+        nominal = actual;
+        std::vector<std::vector<cd>> groupAt (ng, std::vector<cd> (numModes)), groupNominalAt = groupAt;
+        std::vector<cd> term (numModes);
+
+        for (size_t i = 0; i < n; ++i)
+        {
+            for (const auto& sub : subs[i])
             {
-                const double* shapes = &atSeats[(size_t) seat * numModes];
-                std::array<cd, ng> h {}, hn {};
+                const double w = sub.w;
 
+                // The speakers of a group summed mode by mode first (delays and levels included):
+                // each seat then costs one sum over the modes per group
                 for (int g = 0; g < ng; ++g)
                 {
-                    if (! used[g])
-                        continue;
+                    std::fill (groupAt[(size_t) g].begin(), groupAt[(size_t) g].end(), cd());
+                    std::fill (groupNominalAt[(size_t) g].begin(), groupNominalAt[(size_t) g].end(), cd());
+                }
 
-                    const cd* a = groupAt[(size_t) g].data();
-                    cd sum;
+                for (size_t s = 0; s < sources.size(); ++s)
+                {
+                    const cd delay = std::polar (1.0, -w * sources[s].delayMs * 0.001);
+                    const cd gain = delay * sources[s].gain, nominalGain = delay * sources[s].nominalWeight;
+                    auto& sum = groupAt[(size_t) sources[s].group];
+                    auto& nominalSum = groupNominalAt[(size_t) sources[s].group];
 
                     for (size_t k = 0; k < numModes; ++k)
-                        sum += a[k] * (shapes[k] * term[k]);
-
-                    h[(size_t) g] = sum;
-
-                    if (offset[g])
                     {
-                        const cd* b = groupNominalAt[(size_t) g].data();
-                        cd nominalSum;
-
-                        for (size_t k = 0; k < numModes; ++k)
-                            nominalSum += b[k] * (shapes[k] * term[k]);
-
-                        hn[(size_t) g] = nominalSum;
-                    }
-                    else
-                    {
-                        hn[(size_t) g] = sum;
+                        sum[k] += atSource[s][k] * gain;
+                        nominalSum[k] += atSource[s][k] * nominalGain;
                     }
                 }
 
-                auto& ma = actual[(size_t) seat * n + i];
-                auto& mn = nominal[(size_t) seat * n + i];
+                for (size_t k = 0; k < numModes; ++k)
+                    term[k] = 1.0 / cd (modes[k].omega2 - w * w, 2.0 * modes[k].damping * w);
 
-                for (int g = 0; g < ng; ++g)
-                    for (int k = 0; k < ng; ++k)
+                for (int seat = 0; seat < (int) points.size(); ++seat)
+                {
+                    const double* shapes = &atSeats[(size_t) seat * numModes];
+                    std::array<cd, ng> h {}, hn {};
+
+                    for (int g = 0; g < ng; ++g)
                     {
-                        ma[(size_t) (g * ng + k)] += sub.weight * h[(size_t) g] * std::conj (h[(size_t) k]);
-                        mn[(size_t) (g * ng + k)] += sub.weight * hn[(size_t) g] * std::conj (hn[(size_t) k]);
+                        if (! used[g])
+                            continue;
+
+                        const cd* a = groupAt[(size_t) g].data();
+                        cd sum;
+
+                        for (size_t k = 0; k < numModes; ++k)
+                            sum += a[k] * (shapes[k] * term[k]);
+
+                        h[(size_t) g] = sum;
+
+                        if (offset[g])
+                        {
+                            const cd* b = groupNominalAt[(size_t) g].data();
+                            cd nominalSum;
+
+                            for (size_t k = 0; k < numModes; ++k)
+                                nominalSum += b[k] * (shapes[k] * term[k]);
+
+                            hn[(size_t) g] = nominalSum;
+                        }
+                        else
+                        {
+                            hn[(size_t) g] = sum;
+                        }
                     }
+
+                    auto& ma = actual[(size_t) seat * n + i];
+                    auto& mn = nominal[(size_t) seat * n + i];
+
+                    for (int g = 0; g < ng; ++g)
+                        for (int k = 0; k < ng; ++k)
+                        {
+                            ma[(size_t) (g * ng + k)] += sub.weight * h[(size_t) g] * std::conj (h[(size_t) k]);
+                            mn[(size_t) (g * ng + k)] += sub.weight * hn[(size_t) g] * std::conj (hn[(size_t) k]);
+                        }
+                }
             }
         }
-    }
+
+    };
+
+    std::vector<GroupMatrix> actual, nominal;
+    computeGroups (seats, actual, nominal);
 
     // Calibration on the room as set up normally (every speaker at its level),
     // one speaker group at a time, over all seats or the reference seat:
@@ -1952,6 +1961,70 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
     {
         paths.p[i] = toChannels (actual[i]);
         paths.pRef[i] = toChannels (nominal[i]);
+    }
+
+    // Extra points around the riskiest seats: those where the room plays the
+    // LFE path most differently from the screen path (independent of the mix,
+    // so that they are found once). Eight points 0.6 m around each of the
+    // four, rated with the seats but not in the room score: they look for a
+    // worse spot between the seats.
+    if (paths.seats > 0)
+    {
+        std::vector<std::pair<double, int>> mismatch;
+
+        for (int seat = 0; seat < paths.seats; ++seat)
+        {
+            double sum = 0.0, weight = 0.0;
+
+            for (size_t i = 0; i < n; ++i)
+            {
+                const auto& m = paths.pRef[(size_t) seat * n + i];
+                const double screen = (m[0].real() + m[5].real() + m[10].real()) / 3.0, lfe = m[15].real();
+                const double hz = grid[(size_t) paths.points[i]];
+
+                if (screen > 0.0 && lfe > 0.0)
+                {
+                    sum += hz * std::abs (10.0 * std::log10 (lfe / screen));
+                    weight += hz;
+                }
+            }
+
+            mismatch.push_back ({ weight > 0.0 ? sum / weight : 0.0, seat });
+        }
+
+        std::sort (mismatch.begin(), mismatch.end(), std::greater<>());
+        std::vector<Point> probes;
+
+        for (size_t k = 0; k < std::min<size_t> (4, mismatch.size()); ++k)
+        {
+            const auto& c = seats[(size_t) mismatch[k].second];
+
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dy = -1; dy <= 1; ++dy)
+                {
+                    const double x = c[0] + 0.6 * dx, y = c[1] + 0.6 * dy;
+
+                    if ((dx == 0 && dy == 0) || ! r.isInside (x, y))
+                        continue;
+
+                    probes.push_back (r.keptInside ({ x, y, c[2] }));
+                }
+        }
+
+        if (! probes.empty())
+        {
+            std::vector<GroupMatrix> probeActual, probeNominal;
+            computeGroups (probes, probeActual, probeNominal);
+
+            for (size_t i = 0; i < probeActual.size(); ++i)
+            {
+                paths.p.push_back (toChannels (probeActual[i]));
+                paths.pRef.push_back (toChannels (probeNominal[i]));
+            }
+
+            paths.probes = (int) probes.size();
+            paths.probePositions = probes;
+        }
     }
 
     return paths;

@@ -842,6 +842,19 @@ parois, pas selon celle qui est derrière l'enceinte. Dans ce modèle (faible
 absorption), les matériaux ne déforment pas les modes ; avec des parois très
 absorbantes, ils le feraient, ce qui n'est pas modélisé.
 
+**Points de sonde, percentile 10, pire point.** Vingt ou 96 places peuvent
+passer à côté d'un creux étroit entre deux sièges. Après le calcul des places,
+on repère les quatre places où la salle joue le chemin LFE le plus
+différemment du chemin d'écran (écart moyen de niveau entre les deux chemins,
+indépendant du mix : trouvé une fois), et on calcule huit points à 0,6 m
+autour de chacune, 32 points de plus. Ils sont notés comme les places mais
+n'entrent pas dans le score de la salle ; chaque carte affiche le percentile
+10 des places (la note sous laquelle tombent 10 % des places) et le pire point
+trouvé, sièges et points de sonde compris. Quand ce pire point est entre les
+sièges, la vue 3D le marque en magenta (vérifié : 32 points de plus pour une
+salle de 20 places, pire point ≤ pire place ≤ P10). Aux fréquences du grave,
+un creux fait de 1 à 4 m de large : 0,6 m d'écart suffit à le voir.
+
 **Couleurs des places.** Une échelle à dix paliers (violet 0, magenta 40,
 rouge 55, orange 65 à 75, jaune 82, vert-jaune 88, vert 93 à 97, turquoise
 100) : des places à quelques points d'écart se distinguent. Au survol, la vue
