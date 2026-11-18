@@ -433,7 +433,7 @@ Vérifiées par les tests, sur bruit blanc à −20 dBFS, au niveau Strong, éco
 | LFE sans rapport, aussi fort que la façade | 56 |
 | LFE 10 dB sous la façade, à 60 % copié sur elle | 60 |
 | LFE seul | 2 |
-| LFE sans rapport, 6 dB au-dessus de la façade | 21 |
+| LFE sans rapport, 6 dB au-dessus de la façade | 2 |
 | LFE aussi fort que la façade, à 60 % copié sur elle | 19 |
 | LFE 10 dB sous la façade, entièrement copié sur elle | 20 |
 | LFE identique à la façade | 0 |
