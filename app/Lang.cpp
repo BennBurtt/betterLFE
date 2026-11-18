@@ -292,6 +292,9 @@ namespace
 
             { "worst ", "pire " }, { "worst point ", "pire point " },
 
+            { "As with pink noise and a sound level meter: each speaker group is set for the same total energy from 20 to 120 Hz (direct and reverberant sound together, which below the Schroeder frequency are the same modes). A live room therefore gets lower gains than a dead one.",
+              "Comme au bruit rose et au sonomètre : chaque groupe d'enceintes est réglé pour la même énergie totale de 20 à 120 Hz (son direct et réverbéré ensemble, qui sous la fréquence de Schroeder sont les mêmes modes). Une salle vive reçoit donc des gains plus bas qu'une salle mate." },
+
             // The fifteen cinema rooms
             { "Corridor room, live", "Salle couloir, vive" }, { "Small multiplex, live", "Petit multiplexe, vif" },
             { "Old cinema, near-cubic, live", "Ancien cinéma, presque cubique, vif" }, { "Narrow 120 seats", "Étroite 120 places" },

@@ -950,7 +950,10 @@ void RoomProEditor::rebuild()
 
     section (tr ("Calibration"));
     choice (tr ("Levels set at"), { tr ("All seats (average)"), tr ("Reference seat (2/3, centre)") }, [this] { return room->calibration; },
-            [this] (int v) { room->calibration = v; }, false);
+            [this] (int v) { room->calibration = v; }, false)
+        .setTooltip (tr ("As with pink noise and a sound level meter: each speaker group is set for the same total energy from 20 to 120 Hz "
+                         "(direct and reverberant sound together, which below the Schroeder frequency are the same modes). "
+                         "A live room therefore gets lower gains than a dead one."));
 
     resized();
 }

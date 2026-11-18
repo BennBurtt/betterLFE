@@ -53,9 +53,14 @@ Répond à : *sur la durée, le LFE est-il lié au canal d'écran, et dans quel 
    (0,50, par défaut). En mode « Out of
    phase only », seules les valeurs négatives alertent.
 5. Quand le LFE est absent (niveau RMS sous -100 dBFS pendant 0,5 s), tout ce qui
-   a été mesuré face à lui est effacé : la courbe et les alertes repartent de
-   zéro au lieu de garder la trace d'un son terminé. Un LFE très bas, à
-   −80 dBFS par exemple, reste analysé normalement.
+   a été mesuré face à lui est effacé : le calcul repart de zéro au lieu de
+   garder la trace d'un son terminé. Un LFE très bas, à −80 dBFS par exemple,
+   reste analysé normalement. L'affichage n'est pas effacé pour autant : chaque alerte reste à son
+   maximum 1,5 s après sa dernière activité (maintien de crête), puis
+   retombe au rythme du réglage « Decay ». Un impact de LFE court suivi d'un
+   blanc numérique reste ainsi lisible le temps de lever les yeux (vérifié :
+   1 s de LFE puis silence, alerte encore à 1,00 0,9 s après la remise à zéro,
+   éteinte 4,5 s après).
 
    Dans `s`, le LFE est pesé contre **toute la façade** et non contre le seul
    canal comparé (`Sxx` y est remplacé par la puissance de L+C+R quand elle est
@@ -77,9 +82,13 @@ elle est aussi dans le LFE, et si oui comment le LFE se place.
 Les mêmes détecteurs tournent aussi sur **L − R** : une attaque jouée en L et
 en R en polarités opposées disparaît du downmix (L + R = 0) mais pas de
 L − R ; tout contenu d'écran apparaît dans l'une des deux. Une attaque de
-L − R n'est retenue que là où le downmix l'annule vraiment (énergie de L − R
-sur 50 ms au moins 6 dB au-dessus de celle du downmix), et elle est alors
-analysée contre L − R. Sur de la musique ordinaire, rien ne change (mêmes
+L − R n'est retenue que là où le downmix annule vraiment le grave : énergie
+de L − R **sous 200 Hz** (passe-bas Butterworth du 2ᵉ ordre), sur 50 ms, au
+moins 6 dB au-dessus de celle du downmix dans la même bande. Seule
+l'annulation du grave compte face au LFE, et mesuré en pleine bande, un
+centre chargé (dialogues) masquerait l'annulation (vérifié : kick en L et −R
+sous un son de 1 kHz fort au centre, 0 attaque trouvée sur 5 en pleine bande,
+5 sur 5 sous 200 Hz). L'attaque est alors analysée contre L − R. Sur de la musique ordinaire, rien ne change (mêmes
 24 attaques qu'avant) ; un kick en L et R en opposition est trouvé 5 fois sur
 5 et le retard de 12 ms du LFE lu exactement (vérifié).
 
@@ -639,7 +648,13 @@ enceinte. En Pro, la référence est le mix d'écran tel quel ; le grave du LFE
 y est attendu là où est celui de l'écran, dans les proportions L / C / R du
 mix. Étalonnage : chaque groupe d'enceintes (L, C, R, caissons) est réglé
 séparément au niveau de la régie ; les rappels gardent leur niveau face à
-l'enceinte d'écran de leur côté.
+l'enceinte d'écran de leur côté. C'est l'équivalent d'un réglage au bruit
+rose et au sonomètre : la même **énergie totale** de 20 à 120 Hz sur les
+places d'étalonnage, son direct et réverbéré ensemble (sous la fréquence de
+Schroeder, ils ne se séparent pas : ce sont les mêmes modes). Une salle vive
+reçoit donc des gains plus bas qu'une salle mate ; c'est voulu, c'est ce que
+ferait un installateur, mais il faut s'en souvenir en comparant deux salles
+aux TR60 très différents.
 
 **Divergence (comme le panner de Pro Tools).** Une matrice de routage répartit
 les canaux sur les groupes d'enceintes, en puissance : *Centre %* (part de C
@@ -741,8 +756,16 @@ Rayleigh-Ritz : les modes de Neumann (parois rigides) rendent stationnaire
 (jusqu'à 1,5 fois le nombre d'onde gardé, 700 au plus) ; intégrales exactes
 en travers (chaque colonne du sol est un intervalle), règle du point milieu
 en long ; puis `K c = k² M c`, résolu par Cholesky et réduction de Householder
-+ QL implicite (EISPACK tred2 / tql2). Les fonctions presque nulles sur le sol
-(norme réelle < 0,5) sont écartées comme parasites. Vérifié : un « ovale »
++ QL implicite (EISPACK tred2 / tql2). Chaque mode trouvé est normalisé sur
+le sol lui-même (∫ u² = 1 avec la matrice M régularisée) ; sa norme réelle,
+calculée avec M sans régularisation, vaut alors environ 1 pour un mode
+physique et environ 0 pour un mode parasite porté par la régularisation (une
+combinaison de fonctions presque nulles sur le sol) : ceux dont elle est sous
+0,5 sont écartés. Ce seuil ne dépend pas du rapport des surfaces du sol et
+du rectangle englobant. Vérifié : le nombre de modes trouvés suit la loi de
+Weyl pour un problème de Neumann, `N(k) = A·k²/4π + P·k/4π`, à 3,8 % près
+pour les trois formes et trois proportions (1, 1,6 et 3) ; aucun mode ne
+manque. Vérifié : un « ovale »
 de 10 × 10 m (un cercle) donne son premier mode à 20,10 Hz, la valeur exacte
 de Bessel. Formes : ovale inscrit, coins arrondis (rayon = 1/4 du petit côté),
 L (le quart arrière droit retiré). Temps : 0,6 à 0,8 s pour 20 × 13 m. La

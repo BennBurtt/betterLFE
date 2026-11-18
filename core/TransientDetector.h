@@ -200,6 +200,8 @@ private:
     std::deque<long long> pendingMix, recentMix, recentLfe;    // decimated indices
 
     struct HighPass { double b0, b1, b2, a1, a2; } inputHighPass {};
+    HighPass bassBand {};                           // 200 Hz low-pass (same coefficient layout)
+    std::array<std::array<double, 2>, 2> bassState {};
     std::array<std::array<double, 2>, 3> filterState {};
 
     static constexpr int historySize = 1024;       // 2 s at the decimated rate

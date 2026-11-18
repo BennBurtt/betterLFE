@@ -1020,15 +1020,12 @@ void MainComponent::timerCallback()
         const auto& measured = snapshot.analysis;
 
         // Nothing in the LFE any more: the engine has cleared what it measured
-        // against it, so the display starts from a clean slate too.
+        // against it (so that the next passage starts clean), but the display
+        // is not wiped: alerts are held at their peak for a moment, then fade
+        // with the Decay setting, so that a short LFE hit followed by digital
+        // silence can still be read.
         if (snapshot.autoReset)
-        {
             snapshot.autoReset = false;
-            alerts.reset (measured.grid.size());
-
-            for (auto& channel : curveInertia)
-                channel.clear();
-        }
 
         alerts.update (measured, alerting, dt);
 

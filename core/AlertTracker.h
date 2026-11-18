@@ -21,6 +21,9 @@ public:
     static constexpr double alertGain = 3.5;
     static constexpr double alertSigmas = 2.5;        // an alert must stand this far above chance
     static constexpr double speakerDecaySeconds = 0.10;
+    // An alert stays at its peak this long after it was last active, then decays:
+    // a short LFE hit followed by digital silence stays readable (peak hold)
+    static constexpr double holdSeconds = 1.5;
 
     // Signed LFE/screen interaction per channel, zero where nothing plays [L, C, R][grid]
     std::array<std::vector<double>, 3> curves;
@@ -37,11 +40,13 @@ public:
             curves[(size_t) c].assign (gridSize, 0.0);
             conflict[(size_t) c].assign (gridSize, 0.0);
             sign[(size_t) c].assign (gridSize, 1.0);
+            age[(size_t) c].assign (gridSize, holdSeconds);
         }
 
         heatLevel.assign (gridSize, 0.0);
         heatSign.assign (gridSize, 1.0);
         speakerLevel.fill (0.0);
+        speakerAge.fill (holdSeconds);
     }
 
     struct Options
@@ -99,8 +104,22 @@ public:
                     target = std::min (target * alertGain, 1.0);
                 }
 
+                // Rises at once; held at its peak for holdSeconds after it was last active; then decays
                 double& level = conflict[c][i];
-                level += (target > level ? 0.8 : decay) * (target - level);
+                double& since = age[c][i];
+
+                if (target >= level * 0.999 && target > 0.0)
+                {
+                    level += 0.8 * (target - level);
+                    since = 0.0;
+                }
+                else
+                {
+                    since += frameSeconds;
+
+                    if (since > holdSeconds)
+                        level += decay * (target - level);
+                }
 
                 if (target > 0.0)
                     sign[c][i] = s < 0.0 ? -1.0 : 1.0;
@@ -115,12 +134,25 @@ public:
             }
 
             double& spk = speakerLevel[c];
-            spk += (strongest > spk ? 0.7 : speakerDecay) * (strongest - spk);
+
+            if (strongest >= spk * 0.999 && strongest > 0.0)
+            {
+                spk += 0.7 * (strongest - spk);
+                speakerAge[c] = 0.0;
+            }
+            else
+            {
+                speakerAge[c] += frameSeconds;
+
+                if (speakerAge[c] > holdSeconds)
+                    spk += speakerDecay * (strongest - spk);
+            }
         }
     }
 
 private:
-    std::array<std::vector<double>, 3> conflict, sign;
+    std::array<std::vector<double>, 3> conflict, sign, age;
+    std::array<double, 3> speakerAge { { holdSeconds, holdSeconds, holdSeconds } };
 };
 
 } // namespace subguard

@@ -364,6 +364,12 @@ TransientDetector::TransientDetector (double inputSampleRate, int decimationFact
     mixHighPeaks.prepare (inputSampleRate, highViewHz);
     sideOnsets.prepare (inputSampleRate, std::max (1, (int) std::lround (inputSampleRate / 1000.0)), mixBands);
     energyCoefficient = 1.0 - std::exp (-1.0 / (0.05 * inputSampleRate));
+    {
+        // 200 Hz Butterworth low-pass (RBJ cookbook), for the cancellation test
+        const double w0 = 2.0 * 3.14159265358979323846 * 200.0 / inputSampleRate;
+        const double alpha = std::sin (w0) / std::sqrt (2.0), c = std::cos (w0), a0 = 1.0 + alpha;
+        bassBand = { (1.0 - c) / 2.0 / a0, (1.0 - c) / a0, (1.0 - c) / 2.0 / a0, -2.0 * c / a0, (1.0 - alpha) / a0 };
+    }
     sidePeaks.prepare (inputSampleRate, midViewHz);
     sideHighPeaks.prepare (inputSampleRate, highViewHz);
 
@@ -432,6 +438,9 @@ void TransientDetector::reset()
     sideOnsets.reset();
     sidePeaks.reset();
     mixEnergy = sideEnergy = 0.0;
+
+    for (auto& st : bassState)
+        st.fill (0.0);
     sideHighPeaks.reset();
     lastMixAttack = -1000000;
     recentMix.clear();
@@ -500,10 +509,20 @@ void TransientDetector::processInput (const float* frame)
     if (! std::isfinite (side))
         side = 0.0;
 
-    // Short-term energy of both (about 50 ms): an attack of L - R only counts
-    // where the downmix really cancels it (L - R at least 6 dB above)
-    mixEnergy += energyCoefficient * (mix * mix - mixEnergy);
-    sideEnergy += energyCoefficient * (side * side - sideEnergy);
+    // Short-term energy of both below 200 Hz (about 50 ms): an attack of L - R
+    // only counts where the downmix really cancels the bass (L - R at least
+    // 6 dB above in that band). Only a cancellation in the bass matters
+    // against the LFE, and a busy centre (dialogue) would otherwise hide it.
+    const auto lowPass = [this] (double x, std::array<double, 2>& st)
+    {
+        const double y = bassBand.b0 * x + st[0];
+        st[0] = bassBand.b1 * x - bassBand.a1 * y + st[1];
+        st[1] = bassBand.b2 * x - bassBand.a2 * y;
+        return y;
+    };
+    const double mixBass = lowPass (mix, bassState[0]), sideBass = lowPass (side, bassState[1]);
+    mixEnergy += energyCoefficient * (mixBass * mixBass - mixEnergy);
+    sideEnergy += energyCoefficient * (sideBass * sideBass - sideEnergy);
     const bool cancelled = sideEnergy > 4.0 * mixEnergy && sideEnergy > 1e-20;
 
     if (sideHighPeaks.process (side, samplesAgo) && cancelled)  mixAttack (inputIndex - samplesAgo);

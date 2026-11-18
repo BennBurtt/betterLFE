@@ -704,6 +704,13 @@ static void testTransients()
         std::printf ("  kick in L and R in opposite polarity (gone from the downmix): %zu of 5 found, LFE +12 ms read within %.2f ms\n",
                      events.size(), worst);
         check (events.size() == 5 && worst < 0.5, "an attack cancelled in the downmix is still found and timed", (double) events.size());
+
+        // The same with a loud centre above the bass (a voice-like 1 kHz tone): the cancellation
+        // is judged below 200 Hz, so the centre does not hide it
+        s.c = sine (1000.0, -6.0, 6.0);
+        const auto withCentre = collect (s);
+        std::printf ("  the same under a loud 1 kHz centre: %zu of 5 found\n", withCentre.size());
+        check (withCentre.size() == 5, "a busy centre above the bass does not hide a bass cancelled in L + R", (double) withCentre.size());
     }
 
     {
@@ -1610,6 +1617,43 @@ static void testInertiaAndAutoReset()
         std::printf ("  automatic reset %.1f s after the LFE stopped\n", resetAt - 4.0);
     }
     {
+        // A short LFE passage followed by digital silence: the engine resets, the
+        // alert on screen is held for a moment, then fades (it is not wiped)
+        const auto n = noise (8.0, 83);
+        Scene s;
+        s.l = n;
+        s.lfe = Signal (n.begin(), n.begin() + sampleRate);      // 1 s of LFE, then silence
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        AlertTracker tracker;
+        AlertTracker::Options o;
+        const auto data = s.interleaved();
+        double resetAt = -1.0, peak = 0.0, heldAfter = 0.0, late = 1.0;
+        const double frame = 800.0 / sampleRate;
+
+        for (size_t pos = 0; pos + 800 <= s.length(); pos += 800)
+        {
+            e.push (data.data() + pos * numChannels, 800);
+            e.analyze ({});
+            const double t = (double) pos / sampleRate;
+
+            if (e.takeAutoReset())
+                resetAt = t;
+
+            tracker.update (e.result(), o, frame);
+            peak = std::max (peak, tracker.speakerLevel[0]);
+
+            if (resetAt > 0.0 && t > resetAt + 0.8 && t < resetAt + 1.0)
+                heldAfter = tracker.speakerLevel[0];
+
+            if (resetAt > 0.0 && t > resetAt + 4.5)
+                late = tracker.speakerLevel[0];
+        }
+
+        std::printf ("  short LFE then silence: alert %.2f at its peak, %.2f 0.9 s after the reset, %.2f 4.5 s after\n", peak, heldAfter, late);
+        check (resetAt > 0.0 && peak > 0.9 && heldAfter > 0.5 * peak, "after the automatic reset the alert stays readable for a moment", heldAfter);
+        check (late < 0.1, "then it fades", late);
+    }
+    {
         // A very quiet LFE (-80 dBFS) is not silence: no reset
         const auto n = noise (6.0, 82);
         LfeEngine e (sampleRate, 1.0, 0.0);
@@ -2190,6 +2234,35 @@ static void testRoomPro()
         check (paths.probes > 0 && (int) rated.probePenalty.size() == paths.probes && rated.worstPointScore <= worstSeat + 1e-9
                  && rated.p10Score >= worstSeat - 1e-9,
                "extra points are rated; the worst point found is at most the worst seat; P10 between", rated.worstPointScore);
+    }
+
+    // Numerical floors miss no mode: their count follows Weyl's law (Neumann:
+    // N(k) = A k^2 / 4 pi + P k / 4 pi) for every shape and three proportions
+    {
+        double worst = 0.0;
+
+        for (int shape : { ProRoom::oval, ProRoom::roundedCorners, ProRoom::lShape })
+            for (double aspect : { 1.0, 1.6, 3.0 })
+            {
+                ProRoom r;
+                r.shape = shape;
+                r.width = 12.0;
+                r.length = 12.0 * aspect;
+                r.height = 5.0;
+                const double kmax = 2.0 * 3.14159265358979 * 120.0 / 343.0;
+                const auto modes = ProRoomModel::floorModes (r, kmax);
+                const double area = r.floorArea(), perimeter = r.wallArea() / r.height;
+                const double weyl = area * kmax * kmax / (4.0 * 3.14159265358979) + perimeter * kmax / (4.0 * 3.14159265358979);
+                int found = 0;
+
+                for (const auto& m : modes)
+                    found += m.first <= kmax ? 1 : 0;
+
+                worst = std::max (worst, std::abs (found - weyl) / weyl);
+            }
+
+        std::printf ("  numerical floors (oval, rounded corners, L; proportions 1, 1.6, 3): mode count within %.1f %% of Weyl's law\n", 100.0 * worst);
+        check (worst < 0.05, "numerical floors: no mode missing (Weyl's law)", worst);
     }
 
     // Room score: the worst seats weigh more
