@@ -55,12 +55,13 @@ public:
     static juce::Colour seatColour (double score);
 
     /** What each head receives: loudness of the bass (phon), level under 40 Hz (dB SPL). The brightness of a head follows its loudness. */
-    void setHeads (const std::vector<double>& heardPhon, const std::vector<double>& feltDb)
+    void setHeads (const std::vector<double>& heardPhon, const std::vector<double>& feltDb, const std::vector<double>& levelDb = {})
     {
-        if (heardPhon != heard || feltDb != felt)
+        if (heardPhon != heard || feltDb != felt || levelDb != levels)
         {
             heard = heardPhon;
             felt = feltDb;
+            levels = levelDb;
             repaint();
         }
     }
@@ -85,7 +86,7 @@ private:
     std::optional<std::array<double, 3>> worstSpot;
     double worstSpotScore = 100.0;
     std::vector<juce::Point<float>> seatPoints;     // where each seat was drawn
-    std::vector<double> heard, felt;
+    std::vector<double> heard, felt, levels;
     int hovered = -1;
     std::shared_ptr<ProCamera> camera = std::make_shared<ProCamera>();
     double yawAtDrag = 0.0, pitchAtDrag = 0.0;

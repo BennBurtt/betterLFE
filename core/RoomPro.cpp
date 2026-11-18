@@ -1922,7 +1922,35 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
 
     scale[ProRoom::groupFillsLeft] = scale[ProRoom::groupL];
     scale[ProRoom::groupFillsRight] = scale[ProRoom::groupR];
-    scale[ProRoom::groupFillsLfe] = scale[ProRoom::groupSubs];
+
+    // The LFE system is set as a whole, as an installer does: subwoofers and
+    // LFE fills playing together reach the stage level at the calibration
+    // seats. The fills then move bass towards where they are, they do not add
+    // to it everywhere.
+    if (used[ProRoom::groupSubs] || used[ProRoom::groupFillsLfe])
+    {
+        constexpr int s = ProRoom::groupSubs, f = ProRoom::groupFillsLfe;
+        double together = 0.0;
+
+        for (int seat = 0; seat < paths.seats; ++seat)
+        {
+            if (r.calibration == 1 && seat != reference)
+                continue;
+
+            for (size_t i = 0; i < n; ++i)
+            {
+                const double hz = grid[(size_t) paths.points[i]];
+
+                if (hz < RoomSimulator::bandLoHz)
+                    continue;
+
+                const auto& m = nominal[(size_t) seat * n + i];
+                together += hz * (m[(size_t) (s * ng + s)].real() + m[(size_t) (f * ng + f)].real() + 2.0 * m[(size_t) (s * ng + f)].real());
+            }
+        }
+
+        scale[s] = scale[f] = weight > 0.0 && together > 0.0 ? std::sqrt (weight / together) : 1.0;
+    }
 
     // Channel paths: H_a = sum over groups of routing (a, g) x scale (g) x G_g
     const auto routing = r.routing();

@@ -899,8 +899,49 @@ par un trait vertical et ses trois valeurs. Les couches :
 | Très grave | 20–60 Hz | 60 Hz : pas de norme ; convention courante entre « sub-bass » et « bass », et limite de nos bandes de notation |
 | Grave | 60–120 Hz | 120 Hz : limite haute du canal LFE (Dolby, ATSC A/52) |
 
-L'infra n'entre pas (encore) dans le score : il faut d'abord une base
-documentée pour juger ce qui est ressenti sous 20 Hz.
+**L'infra dans le score de Room Sim Pro.** Sous 20 Hz, la bande 10–20 Hz
+est notée comme les autres, sur la base de Møller & Pedersen (2004) [38],
+la revue de référence sur l'audition aux basses fréquences et aux
+infrasons :
+
+- **seuil** : leur seuil normal proposé sous 20 Hz, une droite de 97 dB à
+  10 Hz montant de 11,9 dB par octave vers le bas (régression sur les études
+  publiées, leur figure 10), qui correspond à peu près à 97 dB(G) au sens
+  d'ISO 7196 ; il est pris à la fréquence où se trouve l'infra du mix. Il ne
+  se raccorde pas exactement à ISO 226 à 20 Hz (environ 85 dB contre 78) :
+  les auteurs le signalent, aucune solution définitive n'existe autour de
+  20 Hz ;
+- **dispersion** : 5 dB d'écart-type entre personnes, comme au-dessus de
+  20 Hz (même article) ;
+- **sensation** : au-dessus du seuil, l'infra devient fort très vite, les
+  courbes d'isosonie y sont très resserrées ; mais leurs courbes proposées
+  sous 20 Hz sont « à prendre avec une grande réserve ». Les dB qui doublent
+  la sonie sont donc pris à 20 Hz dans ISO 226:2023, la plus basse fréquence
+  normalisée : l'infra étant plus resserré encore, un écart d'infra compte au
+  moins autant qu'à 20 Hz, jamais moins. Selon l'article, on sent des
+  vibrations dans le corps dès 20 à 25 dB au-dessus du seuil.
+
+Le reste de la notation est le même (tolérance, poids selon le grave entendu).
+Room Sim, lui, reste sur 20–120 Hz.
+
+**Couverture (Room Sim Pro).** Le modèle modal contient la perte avec la
+distance, les déphasages entre sources et les modes ; la note d'interaction
+les retire volontairement en comparant chaque place au chemin d'écran à cette
+même place. Room Sim Pro note donc aussi la **couverture** : le niveau du
+grave à chaque place face au niveau de la régie, couleur de la salle comprise
+(rangs du fond qui perdent le grave, trous, boosts), bande par bande, avec la
+même tolérance, les mêmes dB de doublement et la même audibilité. Pénalité de
+la place = `1 − (1 − interaction) × (1 − w × couverture)`, avec `w` = 0,5 par
+défaut (réglage Dev « Couverture (Pro), poids » ; 0 redonne l'interaction
+seule). Au survol, chaque tête affiche son grave face à la régie.
+
+**Étalonnage du système LFE.** Caissons et rappels LFE sont réglés ensemble,
+comme le ferait un installateur : joués ensemble, ils atteignent le niveau de
+la régie sur les places d'étalonnage. Un rappel déplace donc le grave vers
+l'endroit où il est, il ne l'ajoute pas partout. Vérifié sur le podium du
+showroom (20 × 10 × 4 m) : sans rappel, grave +0,8 dB devant et −2,7 dB au
+fond face à la régie ; avec deux rappels LFE à mi-salle sur les côtés,
++0,4 / −1,7 dB, et la note de la salle passe de 76 à 80.
 
 **Ce que reçoit chaque tête.** Pour chaque place : le niveau du grave de 20 à
 120 Hz (dB SPL), sa sonie (phones de la bande la plus forte, ISO 226) et le
@@ -1159,6 +1200,8 @@ du son) : bruit blanc ou rose, aucune ; grondement grave (sous 90 Hz), 1 à 3.
     public assis).
 35. P. M. Morse, K. U. Ingard, *Theoretical Acoustics*, McGraw-Hill, 1968,
     §9.2 (modes d'une cavité cylindrique).
+38. H. Møller, C. S. Pedersen, « Hearing at low and infrasonic frequencies »,
+    *Noise & Health* 6(23), 37–57 (2004).
 36. L. N. Trefethen, J. A. C. Weideman, « The exponentially convergent
     trapezoidal rule », *SIAM Review* 56(3), 385–458 (2014).
 37. Y. Suzuki, H. Takeshima, K. Kurakata, « Revision of ISO 226 "Normal

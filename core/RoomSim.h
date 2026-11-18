@@ -86,6 +86,7 @@ struct RoomResult
     // loudness (phon, the loudest band, ISO 226), and what is felt more than
     // heard: the level under 40 Hz, infra included (dB SPL)
     std::vector<double> seatBassDb, seatHeardPhon, seatFeltDb;
+    std::vector<double> seatLevelDb;            // the bass level at the seat against the stage, 20-120 Hz (coverage)
     double combinedScore = 100.0;                         // bass robustness x room score / 100
 };
 

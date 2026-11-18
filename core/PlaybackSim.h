@@ -242,6 +242,11 @@ public:
         // 10 to 30 points instead of 1 or 2.
         double roomWorstWeight = 0.25, roomWorstShare = 0.10;
 
+        // Room Sim Pro: how much the bass level at each seat against the stage
+        // (coverage: holes, back rows losing the bass, boosts) counts next to
+        // the interaction: seat penalty = 1 - (1 - interaction) (1 - w x coverage)
+        double coverageWeight = 0.5;
+
         // Listening level: the sound pressure level, in dB(C), that a screen
         // channel gives with the reference signal at -20 dBFS RMS. 85 is the
         // cinema calibration (SMPTE RP 200); dubbing stages and smaller

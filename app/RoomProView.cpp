@@ -297,6 +297,9 @@ void Room3DView::paint (juce::Graphics& g)
         if (hovered < (int) changes.size())
             text << ",  " << (changes[(size_t) hovered] >= 0.0 ? "+" : "") << juce::String (changes[(size_t) hovered], 1) << " dB";
 
+        if (hovered < (int) levels.size())
+            text << "   " << tr ("bass ") << (levels[(size_t) hovered] >= 0.0 ? "+" : "") << juce::String (levels[(size_t) hovered], 1) << tr (" dB against the stage");
+
         if (hovered < (int) heard.size() && hovered < (int) felt.size())
             text << "   " << tr ("hears ") << (heard[(size_t) hovered] < 20.0 ? tr ("under 20 phon") : juce::String (juce::roundToInt (heard[(size_t) hovered])) + tr (" phon"))
                  << ", " << tr ("feels ") << juce::String (juce::roundToInt (felt[(size_t) hovered])) << tr (" dB SPL under 40 Hz");
@@ -1505,7 +1508,7 @@ void RoomProView::update (const Analysis& a, const Translation& electricalTransl
             const auto& res = results[(size_t) selected];
             const auto& p = paths[(size_t) selected];
             view3d.setRoom (config.rooms[(size_t) selected], res.seatPenalty, res.seatChangeDb);
-            view3d.setHeads (res.seatHeardPhon, res.seatFeltDb);
+            view3d.setHeads (res.seatHeardPhon, res.seatFeltDb, res.seatLevelDb);
             layerView.setData (config.rooms[(size_t) selected], &p, &res);
             view3d.setWorstSpot (res.worstProbe >= 0 && res.worstProbe < (int) p.probePositions.size()
                                    ? std::optional<std::array<double, 3>> (p.probePositions[(size_t) res.worstProbe]) : std::nullopt,

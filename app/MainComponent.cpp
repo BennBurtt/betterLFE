@@ -497,7 +497,7 @@ void MainComponent::buildCards()
         const auto plain = [] (double v) { return juce::String (v, 2); };
         const auto hz = [] (double v) { return juce::String ((int) v) + " Hz"; };
         dTolSoft.format = dTolMedium.format = dTolStrong.format = dLevelRed.format = db;
-        dLate.format = dEarly.format = dCeiling.format = dInfraWeight.format = dLevelWeight.format = dWorstWeight.format = plain;
+        dLate.format = dEarly.format = dCeiling.format = dInfraWeight.format = dLevelWeight.format = dWorstWeight.format = dCoverage.format = plain;
         dWorstShare.format = [] (double v) { return juce::String (juce::roundToInt (100.0 * v)) + " %"; };
         dInfraLo.format = dInfraHi.format = hz;
         const juce::String sectionTitles[] = { tr ("Tolerances (Soft, Medium, Strong)"), tr ("Cinema subwoofer off its place"), tr ("LFE dependence"),
@@ -518,6 +518,8 @@ void MainComponent::buildCards()
         dWorstWeight.setTooltip (tr ("Room Sim and Room Sim Pro: room score = (1 - weight) x mean seat score + weight x score of the worst seats. "
                                  "0 is the plain mean."));
         dWorstShare.setTooltip (tr ("Which seats count as the worst ones: this share of the seats, at least one."));
+        dCoverage.setTooltip (tr ("Room Sim Pro: how much the bass level at each seat against the stage counts (back rows losing the bass, holes, boosts). "
+                                  "0: only the interaction, as Room Sim."));
 
         for (auto* slider : devSliders())
         {
@@ -541,6 +543,7 @@ void MainComponent::buildCards()
             dLevelRed.setValue (d.levelRedDb);
             dWorstWeight.setValue (d.roomWorstWeight);
             dWorstShare.setValue (d.roomWorstShare);
+            dCoverage.setValue (d.coverageWeight);
         };
 
         auto& card = cards[(size_t) devCard];
@@ -581,7 +584,7 @@ void MainComponent::buildCards()
             group (left, 1, { &dLate, &dEarly });
             group (left, 2, { &dCeiling, &dLevelWeight, &dLevelRed });
             group (right, 3, { &dInfraWeight, &dInfraLo, &dInfraHi });
-            group (right, 4, { &dWorstWeight, &dWorstShare });
+            group (right, 4, { &dWorstWeight, &dWorstShare, &dCoverage });
         };
         card.setSize (760, 590);
         addChildComponent (card);
@@ -965,7 +968,7 @@ void MainComponent::showListeningMenu()
 std::vector<LabelledSlider*> MainComponent::devSliders()
 {
     return { &dTolSoft, &dTolMedium, &dTolStrong, &dLate, &dEarly, &dCeiling,
-             &dInfraWeight, &dInfraLo, &dInfraHi, &dLevelWeight, &dLevelRed, &dWorstWeight, &dWorstShare };
+             &dInfraWeight, &dInfraLo, &dInfraHi, &dLevelWeight, &dLevelRed, &dWorstWeight, &dWorstShare, &dCoverage };
 }
 
 void MainComponent::applyDevSettings()
@@ -982,6 +985,7 @@ void MainComponent::applyDevSettings()
     t.levelRedDb = dLevelRed.value();
     t.roomWorstWeight = dWorstWeight.value();
     t.roomWorstShare = dWorstShare.value();
+    t.coverageWeight = dCoverage.value();
     t.listeningLevelDbC = listeningDbC;
 }
 
@@ -1322,7 +1326,7 @@ void MainComponent::loadState()
     {
         const char* keys[] = { "devTolSoft", "devTolMedium", "devTolStrong", "devLate", "devEarly", "devCeiling",
                                "devInfraWeight", "devInfraLo", "devInfraHi", "devLevelWeight", "devLevelRed",
-                               "devRoomWorstWeight", "devRoomWorstShare" };
+                               "devRoomWorstWeight", "devRoomWorstShare", "devCoverageWeight" };
         int index = 0;
 
         for (auto* slider : devSliders())
@@ -1393,7 +1397,7 @@ void MainComponent::saveState()
     {
         const char* keys[] = { "devTolSoft", "devTolMedium", "devTolStrong", "devLate", "devEarly", "devCeiling",
                                "devInfraWeight", "devInfraLo", "devInfraHi", "devLevelWeight", "devLevelRed",
-                               "devRoomWorstWeight", "devRoomWorstShare" };
+                               "devRoomWorstWeight", "devRoomWorstShare", "devCoverageWeight" };
         int index = 0;
 
         for (auto* slider : devSliders())

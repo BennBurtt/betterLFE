@@ -311,6 +311,10 @@ namespace
             { "dip down, boost up:  0 dB", "creux en bas, boost en haut :  0 dB" },
             { "Bass layers against the approved mix. Drag to turn, as the 3D view.", "Couches du grave face au mix validé. Glisser pour tourner, comme la vue 3D." },
 
+            { "bass ", "grave " }, { " dB against the stage", " dB face à la régie" }, { "Coverage (Pro), weight:", "Couverture (Pro), poids :" },
+            { "Room Sim Pro: how much the bass level at each seat against the stage counts (back rows losing the bass, holes, boosts). 0: only the interaction, as Room Sim.",
+              "Room Sim Pro : ce que compte le niveau du grave à chaque place face à la régie (rangs du fond qui perdent le grave, trous, boosts). 0 : seulement l'interaction, comme Room Sim." },
+
             // The fifteen cinema rooms
             { "Corridor room, live", "Salle couloir, vive" }, { "Small multiplex, live", "Petit multiplexe, vif" },
             { "Old cinema, near-cubic, live", "Ancien cinéma, presque cubique, vif" }, { "Narrow 120 seats", "Étroite 120 places" },

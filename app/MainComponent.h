@@ -179,7 +179,8 @@ private:
                    dLevelWeight { tr ("Level dependence, weight:"), 0, 0.5, 0.01, 0.20 },
                    dLevelRed { tr ("Level dependence, red at:"), 0.5, 12, 0.1, 3 },
                    dWorstWeight { tr ("Worst seats, weight:"), 0, 1, 0.01, 0.25 },
-                   dWorstShare { tr ("Worst seats, share:"), 0.02, 0.5, 0.01, 0.10 };
+                   dWorstShare { tr ("Worst seats, share:"), 0.02, 0.5, 0.01, 0.10 },
+                   dCoverage { tr ("Coverage (Pro), weight:"), 0, 1, 0.05, 0.5 };
     std::array<juce::Label, 5> devSections;
     LoudnessTable devLoudness;          // what the listening level makes of the bass playing now
     juce::TextButton devDefaultsButton { tr ("Defaults") };

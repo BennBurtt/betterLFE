@@ -451,6 +451,7 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
     for (auto& v : r.gridLayerDb)   v.assign ((size_t) room.gridPoints, nothing);
 
     r.seatBassDb.assign ((size_t) room.seats, 0.0);
+    r.seatLevelDb.clear();
     r.seatHeardPhon.assign ((size_t) room.seats, 0.0);
     r.seatFeltDb.assign ((size_t) room.seats, 0.0);
 
@@ -538,11 +539,52 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
             continue;
         }
 
+        // Room Sim Pro: the infra (under 20 Hz) is rated too, with the threshold
+        // proposed by Moller & Pedersen (2004) below 20 Hz: 97 dB at 10 Hz,
+        // rising 11.9 dB per octave towards lower frequencies (about 97 dB(G),
+        // ISO 7196), listeners spread by 5 dB as above 20 Hz. Its contours of
+        // equal loudness are only tentative ("with great reservation"), so the
+        // dB that double its loudness are those of ISO 226:2023 at 20 Hz, the
+        // lowest standardised: infra is more compressed still, so this counts
+        // an infra change at least as much as one at 20 Hz.
+        double infraWeight = 0.0, infraRated = 0.0, infraCoverage = 0.0, infraHeard = 0.0;
+
+        if (room.lcrReference && approvedLayerPower[0] > 1e-6 * (approvedPowerTotal + 1e-60) && inPowerLayer[0] > 0.0)
+        {
+            double centre = 0.0, weight = 0.0;
+
+            for (size_t i = 0; i < points.size(); ++i)
+            {
+                const double hz = a.grid[(size_t) points[i]];
+
+                if (hz < RoomResult::layerEdgesHz[1])
+                {
+                    const double power = std::max (0.0, played (flat, mix[i], false));
+                    centre += hz * power * std::log (hz);
+                    weight += hz * power;
+                }
+            }
+
+            const double hz = weight > 0.0 ? std::exp (centre / weight) : 14.0;      // where the infra of the mix sits
+            const double threshold = 97.0 - 11.9 * std::log2 (hz / 10.0);
+            const double approvedHere = inPowerLayer[0] * approvedLayer[0] / approvedLayerPower[0];
+            const double spl = splOfPower (std::max (approvedHere, actualLayer[0]));
+            infraHeard = tuning.audibility ? 0.5 * std::erfc (-((spl - threshold) / std::max (tuning.thresholdSpreadDb, 0.1)) / std::sqrt (2.0)) : 1.0;
+
+            const double doubling = PlaybackSimulator::iso226Spl (20.0, 30.0) - PlaybackSimulator::iso226Spl (20.0, 20.0);
+            const double allowed = std::min (toleranceDb, doubling - 0.5);
+            const double change = limitedDb ((actualLayer[0] / inPowerLayer[0]) / (approvedLayer[0] / approvedLayerPower[0] + 1e-30));
+            const double level = limitedDb (actualLayer[0] / (approvedLayer[0] + 1e-60));
+            infraRated = std::clamp ((std::abs (change) - allowed) / (doubling - allowed), 0.0, 1.0);
+            infraCoverage = std::clamp ((std::abs (level) - allowed) / (doubling - allowed), 0.0, 1.0);
+            infraWeight = approvedHere * infraHeard;
+        }
+
         // What the interaction adds at this seat, against what it added on the
         // stage. Audibility and loudness are taken at the level the bass has
         // at this seat, room peaks and dips included: the louder the
         // listening level, the more of what the room does is heard.
-        double weights[numBands] = {}, rated[numBands] = {}, weightTotal = 0.0, heardAtAll = 0.0;
+        double weights[numBands] = {}, rated[numBands] = {}, covered[numBands] = {}, weightTotal = 0.0, heardAtAll = 0.0;
         double totalActual = 0.0, totalPower = 0.0;
 
         for (int b = 0; b < numBands; ++b)
@@ -561,15 +603,32 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
             const double allowed = std::min (toleranceDb, doubling - 0.5);
 
             rated[b] = std::clamp ((std::abs (change) - allowed) / (doubling - allowed), 0.0, 1.0);
+
+            // Pro: coverage, the bass level at this seat against the stage, room colour included
+            // (back rows losing the bass, holes, boosts), judged the same way
+            const double level = limitedDb (actual[b] / (approved[b] + 1e-60));
+            covered[b] = std::clamp ((std::abs (level) - allowed) / (doubling - allowed), 0.0, 1.0);
             weights[b] = approvedHere * heard;
             weightTotal += weights[b];
             heardAtAll = std::max (heardAtAll, heard);
         }
 
-        double penalty = 0.0;
+        double penalty = 0.0, coverage = 0.0;
+        weightTotal += infraWeight;
+        heardAtAll = std::max (heardAtAll, infraHeard);
 
         for (int b = 0; b < numBands; ++b)
+        {
             penalty += weights[b] / (weightTotal + 1e-60) * rated[b];
+            coverage += weights[b] / (weightTotal + 1e-60) * covered[b];
+        }
+
+        penalty += infraWeight / (weightTotal + 1e-60) * infraRated;
+        coverage += infraWeight / (weightTotal + 1e-60) * infraCoverage;
+
+        // Pro: the interaction and the coverage, both risks
+        if (room.lcrReference)
+            penalty = 1.0 - (1.0 - std::min (penalty, 1.0)) * (1.0 - std::clamp (tuning.coverageWeight, 0.0, 1.0) * std::min (coverage, 1.0));
 
         const double seatPenalty = std::min (penalty, 1.0) * heardAtAll;
         const double seatChange = totalPower > 0.0 ? limitedDb ((totalActual / totalPower) / (approvedTotal / (approvedPowerTotal + 1e-60) + 1e-30))
@@ -591,6 +650,7 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
                     phon = std::max (phon, PlaybackSimulator::iso226Phon (PlaybackSimulator::bandCentreHz[b], splAt (b, actual[b])));
 
             r.seatBassDb[(size_t) seat] = splOfPower (totalActual);
+            r.seatLevelDb.push_back (limitedDb (totalActual / (approvedTotal + 1e-60)));
             r.seatHeardPhon[(size_t) seat] = phon;
             r.seatFeltDb[(size_t) seat] = splOfPower (felt);
         }

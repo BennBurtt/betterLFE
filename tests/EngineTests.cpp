@@ -2066,7 +2066,9 @@ static void testRoomPro()
         room.fillsOn = true;
         room.numFills = 4;
         room.dualLCR = true;
-        const auto r = RoomSimulator::rate (ProRoomModel::prepare (room, noLfe.grid), noLfe, noLfeT, sim.tuning,
+        auto interactionOnly = sim.tuning;
+        interactionOnly.coverageWeight = 0.0;       // coverage (the room's own holes) is tested below
+        const auto r = RoomSimulator::rate (ProRoomModel::prepare (room, noLfe.grid), noLfe, noLfeT, interactionOnly,
                                             PlaybackSimulator::Level::strong, 10.0);
         double worst = 0.0;
 
@@ -2279,6 +2281,40 @@ static void testRoomPro()
 
         std::printf ("  numerical floors (oval, rounded corners, L; proportions 1, 1.6, 3): mode count within %.1f %% of Weyl's law\n", 100.0 * worst);
         check (worst < 0.05, "numerical floors: no mode missing (Weyl's law)", worst);
+    }
+
+    // Coverage: LFE fills half way down a catwalk room bring the bass to the back rows
+    {
+        const auto mix = scene (0.3, -10.0);
+        const auto mixT = sim.compute (mix);
+        auto room = ProRoom::venues()[7].room;      // showroom catwalk, 20 x 10 x 4 m
+        const auto rows = [&] (const ProRoom& rm, const RoomResult& res)
+        {
+            // Mean bass level against the stage, front half and back half of the audience
+            const auto seats = rm.seatPositions();
+            double front = 0.0, back = 0.0;
+            int nf = 0, nb = 0;
+
+            for (size_t i = 0; i < seats.size() && i < res.seatLevelDb.size(); ++i)
+                (seats[i][0] < 0.5 * rm.length ? (++nf, front) : (++nb, back)) += res.seatLevelDb[i];
+
+            return std::pair<double, double> { front / std::max (1, nf), back / std::max (1, nb) };
+        };
+
+        const auto without = RoomSimulator::rate (ProRoomModel::prepare (room, mix.grid), mix, mixT, sim.tuning, PlaybackSimulator::Level::medium, 10.0);
+        room.fillsOn = true;
+        room.numFills = 2;
+        room.fills[0].fx = 0.55;
+        room.fills[0].fy = 0.03;
+        room.fills[0].feed = 1;     // LFE
+        room.fills[0].delayMs = 1000.0 * room.fills[0].fx * room.length / RoomSimulator::speedOfSound;
+        room.applyLinks();
+        const auto with = RoomSimulator::rate (ProRoomModel::prepare (room, mix.grid), mix, mixT, sim.tuning, PlaybackSimulator::Level::medium, 10.0);
+        const auto a = rows (ProRoom::venues()[7].room, without), b = rows (room, with);
+        std::printf ("  catwalk, bass level against the stage: front %+.1f / back %+.1f dB; with LFE fills half way %+.1f / %+.1f dB; room %.1f -> %.1f\n",
+                     a.first, a.second, b.first, b.second, without.roomScore, with.roomScore);
+        check (! with.seatLevelDb.empty() && std::abs (b.first - a.first) + std::abs (b.second - a.second) > 0.3,
+               "coverage: the bass level at the seats follows the fills, distance and phase included", b.second - a.second);
     }
 
     // Room score: the worst seats weigh more
