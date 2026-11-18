@@ -71,26 +71,25 @@ void Room3DView::paint (juce::Graphics& g)
     g.fillAll (juce::Colour (0xff1b1c20));
 
     const double L = room.length, W = room.width, H = room.height;
-    const bool round = room.shape == ProRoom::round;
+    const bool round = room.shape != ProRoom::rectangle;     // any floor but the rectangle: drawn from its outline
     using Corner = std::array<double, 3>;
     struct Face { std::vector<Corner> corners; float alpha; float depth; bool screen; };
     std::vector<Face> faces;
 
     if (round)
     {
-        // A cylinder: floor, ceiling, and the wall in segments; the front (x = 0) marked as the screen
-        constexpr int segments = 48;
-        const double R = 0.5 * W;
-        const auto at = [&] (int k, double z) { const double a = juce::MathConstants<double>::twoPi * k / segments;
-                                                  return Corner { R + R * std::cos (a), R + R * std::sin (a), z }; };
+        // Floor, ceiling and the wall in segments along the outline; the front (x near 0) marked as the screen
+        const auto outline = room.boundaryPoints (room.shape == ProRoom::lShape ? 6 * 12 : 64);
+        const int segments = (int) outline.size();
+        const auto at = [&] (int k, double z) { const auto& p = outline[(size_t) (k % segments)]; return Corner { p[0], p[1], z }; };
         Face floor { {}, 0.30f, 0.0f, false }, ceiling { {}, 0.14f, 0.0f, false };
 
         for (int k = 0; k < segments; ++k)
         {
             floor.corners.push_back (at (k, 0.0));
             ceiling.corners.push_back (at (k, H));
-            const double a = juce::MathConstants<double>::twoPi * (k + 0.5) / segments;
-            const bool front = std::abs (a - juce::MathConstants<double>::pi) < 0.45;
+            const auto a0 = at (k, 0.0), a1 = at (k + 1, 0.0);
+            const bool front = std::max (a0[0], a1[0]) < 0.12 * L + 0.3;
             faces.push_back ({ { at (k, 0.0), at (k + 1, 0.0), at (k + 1, H), at (k, H) }, front ? 0.26f : 0.12f, 0.0f, false });
 
             if (front)
@@ -489,6 +488,9 @@ void RoomProEditor::barToggle (const juce::String& text, const juce::String& tip
     bool* target = &value;
     button->onClick = [this, raw, target, structure]
     {
+        if (onGestureStart)
+            onGestureStart();
+
         *target = raw->getToggleState();
         changed (structure);
     };
@@ -497,7 +499,8 @@ void RoomProEditor::barToggle (const juce::String& text, const juce::String& tip
 }
 
 juce::Slider& RoomProEditor::knob (const juce::String& label, double min, double max, double step, const juce::String& suffix,
-                                   std::function<double()> get, std::function<void (double)> set, std::function<double()> top)
+                                   std::function<double()> get, std::function<void (double)> set, std::function<double()> top,
+                                   std::function<double()> fallback)
 {
     Item item;
     item.kind = Item::knob;
@@ -515,16 +518,26 @@ juce::Slider& RoomProEditor::knob (const juce::String& label, double min, double
     slider->setValue (get(), juce::dontSendNotification);
     slider->setMouseDragSensitivity (180);
     slider->setScrollWheelEnabled (false);      // the wheel scrolls the column
+    slider->setTooltip (tr ("Double-click: back to the default."));
+
+    if (fallback)
+        slider->setDoubleClickReturnValue (true, fallback());
+
     auto* raw = slider.get();
+    slider->onDragStart = [this] { if (onGestureStart) onGestureStart(); };
     slider->onValueChange = [this, raw, set]
     {
         set (raw->getValue());
         changed (false);
     };
-    item.refresh = [raw, get, top, min, step]
+    item.refresh = [raw, get, top, min, step, fallback]
     {
         if (top)
             raw->setRange (min, juce::jmax (min + step, top()), step);
+
+        // The default follows the room: a speaker at half the width goes back to half of the width set now
+        if (fallback)
+            raw->setDoubleClickReturnValue (true, fallback());
 
         raw->setValue (get(), juce::dontSendNotification);
     };
@@ -536,16 +549,19 @@ juce::Slider& RoomProEditor::knob (const juce::String& label, double min, double
     return *raw;
 }
 
-juce::Slider& RoomProEditor::knob (const juce::String& label, double min, double max, double step, const juce::String& suffix, double& value)
+juce::Slider& RoomProEditor::knob (const juce::String& label, double min, double max, double step, const juce::String& suffix, double& value,
+                                   double fallback)
 {
     double* target = &value;
-    return knob (label, min, max, step, suffix, [target] { return *target; }, [target] (double v) { *target = v; });
+    return knob (label, min, max, step, suffix, [target] { return *target; }, [target] (double v) { *target = v; }, {},
+                 [fallback] { return fallback; });
 }
 
-juce::Slider& RoomProEditor::countKnob (const juce::String& label, int min, int max, int& value)
+juce::Slider& RoomProEditor::countKnob (const juce::String& label, int min, int max, int& value, int fallback)
 {
     int* target = &value;
-    return knob (label, min, max, 1.0, {}, [target] { return (double) *target; }, [target] (double v) { *target = juce::roundToInt (v); });
+    return knob (label, min, max, 1.0, {}, [target] { return (double) *target; }, [target] (double v) { *target = juce::roundToInt (v); }, {},
+                 [fallback] { return (double) fallback; });
 }
 
 void RoomProEditor::wide (const juce::String& label, std::unique_ptr<juce::Component> control)
@@ -578,6 +594,9 @@ juce::ComboBox& RoomProEditor::choice (const juce::String& label, const juce::St
     auto* raw = box.get();
     box->onChange = [this, raw, set, structure]
     {
+        if (onGestureStart)
+            onGestureStart();
+
         set (raw->getSelectedId() - 1);
         changed (structure);
     };
@@ -601,28 +620,52 @@ void RoomProEditor::info (std::function<juce::String()> text)
     items.push_back (std::move (item));
 }
 
-void RoomProEditor::speaker (const juce::String& title, ProSpeaker& s, bool sub, bool isFill, bool* link)
+void RoomProEditor::speaker (const juce::String& title, ProSpeaker& s, const ProSpeaker& reference, bool sub, bool isFill, bool* link)
 {
     section (title, sub);
 
     if (link != nullptr)
-        barToggle ("Link", "Linked: the right one mirrors the left one across the centre of the room.", *link, true, onGreen);
+        barToggle (tr ("Link"), tr ("Linked: the right one mirrors the left one across the centre of the room."), *link, true, onGreen);
 
-    barToggle (polaritySign, "Polarity inverted", s.inverted, false, polarityOrange);
-    barToggle ("On", "Speaker on", s.enabled, false, onGreen);
+    barToggle (polaritySign, tr ("Polarity inverted"), s.inverted, false, polarityOrange);
+    barToggle (tr ("On"), tr ("Speaker on"), s.enabled, false, onGreen);
 
+    // Defaults as a share of the room: they follow its size
     ProSpeaker* sp = &s;
-    knob ("From front", 0.0, 1.0, 0.05, " m", [this, sp] { return sp->fx * room->length; },
-          [this, sp] (double v) { sp->fx = v / room->length; }, [this] { return room->length; });
-    knob ("From left", 0.0, 1.0, 0.05, " m", [this, sp] { return sp->fy * room->width; },
-          [this, sp] (double v) { sp->fy = v / room->width; }, [this] { return room->width; });
-    knob ("Height", 0.0, 1.0, 0.05, " m", [this, sp] { return sp->fz * room->height; },
-          [this, sp] (double v) { sp->fz = v / room->height; }, [this] { return room->height; });
-    knob ("Delay", 0.0, isFill ? 300.0 : 50.0, 0.1, " ms", s.delayMs);
-    knob ("Level", -20.0, 20.0, 0.5, " dB", s.gainDb);
+    const ProSpeaker def = reference;
+    knob (tr ("From front"), 0.0, 1.0, 0.05, " m", [this, sp] { return sp->fx * room->length; },
+          [this, sp] (double v) { sp->fx = v / room->length; }, [this] { return room->length; }, [this, def] { return def.fx * room->length; });
+    knob (tr ("From left"), 0.0, 1.0, 0.05, " m", [this, sp] { return sp->fy * room->width; },
+          [this, sp] (double v) { sp->fy = v / room->width; }, [this] { return room->width; }, [this, def] { return def.fy * room->width; });
+    knob (tr ("Height"), 0.0, 1.0, 0.05, " m", [this, sp] { return sp->fz * room->height; },
+          [this, sp] (double v) { sp->fz = v / room->height; }, [this] { return room->height; }, [this, def] { return def.fz * room->height; });
 
     if (isFill)
-        choice ("Plays", { "Lc / Rc (L or R + C at -3 dB)", "LFE" }, [sp] { return sp->feed; }, [sp] (int v) { sp->feed = v; }, false);
+        // A fill's default delay: aligned with the screen at its own distance
+        knob (tr ("Delay"), 0.0, 300.0, 0.1, " ms", [sp] { return sp->delayMs; }, [sp] (double v) { sp->delayMs = v; }, {},
+              [this, sp] { return 1000.0 * sp->fx * room->length / RoomSimulator::speedOfSound; });
+    else
+        knob (tr ("Delay"), 0.0, 50.0, 0.1, " ms", s.delayMs, 0.0);
+
+    knob (tr ("Level"), -20.0, 20.0, 0.5, " dB", s.gainDb, 0.0);
+
+    if (isFill)
+        choice (tr ("Plays"), { tr ("Lc / Rc (L or R + C at -3 dB)"), "LFE" }, [sp] { return sp->feed; }, [sp] (int v) { sp->feed = v; }, false);
+}
+
+namespace
+{
+    // The reference layout the defaults come from (a multiplex of 200 seats), as shares of the room
+    const ProRoom& referenceRoom()
+    {
+        static const ProRoom r = ProRoom::fromSpec (RoomSimulator::defaultRooms()[6]);
+        return r;
+    }
+
+    juce::String materialLabel (const ProMaterial& m)
+    {
+        return tr (m.name) + "  (" + juce::String (m.alpha63, 2) + " / " + juce::String (m.alpha125, 2) + ")";
+    }
 }
 
 void RoomProEditor::rebuild()
@@ -634,32 +677,42 @@ void RoomProEditor::rebuild()
         return;
 
     auto& r = *room;
+    const auto& ref = referenceRoom();
 
     // Room
-    section ("Room");
+    section (tr ("Room"));
     {
         auto text = std::make_unique<juce::TextEditor>();
         text->setText (juce::String (r.name), false);
         text->setFont (uiFont (12.0f, true));
         auto* raw = text.get();
-        text->onTextChange = [this, raw] { room->name = raw->getText().toStdString(); changed (false); };
-        wide ("Name", std::move (text));
+        text->onTextChange = [this, raw] { if (onGestureStart) onGestureStart(); room->name = raw->getText().toStdString(); changed (false); };
+        wide (tr ("Name"), std::move (text));
     }
 
     {
+        // Presets: the cinema rooms of Room Sim, then the other venues by category
         auto box = std::make_unique<juce::ComboBox>();
-        box->setTextWhenNothingSelected ("Choose a room...");
-        box->addSectionHeading ("Cinemas");
+        box->setTextWhenNothingSelected (tr ("Choose a room..."));
+        box->addSectionHeading (tr ("Cinemas"));
         const auto specs = RoomSimulator::defaultRooms();
 
         for (size_t i = 0; i < specs.size(); ++i)
-            box->addItem (specs[i].name, (int) i + 1);
+            box->addItem (tr (specs[i].name), (int) i + 1);
 
-        box->addSectionHeading ("Other venues");
         const auto venues = ProRoom::venues();
+        std::string category;
 
         for (size_t i = 0; i < venues.size(); ++i)
-            box->addItem (juce::String (venues[i].name), 100 + (int) i);
+        {
+            if (venues[i].category != category)
+            {
+                category = venues[i].category;
+                box->addSectionHeading (tr (category));
+            }
+
+            box->addItem (tr (venues[i].room.name), 100 + (int) i);
+        }
 
         auto* raw = box.get();
         box->onChange = [this, raw]
@@ -669,55 +722,98 @@ void RoomProEditor::rebuild()
             const auto others = ProRoom::venues();
             const bool counted = room->counted;
 
+            if (onGestureStart)
+                onGestureStart();
+
             if (id >= 1 && id <= (int) cinemas.size())
                 *room = ProRoom::fromSpec (cinemas[(size_t) id - 1]);
             else if (id >= 100 && id < 100 + (int) others.size())
-                *room = others[(size_t) id - 100];
+                *room = others[(size_t) id - 100].room;
             else
                 return;
 
+            room->name = tr (room->name).toStdString();
             room->counted = counted;
             changed (true);
         };
-        wide ("Start from", std::move (box));
+        wide (tr ("Start from"), std::move (box));
     }
 
-    choice ("Shape", { "Rectangle", "Round" }, [this] { return room->shape; }, [this] (int v) { room->shape = v; }, true);
+    choice (tr ("Shape"), { tr ("Rectangle"), tr ("Round"), tr ("Oval"), tr ("Rounded corners"), tr ("L shape") },
+            [this] { return room->shape; }, [this] (int v) { room->shape = v; }, true);
 
     if (r.shape == ProRoom::round)
     {
-        knob ("Diameter", 3.0, 40.0, 0.1, " m", r.width);
+        knob (tr ("Diameter"), 3.0, 40.0, 0.1, " m", r.width, 13.0);
     }
     else
     {
-        knob ("Length", 4.0, 60.0, 0.1, " m", r.length);
-        knob ("Width", 3.0, 40.0, 0.1, " m", r.width);
+        knob (tr ("Length"), 4.0, 60.0, 0.1, " m", r.length, 20.0);
+        knob (tr ("Width"), 3.0, 40.0, 0.1, " m", r.width, 13.0);
     }
 
-    knob ("Height", 2.5, 25.0, 0.1, " m", r.height);
+    knob (tr ("Height"), 2.5, 25.0, 0.1, " m", r.height, 7.0);
+
+    if (r.shape == ProRoom::oval || r.shape == ProRoom::roundedCorners || r.shape == ProRoom::lShape)
+        info ([] { return tr ("Modes of this floor computed numerically (Rayleigh-Ritz): a second or two for a large room."); });
 
     // Acoustics
-    section ("Acoustics");
-    choice ("Decay", { "RT60 set by hand", "From the materials" }, [this] { return room->acoustics; },
+    section (tr ("Acoustics"));
+    choice (tr ("Decay"), { tr ("RT60 set by hand"), tr ("From the materials") }, [this] { return room->acoustics; },
             [this] (int v) { room->acoustics = v; }, true);
 
     if (r.acoustics == 0)
     {
-        knob ("RT60", 0.1, 10.0, 0.01, " s", r.rt60).setSkewFactorFromMidPoint (1.0);
+        knob (tr ("RT60"), 0.1, 10.0, 0.01, " s", r.rt60, 0.55).setSkewFactorFromMidPoint (1.0);
     }
     else
     {
-        juce::StringArray names;
-
-        for (const auto& m : ProRoom::materialList())
-            names.add (juce::String (m.name) + "  (" + juce::String (m.alpha63, 2) + " / " + juce::String (m.alpha125, 2) + ")");
-
-        const char* surfaces[] = { "Front wall", "Back wall", "Left wall", "Right wall", "Floor", "Ceiling" };
+        const juce::String surfaces[] = { tr ("Front wall"), tr ("Back wall"), tr ("Left wall"), tr ("Right wall"), tr ("Floor"), tr ("Ceiling") };
+        const int allowed[] = { ProMaterial::wall, ProMaterial::wall, ProMaterial::wall, ProMaterial::wall, ProMaterial::floor, ProMaterial::ceiling };
 
         for (int i = 0; i < ProRoom::numSurfaces; ++i)
-            if (r.shape == ProRoom::rectangle || i == ProRoom::frontWall || i == ProRoom::floor || i == ProRoom::ceiling)
-                choice (r.shape == ProRoom::round && i == ProRoom::frontWall ? "Wall" : surfaces[i], names, [this, i] { return room->materials[(size_t) i]; },
-                    [this, i] (int v) { room->materials[(size_t) i] = juce::jmax (0, v); }, false);
+        {
+            if (r.shape != ProRoom::rectangle && i != ProRoom::frontWall && i != ProRoom::floor && i != ProRoom::ceiling)
+                continue;
+
+            // Only what can go on this surface, by family, in alphabetical order of the language shown
+            auto box = std::make_unique<juce::ComboBox>();
+            const auto& list = ProRoom::materialList();
+
+            for (int group = 0; group < ProMaterial::numGroups; ++group)
+            {
+                std::vector<int> members;
+
+                for (size_t m = 0; m < list.size(); ++m)
+                    if (list[m].group == group && (list[m].surfaces & allowed[i]) != 0)
+                        members.push_back ((int) m);
+
+                if (members.empty())
+                    continue;
+
+                std::sort (members.begin(), members.end(), [&list] (int a, int b) { return tr (list[(size_t) a].name).compareNatural (tr (list[(size_t) b].name)) < 0; });
+                box->addSectionHeading (tr (ProMaterial::groupName (group)));
+
+                for (int m : members)
+                    box->addItem (materialLabel (list[(size_t) m]), m + 1);
+            }
+
+            box->setSelectedId (r.materials[(size_t) i] + 1, juce::dontSendNotification);
+            auto* raw = box.get();
+            box->onChange = [this, raw, i]
+            {
+                if (raw->getSelectedId() > 0)
+                {
+                    if (onGestureStart)
+                        onGestureStart();
+
+                    room->materials[(size_t) i] = raw->getSelectedId() - 1;
+                    changed (false);
+                }
+            };
+            wide (r.shape != ProRoom::rectangle && i == ProRoom::frontWall ? tr ("Wall") : surfaces[i], std::move (box));
+            items.back().refresh = [this, raw, i] { raw->setSelectedId (room->materials[(size_t) i] + 1, juce::dontSendNotification); };
+        }
     }
 
     info ([this]
@@ -726,100 +822,117 @@ void RoomProEditor::rebuild()
         juce::String text;
 
         if (rm.acoustics == 1)
-            text << "RT60 (Eyring)  63 Hz: " << juce::String (rm.eyringRt60 (63.0), 2) << " s   125 Hz: "
+            text << tr ("RT60 (Eyring)") << "  63 Hz: " << juce::String (rm.eyringRt60 (63.0), 2) << " s   125 Hz: "
                  << juce::String (rm.eyringRt60 (125.0), 2) << " s\n";
         else
-            text << "Absorption in brackets: 63 Hz / 125 Hz\n";
+            text << tr ("Absorption in brackets: 63 Hz / 125 Hz") << "\n";
 
-        text << "Schroeder frequency " << juce::roundToInt (rm.schroederHz()) << " Hz: below it, single modes.";
+        text << tr ("Schroeder frequency") << " " << juce::roundToInt (rm.schroederHz()) << " Hz: " << tr ("below it, single modes.");
         return text;
     });
 
     // Speakers
     section ("L C R");
-    choice ("Sets", { "One set", "Two sets, back to back" }, [this] { return room->dualLCR ? 1 : 0; },
+    choice (tr ("Sets"), { tr ("One set"), tr ("Two sets, back to back") }, [this] { return room->dualLCR ? 1 : 0; },
             [this] (int v) { room->dualLCR = v == 1; }, true);
 
     if (r.dualLCR)
-        info ([] { return juce::String ("The second set is the first one turned round the centre of the room:\nplace the first set, the second follows."); });
+        info ([] { return tr ("The second set is the first one turned round the centre of the room:\nplace the first set, the second follows."); });
 
     if (r.linkLR)
     {
-        speaker ("Left / Right", r.lcr[0], true, false, &r.linkLR);
+        speaker (tr ("Left / Right"), r.lcr[0], ref.lcr[0], true, false, &r.linkLR);
     }
     else
     {
-        speaker ("Left", r.lcr[0], true, false, &r.linkLR);
-        speaker ("Right", r.lcr[2], true, false, nullptr);
+        speaker (tr ("Left"), r.lcr[0], ref.lcr[0], true, false, &r.linkLR);
+        speaker (tr ("Right"), r.lcr[2], ref.lcr[2], true, false, nullptr);
     }
 
-    speaker ("Centre", r.lcr[1], true, false, nullptr);
+    speaker (tr ("Centre"), r.lcr[1], ref.lcr[1], true, false, nullptr);
 
-    section ("Subwoofers");
-    choice ("Number", { "1", "2", "3", "4" }, [this] { return room->numSubs - 1; }, [this] (int v) { room->numSubs = v + 1; }, true);
+    // Routing, as on a console panner
+    section (tr ("Divergence"));
+    knob (tr ("Centre %"), 0.0, 100.0, 1.0, " %", r.centrePercent, 100.0)
+        .setTooltip (tr ("Share of C played by the centre speaker; the rest goes to L and R as a phantom centre. Double-click: 100."));
+    knob (tr ("Front"), 0.0, 100.0, 1.0, " %", r.frontDivergence, 100.0)
+        .setTooltip (tr ("100: each screen channel on its own speaker. Lower: spread over L, C and R. Double-click: 100."));
+    knob (tr ("Rear"), 0.0, 100.0, 1.0, " %", r.rearDivergence, 100.0)
+        .setTooltip (tr ("100: left fills play Lc, right fills Rc. Lower: the two sides share their feeds. Double-click: 100."));
+    knob (tr ("F / R"), 0.0, 100.0, 1.0, " %", r.frDivergence, 100.0)
+        .setTooltip (tr ("100: the screen channels stay on the screen speakers. Lower: part of them goes to the fills. Double-click: 100."));
+
+    section (tr ("Subwoofers"));
+    choice (tr ("Number"), { "1", "2", "3", "4" }, [this] { return room->numSubs - 1; }, [this] (int v) { room->numSubs = v + 1; }, true);
 
     for (int i = 0; i < juce::jlimit (1, ProRoom::maxSubs, r.numSubs); ++i)
-        speaker ("Sub " + juce::String (i + 1), r.subs[(size_t) i], true, false, nullptr);
+        speaker (tr ("Sub") + " " + juce::String (i + 1), r.subs[(size_t) i], ref.subs[(size_t) i], true, false, nullptr);
 
-    section ("Fill speakers");
-    barToggle ("Link", "Linked: fills 2 and 4 mirror fills 1 and 3 across the centre of the room.", r.linkFills, true, onGreen);
-    barToggle ("On", "Use fill speakers", r.fillsOn, true, onGreen);
+    section (tr ("Fill speakers"));
+    barToggle (tr ("Link"), tr ("Linked: fills 2 and 4 mirror fills 1 and 3 across the centre of the room."), r.linkFills, true, onGreen);
+    barToggle (tr ("On"), tr ("Use fill speakers"), r.fillsOn, true, onGreen);
 
     if (r.fillsOn)
     {
         if (r.linkFills)
         {
-            choice ("Number", { "1 pair", "2 pairs" }, [this] { return room->numFills <= 2 ? 0 : 1; },
+            choice (tr ("Number"), { tr ("1 pair"), tr ("2 pairs") }, [this] { return room->numFills <= 2 ? 0 : 1; },
                     [this] (int v) { room->numFills = (v + 1) * 2; }, true);
 
             for (int pair = 0; pair < (r.numFills <= 2 ? 1 : 2); ++pair)
-                speaker ("Fills " + juce::String (pair * 2 + 1) + " / " + juce::String (pair * 2 + 2), r.fills[(size_t) pair * 2],
-                         true, true, nullptr);
+                speaker (tr ("Fills") + " " + juce::String (pair * 2 + 1) + " / " + juce::String (pair * 2 + 2), r.fills[(size_t) pair * 2],
+                         ref.fills[(size_t) pair * 2], true, true, nullptr);
         }
         else
         {
-            choice ("Number", { "1", "2", "3", "4" }, [this] { return room->numFills - 1; }, [this] (int v) { room->numFills = v + 1; }, true);
+            choice (tr ("Number"), { "1", "2", "3", "4" }, [this] { return room->numFills - 1; }, [this] (int v) { room->numFills = v + 1; }, true);
 
             for (int i = 0; i < juce::jlimit (1, ProRoom::maxFills, r.numFills); ++i)
-                speaker ("Fill " + juce::String (i + 1), r.fills[(size_t) i], true, true, nullptr);
+                speaker (tr ("Fill") + " " + juce::String (i + 1), r.fills[(size_t) i], ref.fills[(size_t) i], true, true, nullptr);
         }
     }
 
     // Audience
-    section ("Audience");
-    choice ("Layout", { "Rows", "Two blocks, aisle in the middle", "Rings around the centre" }, [this] { return room->audienceLayout; },
-            [this] (int v) { room->audienceLayout = v; }, true);
+    section (tr ("Audience"));
+    choice (tr ("Layout"), { tr ("Rows"), tr ("Two blocks, aisle in the middle"), tr ("Rings around the centre") },
+            [this] { return room->audienceLayout; }, [this] (int v) { room->audienceLayout = v; }, true);
+    choice (tr ("People"), { tr ("None (empty room)"), tr ("Seated"), tr ("Standing") }, [this] { return room->people; },
+            [this] (int v) { room->people = v; }, false);
 
     if (r.audienceLayout == ProRoom::ringLayout)
     {
         const auto half = [this] { return 0.5 * std::min (room->length, room->width); };
-        knob ("Inner", 0.0, 1.0, 0.1, " m", [this, half] { return room->ringInner * half(); },
-              [this, half] (double v) { room->ringInner = v / half(); }, half);
-        knob ("Outer", 0.0, 1.0, 0.1, " m", [this, half] { return room->ringOuter * half(); },
-              [this, half] (double v) { room->ringOuter = v / half(); }, half);
-        countKnob ("Rings", 1, 12, r.rows);
-        countKnob ("Outer ring", 4, 24, r.perRow);
+        knob (tr ("Inner"), 0.0, 1.0, 0.1, " m", [this, half] { return room->ringInner * half(); },
+              [this, half] (double v) { room->ringInner = v / half(); }, half, [half] { return 0.3 * half(); });
+        knob (tr ("Outer"), 0.0, 1.0, 0.1, " m", [this, half] { return room->ringOuter * half(); },
+              [this, half] (double v) { room->ringOuter = v / half(); }, half, [half] { return 0.85 * half(); });
+        countKnob (tr ("Rings"), 1, 12, r.rows, 4);
+        countKnob (tr ("Outer ring"), 4, 24, r.perRow, 16);
     }
     else
     {
-        knob ("First row", 0.0, 1.0, 0.1, " m", [this] { return room->firstRow * room->length; },
-              [this] (double v) { room->firstRow = v / room->length; }, [this] { return room->length; });
-        knob ("Last row", 0.0, 1.0, 0.1, " m", [this] { return room->lastRow * room->length; },
-              [this] (double v) { room->lastRow = v / room->length; }, [this] { return room->length; });
-        knob ("Width", 10.0, 100.0, 1.0, " %", [this] { return room->audienceWidth * 100.0; },
-              [this] (double v) { room->audienceWidth = v / 100.0; });
+        knob (tr ("First row"), 0.0, 1.0, 0.1, " m", [this] { return room->firstRow * room->length; },
+              [this] (double v) { room->firstRow = v / room->length; }, [this] { return room->length; },
+              [this, ref] { return ref.firstRow * room->length; });
+        knob (tr ("Last row"), 0.0, 1.0, 0.1, " m", [this] { return room->lastRow * room->length; },
+              [this] (double v) { room->lastRow = v / room->length; }, [this] { return room->length; },
+              [this, ref] { return ref.lastRow * room->length; });
+        knob (tr ("Width"), 10.0, 100.0, 1.0, " %", [this] { return room->audienceWidth * 100.0; },
+              [this] (double v) { room->audienceWidth = v / 100.0; }, {}, [ref] { return ref.audienceWidth * 100.0; });
 
         if (r.audienceLayout == ProRoom::sidesLayout)
-            knob ("Aisle", 0.0, 90.0, 1.0, " %", [this] { return room->aisle * 100.0; }, [this] (double v) { room->aisle = v / 100.0; });
+            knob (tr ("Aisle"), 0.0, 90.0, 1.0, " %", [this] { return room->aisle * 100.0; }, [this] (double v) { room->aisle = v / 100.0; },
+                  {}, [] { return 25.0; });
 
-        countKnob ("Rows", 1, 12, r.rows);
-        countKnob ("Per row", 1, 24, r.perRow);
+        countKnob (tr ("Rows"), 1, 12, r.rows, ref.rows);
+        countKnob (tr ("Per row"), 1, 24, r.perRow, ref.perRow);
     }
-    knob ("Ear", 0.8, 3.0, 0.05, " m", r.earHeight);
-    knob ("Rake", 0.0, 10.0, 0.05, " m", r.rake);
 
-    section ("Calibration");
-    choice ("Levels set at", { "All seats (average)", "Reference seat (2/3, centre)" }, [this] { return room->calibration; },
+    knob (tr ("Ear"), 0.8, 3.0, 0.05, " m", r.earHeight, 1.2);
+    knob (tr ("Rake"), 0.0, 10.0, 0.05, " m", r.rake, 0.0);
+
+    section (tr ("Calibration"));
+    choice (tr ("Levels set at"), { tr ("All seats (average)"), tr ("Reference seat (2/3, centre)") }, [this] { return room->calibration; },
             [this] (int v) { room->calibration = v; }, false);
 
     resized();

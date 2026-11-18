@@ -22,11 +22,14 @@ namespace
 
     // Layout of one row of the statistics: power of L, C, R, F, LFE, then the
     // real and imaginary parts of X.conj(LFE) for X = L, C, R, F.
-    constexpr int statCount = 15;
+    constexpr int statCount = 19;
     constexpr int statPower = 0, statRe = 5, statIm = 9;
 
     // ...then, for the stereo downmix, the real parts of L.conj(C) and R.conj(C).
     constexpr int statLC = 13, statRC = 14;
+
+    // ...and, for Room Sim Pro, the imaginary parts of L.conj(C) and R.conj(C), then L.conj(R).
+    constexpr int statLCi = 15, statRCi = 16, statLR = 17, statLRi = 18;
 
     constexpr double globalLoHz = 20.0, globalHiHz = 120.0;
 
@@ -282,6 +285,9 @@ void LfeEngine::configure (double windowSeconds)
             v->assign (gridPoints, 0.0);
 
         m.cFLfe.assign (gridPoints, {});
+
+        for (auto* v : { &m.cLC, &m.cLR, &m.cCR, &m.cLLfe, &m.cCLfe, &m.cRLfe })
+            v->assign (gridPoints, {});
     }
 
     out.windowSeconds = windowSec;
@@ -508,8 +514,13 @@ bool LfeEngine::analyze (const Settings& settings)
 
         row[statPower + 4] = std::norm (lfe);
 
-        row[statLC] = (x[0] * std::conj (x[1])).real();
-        row[statRC] = (x[2] * std::conj (x[1])).real();
+        const auto lc = x[0] * std::conj (x[1]), rc = x[2] * std::conj (x[1]), lr = x[0] * std::conj (x[2]);
+        row[statLC] = lc.real();
+        row[statRC] = rc.real();
+        row[statLCi] = lc.imag();
+        row[statRCi] = rc.imag();
+        row[statLR] = lr.real();
+        row[statLRi] = lr.imag();
 
         // Whole-session polarity: no forgetting, weighted by energy and time
         if (i >= globalBinLo && i < globalBinHi)
@@ -580,6 +591,12 @@ bool LfeEngine::analyze (const Settings& settings)
             m.reLC[g] = fast[statLC] / gf2;
             m.reRC[g] = fast[statRC] / gf2;
             m.cFLfe[g] = std::complex<double> (fast[statRe + pairFacade], fast[statIm + pairFacade]) / (facadeGain * gl);
+            m.cLC[g] = std::complex<double> (fast[statLC], fast[statLCi]) / gf2;
+            m.cCR[g] = std::conj (std::complex<double> (fast[statRC], fast[statRCi])) / gf2;
+            m.cLR[g] = std::complex<double> (fast[statLR], fast[statLRi]) / gf2;
+            m.cLLfe[g] = std::complex<double> (fast[statRe], fast[statIm]) / (facadeGain * gl);
+            m.cCLfe[g] = std::complex<double> (fast[statRe + 1], fast[statIm + 1]) / (facadeGain * gl);
+            m.cRLfe[g] = std::complex<double> (fast[statRe + 2], fast[statIm + 2]) / (facadeGain * gl);
 
             const double q = std::sqrt (smNow[pairFacade] * smNow[4]);
             double& a1 = m1Fast[g];

@@ -7,6 +7,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "Widgets.h"
+#include "Lang.h"
 #include "../core/RoomPro.h"
 
 #include <array>
@@ -66,6 +67,7 @@ public:
 
     std::function<void()> onChange;             // any value changed
     std::function<void()> onStructureChange;    // the list of controls must be rebuilt
+    std::function<void()> onGestureStart;       // a change is about to be made (for undo)
 
     void setRoom (ProRoom* r)                   { room = r; rebuild(); }
     void rebuild();
@@ -88,14 +90,16 @@ private:
     void section (const juce::String& title, bool sub = false);
     void barToggle (const juce::String& text, const juce::String& tip, bool& value, bool structure, juce::Colour on);
     juce::Slider& knob (const juce::String& label, double min, double max, double step, const juce::String& suffix,
-                        std::function<double()> get, std::function<void (double)> set, std::function<double()> top = {});
-    juce::Slider& knob (const juce::String& label, double min, double max, double step, const juce::String& suffix, double& value);
-    juce::Slider& countKnob (const juce::String& label, int min, int max, int& value);
+                        std::function<double()> get, std::function<void (double)> set, std::function<double()> top = {},
+                        std::function<double()> fallback = {});     // fallback: the value a double-click goes back to
+    juce::Slider& knob (const juce::String& label, double min, double max, double step, const juce::String& suffix, double& value,
+                        double fallback);
+    juce::Slider& countKnob (const juce::String& label, int min, int max, int& value, int fallback);
     juce::ComboBox& choice (const juce::String& label, const juce::StringArray& entries, std::function<int()> get,
                             std::function<void (int)> set, bool structure);
     void wide (const juce::String& label, std::unique_ptr<juce::Component>);
     void info (std::function<juce::String()> text);
-    void speaker (const juce::String& title, ProSpeaker&, bool sub, bool isFill, bool* link);
+    void speaker (const juce::String& title, ProSpeaker&, const ProSpeaker& reference, bool sub, bool isFill, bool* link);
     void changed (bool structure);
     void refreshAll();
 

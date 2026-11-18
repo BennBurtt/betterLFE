@@ -62,7 +62,8 @@ if(SUBGUARD_BUILD_APP)
         app/Main.cpp
         app/MainComponent.cpp
         app/Widgets.cpp
-        app/RoomProView.cpp)
+        app/RoomProView.cpp
+        app/Lang.cpp)
 
     target_compile_definitions(SubGuard PRIVATE
         JUCE_WEB_BROWSER=0

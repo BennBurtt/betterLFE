@@ -95,6 +95,10 @@ struct Analysis
     {
         std::vector<double> pF, pLfe, pL, pC, pR, reLC, reRC;
         std::vector<std::complex<double>> cFLfe;
+
+        // The full cross-spectral matrix of L, C, R and the LFE (Room Sim Pro
+        // plays each channel from its own speakers): X.conj(Y), same gains.
+        std::vector<std::complex<double>> cLC, cLR, cCR, cLLfe, cCLfe, cRLfe;
         std::vector<double> sigma;      // chance level of the F / LFE coherence at this averaging
     } matrix;
 

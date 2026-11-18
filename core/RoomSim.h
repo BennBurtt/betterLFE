@@ -72,31 +72,35 @@ struct RoomResult
     double combinedScore = 100.0;                         // bass robustness x room score / 100
 };
 
-/** A room's calibrated paths, per seat and grid point, as averages over the band of that point:
-    screen-path power, LFE-path power and their cross product. */
+/** A room's calibrated paths, per seat and grid point, as averages over the band of that point.
+    Each of the four channels (L, C, R, LFE) reaches a seat through its own speakers: H_a. What is
+    kept is the matrix H_a conj(H_b), so that any mix (its cross-spectral matrix) can be played. */
 struct RoomPaths
 {
+    static constexpr int numChannels = 4;                   // L, C, R, LFE
+    using ChannelMatrix = std::array<std::complex<double>, numChannels * numChannels>;   // [a * 4 + b]
+
     RoomSpec spec;
     int seats = 0;
     std::vector<int> points;                                // grid indices inside 20-120 Hz
-    std::vector<double> ss, ll;                             // |screen|^2, |LFE path|^2   [seat * points.size() + i]
-    std::vector<std::complex<double>> sl;                   // screen * conj (LFE path)
+    std::vector<ChannelMatrix> p;                           // [seat * points.size() + i]
 
     // The room as set up normally (no level offsets), calibrated: what each seat
     // is measured against, so that the room's own colour is left out but a
-    // speaker set off its level is not. Empty: the same as ss and ll.
-    std::vector<double> ssRef, llRef;
+    // speaker set off its level is not. Empty: the same as p.
+    std::vector<ChannelMatrix> pRef;
 
-    // false (Room Sim): only the interaction between the two paths counts, the
-    // colour each path gets from the room is left out.
-    // true (Room Sim Pro): the screen path (L C R) is the reference: the room
-    // colour of the screen path is left out, but the LFE path heard
-    // differently from it (subwoofers placed elsewhere, set off their level,
-    // in another mode) counts, in proportion to the bass the mix gives the LFE.
+    // false (Room Sim): only the interaction between the screen channels and
+    // the LFE counts; the colour each path gets from the room is left out.
+    // true (Room Sim Pro): the screen channels as mixed are the reference:
+    // the LFE's bass is expected where the screen's bass is, so the LFE path
+    // heard differently from the screen's (subwoofers placed elsewhere, set
+    // off their level, in another mode) counts, in proportion to the bass the
+    // mix gives the LFE.
     bool lcrReference = false;
 
-    /** Stores one band point of a seat from its complex responses (the average of several, when called with `weight`). */
-    void accumulate (size_t at, std::complex<double> screen, std::complex<double> lfe, double weight = 1.0);
+    /** Adds h_a conj(h_b) (times `weight`) to one band point of a seat. */
+    static void accumulate (ChannelMatrix&, const std::array<std::complex<double>, numChannels>& h, double weight = 1.0);
 };
 
 struct RoomSimResult

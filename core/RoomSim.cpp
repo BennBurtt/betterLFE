@@ -147,11 +147,11 @@ cd RoomSimulator::response (const RoomSpec& r, const Point& source, const Point&
     return sum;
 }
 
-void RoomPaths::accumulate (size_t at, cd screen, cd lfe, double weight)
+void RoomPaths::accumulate (ChannelMatrix& m, const std::array<cd, numChannels>& h, double weight)
 {
-    ss[at] += weight * std::norm (screen);
-    ll[at] += weight * std::norm (lfe);
-    sl[at] += weight * screen * std::conj (lfe);
+    for (int a = 0; a < numChannels; ++a)
+        for (int b = 0; b < numChannels; ++b)
+            m[(size_t) (a * numChannels + b)] += weight * h[(size_t) a] * std::conj (h[(size_t) b]);
 }
 
 std::vector<int> RoomSimulator::bandPoints (const std::vector<double>& grid)
@@ -167,11 +167,12 @@ std::vector<int> RoomSimulator::bandPoints (const std::vector<double>& grid)
 
 void RoomSimulator::calibrate (RoomPaths& p, const std::vector<double>& grid, const std::vector<int>& calibrationSeats)
 {
-    // As in a real room: the screen and the subwoofers are each set so that
-    // their level averaged over the calibration seats (20-120 Hz) equals the
-    // level on the stage. Each seat then sits above or below by what the room
-    // does there.
-    double screenMean = 0.0, subMean = 0.0, weight = 0.0;
+    // As in a real room: each channel's speakers are set so that their level
+    // averaged over the calibration seats (20-120 Hz) equals the level on the
+    // stage, one channel at a time. Each seat then sits above or below by what
+    // the room does there.
+    constexpr int nc = RoomPaths::numChannels;
+    double mean[nc] = {}, weight = 0.0;
     const size_t n = p.points.size();
 
     for (int seat = 0; seat < p.seats; ++seat)
@@ -182,18 +183,24 @@ void RoomSimulator::calibrate (RoomPaths& p, const std::vector<double>& grid, co
         for (size_t i = 0; i < n; ++i)
         {
             const double hz = grid[(size_t) p.points[i]];
-            screenMean += hz * p.ss[(size_t) seat * n + i];
-            subMean += hz * p.ll[(size_t) seat * n + i];
+            const auto& m = p.p[(size_t) seat * n + i];
+
+            for (int a = 0; a < nc; ++a)
+                mean[a] += hz * m[(size_t) (a * nc + a)].real();
+
             weight += hz;
         }
     }
 
-    const double screenScale = weight > 0.0 && screenMean > 0.0 ? std::sqrt (weight / screenMean) : 1.0;
-    const double subScale = weight > 0.0 && subMean > 0.0 ? std::sqrt (weight / subMean) : 1.0;
+    double scale[nc];
 
-    for (auto& v : p.ss)    v *= screenScale * screenScale;
-    for (auto& v : p.ll)    v *= subScale * subScale;
-    for (auto& v : p.sl)    v *= screenScale * subScale;
+    for (int a = 0; a < nc; ++a)
+        scale[a] = weight > 0.0 && mean[a] > 0.0 ? std::sqrt (weight / mean[a]) : 1.0;
+
+    for (auto& m : p.p)
+        for (int a = 0; a < nc; ++a)
+            for (int b = 0; b < nc; ++b)
+                m[(size_t) (a * nc + b)] *= scale[a] * scale[b];
 }
 
 void RoomSimulator::prepare (const std::vector<double>& grid)
@@ -211,18 +218,21 @@ void RoomSimulator::prepare (const std::vector<double>& grid)
         const auto screen = screenSpeakers (spec), subs = subwoofers (spec), seatPoints = seats (spec);
         p.seats = (int) seatPoints.size();
 
-        // Source terms once per mode: the mean shape over the screen speakers and over the subwoofers
-        std::vector<double> atScreen (modes.size()), atSub (modes.size());
+        // Source terms once per mode: each screen speaker plays its own channel, the subwoofers the LFE
+        std::vector<std::array<double, RoomPaths::numChannels>> atSource (modes.size());
 
         for (size_t k = 0; k < modes.size(); ++k)
         {
-            for (const auto& s : screen)    atScreen[k] += shape (spec, modes[k], s) / (double) screen.size();
-            for (const auto& s : subs)      atSub[k] += shape (spec, modes[k], s) / (double) subs.size();
+            for (size_t c = 0; c < 3; ++c)
+                atSource[k][c] = shape (spec, modes[k], screen[c]);
+
+            atSource[k][3] = 0.0;
+
+            for (const auto& s : subs)
+                atSource[k][3] += shape (spec, modes[k], s) / (double) subs.size();
         }
 
-        p.ss.assign (seatPoints.size() * points.size(), 0.0);
-        p.ll.assign (seatPoints.size() * points.size(), 0.0);
-        p.sl.assign (seatPoints.size() * points.size(), cd());
+        p.p.assign (seatPoints.size() * points.size(), {});
 
         for (size_t seat = 0; seat < seatPoints.size(); ++seat)
         {
@@ -234,16 +244,17 @@ void RoomSimulator::prepare (const std::vector<double>& grid)
             for (size_t i = 0; i < points.size(); ++i)
             {
                 const double w = 2.0 * pi * grid[(size_t) points[i]];
-                cd hs, hl;
+                std::array<cd, RoomPaths::numChannels> h {};
 
                 for (size_t k = 0; k < modes.size(); ++k)
                 {
                     const cd term = atSeat[k] / cd (modes[k].omega2 - w * w, 2.0 * modes[k].damping * w);
-                    hs += atScreen[k] * term;
-                    hl += atSub[k] * term;
+
+                    for (size_t c = 0; c < RoomPaths::numChannels; ++c)
+                        h[c] += atSource[k][c] * term;
                 }
 
-                p.accumulate (seat * points.size() + i, hs, hl);
+                RoomPaths::accumulate (p.p[seat * points.size() + i], h);
             }
         }
 
@@ -317,19 +328,58 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
         return -1;
     };
 
-    // The cross term with what chance alone could produce taken out, as in the playback simulation
-    std::vector<cd> cross (points.size());
+    if (m.cLC.size() != a.grid.size() || room.p.size() != (size_t) room.seats * points.size())
+        return r;
+
+    // The mix's cross-spectral matrix (L, C, R, LFE) at each band point, the
+    // LFE crosses with what chance alone could produce taken out, as in the
+    // playback simulation
+    constexpr int nc = RoomPaths::numChannels;
+    std::vector<RoomPaths::ChannelMatrix> mix (points.size());
 
     for (size_t i = 0; i < points.size(); ++i)
     {
         const auto g = (size_t) points[i];
         const double sigma = m.sigma[g];
-        const double coherence = std::abs (m.cFLfe[g]) / (std::sqrt (m.pF[g] * m.pLfe[g]) + 1e-60);
         const double full = std::max (std::min (3.0 * sigma, 0.95), 2.0 * sigma + 1e-9);
-        cross[i] = m.cFLfe[g] * std::clamp ((coherence - 2.0 * sigma) / (full - 2.0 * sigma), 0.0, 1.0);
+        const double powers[3] = { m.pL[g], m.pC[g], m.pR[g] };
+        const cd withLfe[3] = { m.cLLfe[g], m.cCLfe[g], m.cRLfe[g] };
+        auto& x = mix[i];
+
+        x[0] = powers[0];
+        x[5] = powers[1];
+        x[10] = powers[2];
+        x[15] = gain * gain * m.pLfe[g];
+        x[1] = m.cLC[g];    x[4] = std::conj (m.cLC[g]);
+        x[2] = m.cLR[g];    x[8] = std::conj (m.cLR[g]);
+        x[6] = m.cCR[g];    x[9] = std::conj (m.cCR[g]);
+
+        for (int c = 0; c < 3; ++c)
+        {
+            const double coherence = std::abs (withLfe[c]) / (std::sqrt (powers[c] * m.pLfe[g]) + 1e-60);
+            const cd cross = gain * withLfe[c] * std::clamp ((coherence - 2.0 * sigma) / (full - 2.0 * sigma), 0.0, 1.0);
+            x[(size_t) (c * nc + 3)] = cross;
+            x[(size_t) (3 * nc + c)] = std::conj (cross);
+        }
     }
 
-    // The mix as approved, per band: as heard (in phase) and added in power
+    // Power of the mix through a set of paths: sum over a, b of P_ab x S_ab (screen channels only, or all four)
+    const auto played = [] (const RoomPaths::ChannelMatrix& paths, const RoomPaths::ChannelMatrix& x, bool screenOnly)
+    {
+        const int n = screenOnly ? 3 : nc;
+        double sum = 0.0;
+
+        for (int a = 0; a < n; ++a)
+            for (int b = 0; b < n; ++b)
+                sum += (paths[(size_t) (a * nc + b)] * x[(size_t) (a * nc + b)]).real();
+
+        return sum;
+    };
+
+    RoomPaths::ChannelMatrix flat;
+    flat.fill (cd (1.0, 0.0));
+
+    // The mix as approved, per band: as heard (all crosses) and with the LFE added in power
     double approved[numBands] = {}, approvedPower[numBands] = {};
 
     for (size_t i = 0; i < points.size(); ++i)
@@ -341,9 +391,8 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
             continue;
 
         const double hz = a.grid[g];
-        const double power = m.pF[g] + gain * gain * m.pLfe[g];
-        approvedPower[b] += hz * power;
-        approved[b] += hz * std::max (0.0, power + 2.0 * gain * cross[i].real());
+        approvedPower[b] += hz * (played (flat, mix[i], true) + mix[i][15].real());
+        approved[b] += hz * std::max (0.0, played (flat, mix[i], false));
     }
 
     double approvedTotal = 0.0, approvedPowerTotal = 0.0;
@@ -390,15 +439,29 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
 
             const double hz = a.grid[g];
             const size_t at = (size_t) seat * points.size() + i;
-            const double ss = room.ss[at], ll = room.ll[at] * gain * gain;
-            const double ssRef = room.ssRef.empty() ? ss : room.ssRef[at];
-            const double llRef = room.llRef.empty() ? ll : room.llRef[at] * gain * gain;
-            const double power = ss * m.pF[g] + ll * m.pLfe[g];
+            const auto& paths = room.p[at];
+            const auto& reference = room.pRef.empty() ? paths : room.pRef[at];
+            const auto& x = mix[i];
+            const double screenPart = played (reference, x, true);
+            double lfePart = reference[15].real() * x[15].real();
 
-            // Pro: the whole mix through the screen path is the reference (LCR first)
-            inPower[b] += hz * (room.lcrReference ? ssRef * (m.pF[g] + gain * gain * m.pLfe[g])
-                                                  : ssRef * m.pF[g] + llRef * m.pLfe[g]);
-            actual[b] += hz * std::max (0.0, power + 2.0 * gain * (room.sl[at] * cross[i]).real());
+            if (room.lcrReference)
+            {
+                // Pro: the LFE's bass expected where the screen's bass is, in the mix's own L C R proportions
+                double share = 0.0, total = 0.0;
+
+                for (int c = 0; c < 3; ++c)
+                {
+                    share += reference[(size_t) (c * nc + c)].real() * x[(size_t) (c * nc + c)].real();
+                    total += x[(size_t) (c * nc + c)].real();
+                }
+
+                const double screenMean = (reference[0].real() + reference[5].real() + reference[10].real()) / 3.0;
+                lfePart = x[15].real() * (total > 1e-30 ? share / total : screenMean);
+            }
+
+            inPower[b] += hz * (screenPart + lfePart);
+            actual[b] += hz * std::max (0.0, played (paths, x, false));
         }
 
         // What the interaction adds at this seat, against what it added on the

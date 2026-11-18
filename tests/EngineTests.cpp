@@ -1850,7 +1850,9 @@ static void testRoomPro()
             r.linkLR = false; r.linkFills = false;      // linked speakers would be mirrored on reading
             r.dualLCR = ! r.dualLCR; r.audienceLayout = 2;
             r.aisle = 0.1 * next(); r.ringInner = 0.01 * next(); r.ringOuter = 0.01 * next();
-            r.shape = 1; r.width = r.length;            // a round room keeps length = width
+            r.shape = ProRoom::lShape;
+            r.people = 2;
+            r.centrePercent = next(); r.frontDivergence = next(); r.rearDivergence = next(); r.frDivergence = next();
             r.firstRow = next(); r.lastRow = next(); r.audienceWidth = next();
             r.rows = 7; r.perRow = 9; r.earHeight = next(); r.rake = next(); r.calibration = 1;
         }
@@ -1898,6 +1900,7 @@ static void testRoomPro()
         auto r = ProRoom::fromSpec (RoomSimulator::defaultRooms()[6]);
         r.acoustics = 1;
         r.materials.fill (ProRoom::materialIndex ("plasterboard"));
+        r.people = ProRoom::noPeople;
         const double eyring = r.eyringRt60 (100.0);
         RoomSpec spec { "test", "test", r.length, r.width, r.height, 1.0 };
         RoomSimulator::Mode oblique {}, axial {};
@@ -1918,6 +1921,7 @@ static void testRoomPro()
         check (axialRt > obliqueRt * 1.1, "an axial mode decays more slowly than an oblique one", axialRt);
 
         r.materials.fill (ProRoom::materialIndex ("concrete"));
+        r.people = ProRoom::noPeople;
         check (r.eyringRt60 (63.0) > 8.0, "a bare concrete box rings for seconds", r.eyringRt60 (63.0));
         check (ProRoom::materialIndex ("open") >= 0 && ProRoom::materialIndex ("nothing") < 0, "materials are found by their saved name", 0.0);
     }
@@ -1926,9 +1930,10 @@ static void testRoomPro()
     {
         bool fine = true;
 
-        for (const auto& v : ProRoom::venues())
+        for (const auto& venue : ProRoom::venues())
         {
-            std::printf ("  %-32s RT60 63 Hz %.2f s, 125 Hz %.2f s\n", v.name.c_str(), v.eyringRt60 (63.0), v.eyringRt60 (125.0));
+            const auto& v = venue.room;
+            std::printf ("  %-14s %-34s RT60 63 Hz %.2f s, 125 Hz %.2f s\n", venue.category.c_str(), v.name.c_str(), v.eyringRt60 (63.0), v.eyringRt60 (125.0));
             fine = fine && v.eyringRt60 (63.0) > 0.05 && v.eyringRt60 (63.0) < 20.0;
         }
 
@@ -2005,6 +2010,121 @@ static void testRoomPro()
         std::printf ("  LFE as loud as the screen, unrelated: subwoofers under the screen room %.1f (seats spread %.1f dB), "
                      "one in a back corner %.1f (%.1f dB)\n", front.roomScore, spread (front), corner.roomScore, spread (corner));
         check (std::abs (front.roomScore - corner.roomScore) > 5.0, "moving the subwoofer to a back corner changes the room score", corner.roomScore);
+    }
+
+    // Each channel is played by its own speakers: bass only in L, an LFE identical to it,
+    // the left seats are the ones that change
+    {
+        const auto n = noise (8.0, 121);
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        Scene left;
+        left.l = n;
+        left.lfe = scaled (n, std::pow (10.0, -6.0 / 20.0));
+        run (e, left);
+        const auto onlyLeft = e.result();
+        const auto onlyLeftT = sim.compute (onlyLeft);
+        auto room = ProRoom::fromSpec (RoomSimulator::defaultRooms()[6]);
+        room.numSubs = 1;
+        room.subs[0].fy = 0.9;      // the subwoofer on the right, the bass on the left
+        const auto rated = RoomSimulator::rate (ProRoomModel::prepare (room, onlyLeft.grid), onlyLeft, onlyLeftT, sim.tuning,
+                                                PlaybackSimulator::Level::strong, 10.0);
+        const auto seats = room.seatPositions();
+        double leftChange = 0.0, rightChange = 0.0;
+        int leftCount = 0, rightCount = 0;
+
+        for (size_t i = 0; i < seats.size(); ++i)
+            (seats[i][1] < 0.5 * room.width ? leftChange : rightChange) += std::abs (rated.seatChangeDb[i]),
+            ++(seats[i][1] < 0.5 * room.width ? leftCount : rightCount);
+
+        leftChange /= std::max (1, leftCount);
+        rightChange /= std::max (1, rightCount);
+        std::printf ("  bass only in L, LFE the same, subwoofer on the right: mean change %.1f dB on the left seats, %.1f dB on the right\n",
+                     leftChange, rightChange);
+        check (std::abs (leftChange - rightChange) > 0.3, "bass in L alone: the two sides of the room hear it differently", leftChange - rightChange);
+    }
+
+    // Routing in the manner of a panner
+    {
+        ProRoom r;
+        auto plain = r.routing();
+        check (plain[0][ProRoom::groupL] == 1.0 && plain[1][ProRoom::groupC] == 1.0 && plain[1][ProRoom::groupL] == 0.0 && plain[3][ProRoom::groupSubs] == 1.0,
+               "routing at 100: each channel on its own speakers", plain[1][ProRoom::groupC]);
+        r.centrePercent = 0.0;
+        auto phantom = r.routing();
+        check (std::abs (phantom[1][ProRoom::groupL] - std::sqrt (0.5)) < 1e-12 && phantom[1][ProRoom::groupC] == 0.0,
+               "centre 0 %: C as a phantom centre, -3 dB in L and in R", phantom[1][ProRoom::groupL]);
+        r.centrePercent = 100.0;
+        r.frontDivergence = 0.0;
+        auto spread = r.routing();
+        check (std::abs (spread[0][ProRoom::groupR] - std::sqrt (1.0 / 3.0)) < 1e-12, "front divergence 0: each screen channel on L, C and R alike",
+               spread[0][ProRoom::groupR]);
+        r.frontDivergence = 100.0;
+        r.fillsOn = true;
+        r.numFills = 2;
+        r.fills[0].fy = 0.1;
+        r.fills[1].fy = 0.9;
+        auto fills = r.routing();
+        check (fills[0][ProRoom::groupFillsLeft] == 1.0 && fills[0][ProRoom::groupFillsRight] == 0.0
+                 && std::abs (fills[1][ProRoom::groupFillsLeft] - std::pow (10.0, -3.0 / 20.0)) < 1e-9,
+               "fills: Lc = L + C at -3 dB, the right fill gets no L", fills[1][ProRoom::groupFillsLeft]);
+    }
+
+    // People absorb: the same room is drier with an audience
+    {
+        auto r = ProRoom::venues()[0].room;
+        r.people = ProRoom::noPeople;
+        const double empty = r.eyringRt60 (100.0);
+        r.people = ProRoom::seatedPeople;
+        const double full = r.eyringRt60 (100.0);
+        std::printf ("  small gallery: RT60 at 100 Hz %.2f s empty, %.2f s with a seated audience\n", empty, full);
+        check (full < empty, "an audience shortens the reverberation", full);
+
+        bool sensible = true;
+
+        for (const auto& m : ProRoom::materialList())
+            if (std::string (m.key) == "open")
+                sensible = sensible && m.surfaces == ProMaterial::wall;
+
+        check (sensible && ProRoom::materialIndex ("seated") < 0 && ProRoom::materialIndex ("standing") < 0,
+               "no open side on a floor or a ceiling, no audience among the materials", 0.0);
+    }
+
+    // Numerical floor modes: an oval with equal sides is a circle, whose modes are known
+    {
+        ProRoom oval;
+        oval.shape = ProRoom::oval;
+        oval.length = oval.width = 10.0;
+        oval.height = 4.0;
+        const auto started = std::chrono::steady_clock::now();
+        const auto floor = ProRoomModel::floorModes (oval, 2.0 * 3.14159265358979 * 160.0 / 343.0);
+        const double seconds = std::chrono::duration<double> (std::chrono::steady_clock::now() - started).count();
+        double first = 0.0;
+
+        for (const auto& [k, mode] : floor)
+            if (k > 0.05) { first = k * 343.0 / (2.0 * 3.14159265358979); break; }
+
+        std::printf ("  oval floor 10 x 10 m (a circle), numerical: %zu floor modes in %.2f s, first at %.2f Hz (exact 20.10)\n",
+                     floor.size(), seconds, first);
+        check (! floor.empty() && floor.front().first < 0.05 && std::abs (first - 20.10) / 20.10 < 0.015,
+               "numerical floor modes: a circle's first mode within 1.5 %", first);
+
+        for (int shape : { ProRoom::oval, ProRoom::roundedCorners, ProRoom::lShape })
+        {
+            auto r = ProRoom::fromSpec (RoomSimulator::defaultRooms()[6]);
+            r.shape = shape;
+            const auto t0 = std::chrono::steady_clock::now();
+            const auto modes = ProRoomModel::modesOf (r);
+            const double s = std::chrono::duration<double> (std::chrono::steady_clock::now() - t0).count();
+            double lowest = 1e9;
+
+            for (const auto& m : modes)
+                if (m.hz > 1.0)
+                    lowest = std::min (lowest, m.hz);
+
+            const char* names[] = { "", "", "oval", "rounded corners", "L shape" };
+            std::printf ("  20 x 13 x 7 m, %-15s: %zu modes in %.2f s, first %.1f Hz\n", names[shape], modes.size(), s, lowest);
+            check (modes.size() > 50 && lowest > 5.0 && lowest < 15.0, "a numerical floor gives modes in the expected range", lowest);
+        }
     }
 
     // Room score: the worst seats weigh more
