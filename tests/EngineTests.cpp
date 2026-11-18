@@ -1113,9 +1113,9 @@ static void testPlaybackChains()
         check (t.robustness > 99.9, "screen alone: robustness 100", t.robustness);
         check (t.lfeShare < 0.01, "screen alone: LFE carries nothing", t.lfeShare);
 
-        // The on-time weight is twice the late one and four times the early one
+        // The on-time weight is twice the late one and twice the early one
         check (std::abs (cinema (t, 0.0, false).weight / cinema (t, 2.5, false).weight - 2.0) < 1e-9, "0 ms counts double", 0.0);
-        check (std::abs (cinema (t, 2.5, false).weight / cinema (t, -2.5, false).weight - 2.0) < 1e-9, "early counts half", 0.0);
+        check (std::abs (cinema (t, 2.5, false).weight / cinema (t, -2.5, false).weight - 1.0) < 1e-9, "early and late count alike", 0.0);
     }
     {
         // LFE alone: the cinema systems all agree, a stereo downmix has nothing left
@@ -1127,9 +1127,9 @@ static void testPlaybackChains()
         check (std::abs (cinema (t, 5.0, true).changeDb) < 0.05, "LFE alone: delay and polarity change nothing", cinema (t, 5.0, true).changeDb);
         check (stereo (t).changeDb < -20.0, "LFE alone: nothing left in stereo", stereo (t).changeDb);
         check (t.lfeShare > 0.99, "LFE alone: it carries all the bass", t.lfeShare);
-        // Wide-band bass: the part below 60 Hz counts less and less down to 25 Hz
-        check (t.dependence > 0.65 && t.dependence < 0.85, "LFE alone, 20-120 Hz: high dependence", t.dependence);
-        check (t.robustness > 18.0 && t.robustness < 26.0, "LFE alone: about 20-25, the room alone decides the bass", t.robustness);
+        // Wide-band bass: the part below 40 Hz counts less and less down to 25 Hz; ceiling 1
+        check (t.dependence > 0.90, "LFE alone, 20-120 Hz: near-total dependence", t.dependence);
+        check (t.robustness < 10.0, "LFE alone: under 10, the room alone decides the bass", t.robustness);
 
         double worst = 0.0;
 
@@ -1247,8 +1247,8 @@ static void testPlaybackChains()
             previous = t.dependence;
 
             if (hz <= 20.0)
-                check (t.dependence > 0.20 && t.dependence < 0.27 && t.robustness > 72.0 && t.robustness < 80.0,
-                       "20 Hz in the LFE alone: infra-bass counts for a quarter", t.robustness);
+                check (t.dependence > 0.25 && t.dependence < 0.35 && t.robustness > 65.0 && t.robustness < 75.0,
+                       "20 Hz in the LFE alone: infra-bass counts for 30 %", t.robustness);
 
             if (hz >= 70.0)
                 check (std::abs (t.dependence - PlaybackSimulator::dependenceCeiling) < 0.01, "70 Hz and above: full dependence", t.dependence);

@@ -142,10 +142,10 @@ private:
     // Dev panel: every choice of the score, adjustable
     LabelledSlider dTolSoft { "Tolerance, Soft:", 0.5, 4.5, 0.1, 3 }, dTolMedium { "Tolerance, Medium:", 0.5, 4.5, 0.1, 2 },
                    dTolStrong { "Tolerance, Strong:", 0.5, 4.5, 0.1, 1 },
-                   dLate { "Weight, cinema sub late:", 0, 1, 0.05, 0.5 }, dEarly { "Weight, cinema sub early:", 0, 1, 0.05, 0.25 },
-                   dCeiling { "LFE dependence, ceiling:", 0, 1, 0.01, 0.83 }, dInfraWeight { "Infra-bass weight:", 0, 1, 0.05, 0.25 },
-                   dInfraLo { "Infra-bass up to:", 10, 40, 1, 25 }, dInfraHi { "Full weight from:", 40, 100, 1, 60 },
-                   dLevelWeight { "LFE level dependence, weight in score:", 0, 0.5, 0.01, 0.15 },
+                   dLate { "Weight, cinema sub late:", 0, 1, 0.05, 0.5 }, dEarly { "Weight, cinema sub early:", 0, 1, 0.05, 0.5 },
+                   dCeiling { "LFE dependence, ceiling:", 0, 1, 0.01, 1.0 }, dInfraWeight { "Infra-bass weight:", 0, 1, 0.05, 0.30 },
+                   dInfraLo { "Infra-bass up to:", 10, 40, 1, 25 }, dInfraHi { "Full weight from:", 40, 100, 1, 40 },
+                   dLevelWeight { "LFE level dependence, weight in score:", 0, 0.5, 0.01, 0.20 },
                    dLevelRed { "LFE level dependence, red at a mean of:", 0.5, 12, 0.1, 3 };
     juce::Label devLoudnessLabel;       // what the listening level makes of the bass playing now
     juce::TextButton devDefaultsButton { "Defaults" };

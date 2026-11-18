@@ -467,7 +467,7 @@ void MainComponent::buildCards()
         devLoudnessLabel.setMinimumHorizontalScale (1.0f);
 
         dTolSoft.setTooltip ("How many dB a band may change on a playback system before it starts to count, at each level.");
-        dCeiling.setTooltip ("How much of the score a bass entirely in the LFE can take away. 0.83 puts 'LFE alone' near 21.");
+        dCeiling.setTooltip ("How much of the score a bass entirely in the LFE can take away. At 1.00 'LFE alone' scores near 2; about 0.80 puts it near 20.");
         dInfraWeight.setTooltip ("What bass under the 'infra-bass up to' frequency still counts for in the LFE dependence; it rises to 1 at 'full weight from'.");
         dLevelWeight.setTooltip ("The most the LFE level dependence can take off the score.");
         dLevelRed.setTooltip ("Mean difference from the expected bass at which the LFE level dependence box is fully red.");

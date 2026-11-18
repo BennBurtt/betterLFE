@@ -174,11 +174,11 @@ public:
     // changes little in the downmix: it counts for a quarter. From about 60 Hz up (threshold 37.5 dB at
     // 63 Hz; a television that reaches 60 Hz is already a good one) it counts
     // fully. In between, the weight rises linearly in octaves.
-    static constexpr double infraLoHz = 25.0, infraHiHz = 60.0;
-    static constexpr double infraWeight = 0.25;         // what the infra-bass still counts for: felt, and missed, but not heard
+    static constexpr double infraLoHz = 25.0, infraHiHz = 40.0;
+    static constexpr double infraWeight = 0.30;         // what the infra-bass still counts for: felt, and missed, but not heard
 
     // The level dependence takes a little off the score: at most this share
-    static constexpr double levelDependenceWeight = 0.15;
+    static constexpr double levelDependenceWeight = 0.20;
 
     // Rating bands and, for each, the level change that doubles loudness
     // (ISO 226:2003 around 80 phon, at 25, 40, 70 and 100 Hz).
@@ -191,7 +191,7 @@ public:
     // polarities count alike. How often each fault occurs in practice is not
     // published, so these are engineering assumptions, kept in one place.
     static constexpr double delaySteps[5] = { -5.0, -2.5, 0.0, 2.5, 5.0 };
-    static constexpr double delayRelevance[5] = { 0.25, 0.25, 1.0, 0.5, 0.5 };
+    static constexpr double delayRelevance[5] = { 0.5, 0.5, 1.0, 0.5, 0.5 };
     static constexpr double homeRelevance = 1.0;
 
     // Level dependence. Each cinema and bass-managed system is tried with its
@@ -209,7 +209,7 @@ public:
     // With all the bass in the LFE, spread over 20-120 Hz, the score stops at
     // about 22: bad, since the room alone then decides the bass, but not as bad
     // as a cancellation. (The infra-bass part of it is not counted.)
-    static constexpr double dependenceCeiling = 0.83;
+    static constexpr double dependenceCeiling = 1.0;
 
     static constexpr double speedOfSound = 343.0;       // m/s: a subwoofer 1.7 m further away is 5 ms late
 
@@ -217,7 +217,7 @@ public:
     struct Tuning
     {
         std::array<double, 3> toleranceDb { { 3.0, 2.0, 1.0 } };    // Soft, Medium, Strong
-        double lateRelevance = 0.5, earlyRelevance = 0.25;          // cinema subwoofer late / early, against 1 on time
+        double lateRelevance = 0.5, earlyRelevance = 0.5;           // cinema subwoofer late / early, against 1 on time
         double dependenceCeiling = PlaybackSimulator::dependenceCeiling;
         double infraLoHz = PlaybackSimulator::infraLoHz, infraHiHz = PlaybackSimulator::infraHiHz;
         double infraWeight = PlaybackSimulator::infraWeight;
