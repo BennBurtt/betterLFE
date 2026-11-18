@@ -28,8 +28,11 @@
 //     change (dB)            = 10 log10 (interaction at seat / interaction approved)
 //
 //   An LFE decorrelated from the screen gives 0 dB at every seat of every
-//   room. Each seat is rated like a playback system (tolerance, ISO 226
-//   loudness doubling, audibility); the room score is 100 x (1 - the mean
+//   room. Each room is calibrated as a real one: screen and subwoofers are
+//   each set so that their level averaged over the seats equals the stage's.
+//   Each seat is rated like a playback system, with audibility and loudness
+//   (ISO 226) taken at the level the bass has at that seat, room peaks and
+//   dips included, so the listening level matters; the room score is 100 x (1 - the mean
 //   seat penalty), and the room result is bass robustness x room score.
 //
 // LIMITS
@@ -100,7 +103,8 @@ public:
     static void applyToScore (Translation&, const RoomSimResult&, const std::vector<bool>& selected, double levelDependenceWeight);
 
     /** `translation` is the playback simulation of the same analysis (its band loudness and audibility). */
-    RoomSimResult compute (const Analysis&, const Translation& translation, double toleranceDb, double lfeGainDb);
+    RoomSimResult compute (const Analysis&, const Translation& translation, const PlaybackSimulator::Tuning&,
+                           PlaybackSimulator::Level, double lfeGainDb);
 
 private:
     struct Prepared

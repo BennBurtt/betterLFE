@@ -973,7 +973,7 @@ void MainComponent::timerCallback()
         // Room Sim: computed when shown or when ticked rooms count in the score
         if (roomMode || std::find (roomSelected.begin(), roomSelected.end(), true) != roomSelected.end())
         {
-            roomResult = roomSim.compute (measured, info.translation, simulator.tuning.toleranceDb[(size_t) currentLevel()],
+            roomResult = roomSim.compute (measured, info.translation, simulator.tuning, currentLevel(),
                                           lfeGainToggle.getToggleState() ? lfeInBandGainDb : 0.0);
             RoomSimulator::applyToScore (info.translation, roomResult, roomSelected, simulator.tuning.levelDependenceWeight);
         }

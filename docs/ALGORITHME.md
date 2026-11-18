@@ -516,8 +516,8 @@ pour la bande 20–120 Hz. L'écran : trois sources derrière la toile (L, C, R,
 somme d'écran partagée à parts égales) ; le LFE : deux caissons au pied du mur
 avant ; vingt places (5 × 4) dans la zone des sièges, à 1,2 m. Vérifié : le
 premier mode axial d'une salle de 10 m tombe bien à c/2L = 17,15 Hz, le
-deuxième à 34,3 Hz. Calcul des quinze salles : 0,4 s une fois, puis 0,3 ms
-par mise à jour.
+deuxième à 34,3 Hz. Calcul des quinze salles : 0,5 s une fois, puis moins de
+1 ms par mise à jour.
 
 **Ce qui est mesuré.** La couleur propre de la salle touche n'importe quel mix
 et n'est pas comptée. On garde ce que l'interaction LFE / façade ajoute à
@@ -526,6 +526,19 @@ chaque place, par rapport au mix approuvé :
 `écart (dB) = 10·log10 [ (P place / P place en puissance) / (P approuvé / P approuvé en puissance) ]`
 
 Un LFE décorrélé donne 0 dB à toutes les places de toutes les salles (vérifié).
+
+**Étalonnage et niveau d'écoute.** Chaque salle est étalonnée comme une vraie :
+l'écran et les caissons sont réglés chacun pour que leur niveau moyen sur les
+places (20–120 Hz) égale celui de la régie, comme un étalonnage à plusieurs
+micros. Chaque place est alors au-dessus ou au-dessous de ce niveau selon ce
+que la salle y fait. L'audibilité (seuil ISO 226, dispersion 5 dB) et le
+nombre de dB qui doublent la sonie sont pris au niveau réel du grave à cette
+place, bosses et creux de la salle compris. L'acoustique de la salle ne dépend
+pas du niveau (elle est linéaire) ; ce qui en dépend, c'est ce qu'on en
+entend : plus le niveau d'écoute est élevé, plus ses défauts sont audibles.
+Mesuré, LFE identique à la façade à −50 dBFS : note moyenne des salles 99 à
+70 dB(C), 65 à 90 dB(C).
+
 Chaque place est notée comme un système de lecture (tolérance, doublement de
 sonie ISO 226, audibilité) ; score de la salle = 100 × (1 − pénalité moyenne
 des places) ; **résultat = robustesse du grave × score de la salle / 100**.

@@ -1702,10 +1702,10 @@ static void testRooms()
 
     const auto apartAnalysis = scene (0.0), sharedAnalysis = scene (1.0);
     const auto started = std::chrono::steady_clock::now();
-    const auto apart = rooms.compute (apartAnalysis, sim.compute (apartAnalysis), 1.0, 10.0);
+    const auto apart = rooms.compute (apartAnalysis, sim.compute (apartAnalysis), sim.tuning, PlaybackSimulator::Level::strong, 10.0);
     const double prepareSeconds = std::chrono::duration<double> (std::chrono::steady_clock::now() - started).count();
     const auto again = std::chrono::steady_clock::now();
-    const auto shared = rooms.compute (sharedAnalysis, sim.compute (sharedAnalysis), 1.0, 10.0);
+    const auto shared = rooms.compute (sharedAnalysis, sim.compute (sharedAnalysis), sim.tuning, PlaybackSimulator::Level::strong, 10.0);
     const double updateMs = 1000.0 * std::chrono::duration<double> (std::chrono::steady_clock::now() - again).count();
     std::printf ("  fifteen rooms: prepared in %.2f s, then %.2f ms per update\n", prepareSeconds, updateMs);
 
@@ -1741,6 +1741,39 @@ static void testRooms()
     check (meanShared < 85.0 && thinner >= 12,
            "LFE identical to the screen and as loud: in most rooms the seats lose the in-phase gain heard on the stage", meanShared);
     check (shared.rooms[0].combinedScore <= sim.compute (sharedAnalysis).robustness + 1e-9, "room result = robustness x room score", 0.0);
+
+    // The listening level: the louder, the more of what the rooms do is heard
+    {
+        const auto quietMix = [] ()
+        {
+            const auto n = noise (8.0, 103);
+            LfeEngine e (sampleRate, 1.0, 0.0);
+            Scene s;
+            s.c = scaled (n, 0.03);
+            s.lfe = scaled (n, 0.03 * std::pow (10.0, -10.0 / 20.0));
+            run (e, s);
+            return e.result();
+        }();
+
+        double mean[2] = {};
+        int index = 0;
+
+        for (double dbC : { 70.0, 90.0 })
+        {
+            PlaybackSimulator at;
+            at.tuning.listeningLevelDbC = dbC;
+            RoomSimulator roomsAt;
+            const auto r = roomsAt.compute (quietMix, at.compute (quietMix), at.tuning, PlaybackSimulator::Level::strong, 10.0);
+
+            for (const auto& room : r.rooms)
+                mean[index] += room.roomScore / (double) r.rooms.size();
+
+            ++index;
+        }
+
+        std::printf ("  identical LFE at -50 dBFS: mean room score %.0f at 70 dB(C), %.0f at 90 dB(C)\n", mean[0], mean[1]);
+        check (mean[1] < mean[0] - 5.0, "a louder listening level makes more of the rooms' faults audible", mean[1]);
+    }
 
     // Ticked rooms enter the score as further systems: the worst one counts
     {

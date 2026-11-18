@@ -197,12 +197,37 @@ void RoomSimulator::prepare (const std::vector<double>& grid)
             }
         }
 
+        // Calibration, as in a real room: the screen and the subwoofers are
+        // each set so that their level averaged over the seats (20-120 Hz)
+        // equals the level on the stage. Each seat then sits above or below
+        // that by what the room does there.
+        {
+            double screenMean = 0.0, subMean = 0.0, weight = 0.0;
+
+            for (size_t seat = 0; seat < seatPoints.size(); ++seat)
+                for (size_t i = 0; i < points.size(); ++i)
+                {
+                    const double hz = grid[(size_t) points[i]];
+                    screenMean += hz * std::norm (p.screen[seat * points.size() + i]);
+                    subMean += hz * std::norm (p.sub[seat * points.size() + i]);
+                    weight += hz;
+                }
+
+            const double screenScale = weight > 0.0 && screenMean > 0.0 ? std::sqrt (weight / screenMean) : 1.0;
+            const double subScale = weight > 0.0 && subMean > 0.0 ? std::sqrt (weight / subMean) : 1.0;
+
+            for (auto& h : p.screen)    h *= screenScale;
+            for (auto& h : p.sub)       h *= subScale;
+        }
+
         prepared.push_back (std::move (p));
     }
 }
 
-RoomSimResult RoomSimulator::compute (const Analysis& a, const Translation& t, double toleranceDb, double lfeGainDb)
+RoomSimResult RoomSimulator::compute (const Analysis& a, const Translation& t, const PlaybackSimulator::Tuning& tuning,
+                                      PlaybackSimulator::Level level, double lfeGainDb)
 {
+    const double toleranceDb = tuning.toleranceDb[(size_t) level];
     RoomSimResult out;
     const auto& m = a.matrix;
     const auto n = a.grid.size();
@@ -239,7 +264,7 @@ RoomSimResult RoomSimulator::compute (const Analysis& a, const Translation& t, d
     }
 
     // The mix as approved, per band: as heard (in phase) and added in power
-    double approved[numBands] = {}, approvedPower[numBands] = {}, heardShare[numBands] = {}, heardTotal = 0.0, heardAtAll = 0.0;
+    double approved[numBands] = {}, approvedPower[numBands] = {};
 
     for (size_t i = 0; i < points.size(); ++i)
     {
@@ -255,12 +280,25 @@ RoomSimResult RoomSimulator::compute (const Analysis& a, const Translation& t, d
         approved[b] += hz * std::max (0.0, power + 2.0 * gain * cross[i].real());
     }
 
-    for (int b = 0; b < numBands; ++b)
+    // Sound pressure level at a seat of a band whose power (same units as approved[b]) is `power`:
+    // the stage level of that band, moved by the ratio
+    const auto splAt = [&] (int b, double power)
     {
-        heardShare[b] = approved[b] * t.bandAudible[(size_t) b];
-        heardTotal += heardShare[b];
-        heardAtAll = std::max (heardAtAll, t.bandAudible[(size_t) b]);
-    }
+        return t.bandSplDb[(size_t) b] + 10.0 * std::log10 ((power + 1e-60) / (approved[b] + 1e-60));
+    };
+
+    const auto audible = [&] (int b, double spl)
+    {
+        return tuning.audibility ? PlaybackSimulator::audibleShare (PlaybackSimulator::bandCentreHz[b], spl, tuning.thresholdSpreadDb) : 1.0;
+    };
+
+    // dB that double the loudness of a band at the level it has at that seat (ISO 226)
+    const auto doublingAt = [] (int b, double spl)
+    {
+        const double hz = PlaybackSimulator::bandCentreHz[b];
+        const double phon = std::clamp (PlaybackSimulator::iso226Phon (hz, spl), 20.0, 80.0);
+        return PlaybackSimulator::iso226Spl (hz, phon + 10.0) - PlaybackSimulator::iso226Spl (hz, phon);
+    };
 
     const double approvedTotal = [&] { double s = 0.0; for (double v : approved) s += v; return s; }();
     const double approvedPowerTotal = [&] { double s = 0.0; for (double v : approvedPower) s += v; return s; }();
@@ -290,8 +328,12 @@ RoomSimResult RoomSimulator::compute (const Analysis& a, const Translation& t, d
                 actual[b] += hz * std::max (0.0, power + 2.0 * (hs * std::conj (hl) * cross[i]).real());
             }
 
-            // What the interaction adds at this seat, against what it added on the stage
-            double penalty = 0.0, totalActual = 0.0, totalPower = 0.0;
+            // What the interaction adds at this seat, against what it added on the
+            // stage. Audibility and loudness are taken at the level the bass has
+            // at this seat, room peaks and dips included: the louder the
+            // listening level, the more of what the room does is heard.
+            double weights[numBands] = {}, rated[numBands] = {}, weightTotal = 0.0, heardAtAll = 0.0;
+            double totalActual = 0.0, totalPower = 0.0;
 
             for (int b = 0; b < numBands; ++b)
             {
@@ -301,12 +343,23 @@ RoomSimResult RoomSimulator::compute (const Analysis& a, const Translation& t, d
                 if (inPower[b] <= 0.0 || approvedPower[b] <= 0.0)
                     continue;
 
+                const double approvedHere = inPower[b] * approved[b] / approvedPower[b];     // this seat, with the stage's interaction
                 const double change = limitedDb ((actual[b] / inPower[b]) / (approved[b] / approvedPower[b] + 1e-30));
-                const double doubling = t.bandDoublingDb[(size_t) b] > 0.0 ? t.bandDoublingDb[(size_t) b] : PlaybackSimulator::doublingDb[b];
+                const double spl = splAt (b, std::max (approvedHere, actual[b]));
+                const double heard = audible (b, spl);
+                const double doubling = doublingAt (b, spl);
                 const double allowed = std::min (toleranceDb, doubling - 0.5);
-                const double rated = std::clamp ((std::abs (change) - allowed) / (doubling - allowed), 0.0, 1.0);
-                penalty += heardShare[b] / (heardTotal + 1e-60) * rated;
+
+                rated[b] = std::clamp ((std::abs (change) - allowed) / (doubling - allowed), 0.0, 1.0);
+                weights[b] = approvedHere * heard;
+                weightTotal += weights[b];
+                heardAtAll = std::max (heardAtAll, heard);
             }
+
+            double penalty = 0.0;
+
+            for (int b = 0; b < numBands; ++b)
+                penalty += weights[b] / (weightTotal + 1e-60) * rated[b];
 
             r.seatPenalty[(size_t) seat] = std::min (penalty, 1.0) * heardAtAll;
             r.seatChangeDb[(size_t) seat] = totalPower > 0.0 ? limitedDb ((totalActual / totalPower) / (approvedTotal / (approvedPowerTotal + 1e-60) + 1e-30))
