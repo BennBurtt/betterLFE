@@ -16,14 +16,18 @@ namespace
 
 //==============================================================================
 // 3D view
-void Room3DView::setRoom (const ProRoom& r, const std::vector<double>& seatPenalties, const std::vector<double>& seatChangeDb)
+void Room3DView::setRoom (const ProRoom& r, const std::vector<double>& seatPenalties, const std::vector<double>& seatValues,
+                          bool absoluteValues, double mix, const std::vector<double>& fade)
 {
-    if (room == r && penalties == seatPenalties && changes == seatChangeDb)
+    if (room == r && penalties == seatPenalties && changes == seatValues && absolute == absoluteValues && same (mixValue, mix) && fades == fade)
         return;
 
     room = r;
     penalties = seatPenalties;
-    changes = seatChangeDb;
+    changes = seatValues;
+    absolute = absoluteValues;
+    mixValue = mix;
+    fades = fade;
     repaint();
 }
 
@@ -211,10 +215,15 @@ void Room3DView::paint (juce::Graphics& g)
         float d = 0.0f;
         const auto at = project (seats[i][0], seats[i][1], seats[i][2], &d);
         seatPoints[i] = at;
-        // The head's colour: what it gets against the approved mix in the lens shown
-        // (grey: as approved; blue: a dip; red: a boost). Dark grey: nothing to show.
+        // The head's colour: how loud its bass is (on the mix's scale), or a change against the
+        // approved mix (grey: as approved; blue: a dip; red: a boost), greyer the less the bass is heard
         const bool hasValue = rated && i < changes.size() && ! std::isnan (changes[i]);
-        const auto colour = hasValue ? bassChangeColour (changes[i]) : juce::Colour (0xff4a4a4a);
+        auto colour = juce::Colour (0xff4a4a4a);
+
+        if (hasValue)
+            colour = absolute ? loudnessColour (changes[i])
+                              : juce::Colour (0xff8a8a8a).interpolatedWith (bassChangeColour (changes[i]),
+                                                                           i < fades.size() ? (float) juce::jlimit (0.0, 1.0, fades[i]) : 1.0f);
         marks.push_back ({ d, at, colour, {}, false, (int) i });
     }
 
@@ -271,53 +280,45 @@ void Room3DView::paint (juce::Graphics& g)
 
     // The heads' colour scale, as in the layered view
     auto legend = getLocalBounds().reduced (10, 8).removeFromBottom (36).removeFromRight (300).toFloat();
-    auto bar = legend.removeFromTop (10.0f);
+    drawScale (g, legend, absolute, mixValue, caption);
 
-    for (int x = 0; x < (int) bar.getWidth(); ++x)
-    {
-        g.setColour (bassChangeColour (-9.0 + 18.0 * x / bar.getWidth()));
-        g.fillRect (bar.getX() + (float) x, bar.getY(), 1.0f, bar.getHeight());
-    }
+    // The head under the mouse: two lines
+    juce::String text, second;
 
-    g.setColour (theme::dimText);
-    g.setFont (uiFont (10.0f));
-
-    for (int tick : { -9, -6, -3, 0, 3, 6, 9 })
-        g.drawText ((tick > 0 ? "+" : "") + juce::String (tick), juce::Rectangle<float> (bar.getX() + bar.getWidth() * (float) (tick + 9) / 18.0f - 16.0f,
-                                                                                           bar.getBottom() + 1.0f, 32.0f, 12.0f),
-                    juce::Justification::centred);
-
-    g.drawText (caption, legend.withTrimmedTop (14.0f), juce::Justification::centredLeft);
-
-    // The seat under the mouse
     if (hovered >= 0 && hovered < (int) seatPoints.size() && rated)
     {
-        const auto signedDb = [] (double v) { return std::isnan (v) ? juce::String ("--") : (v >= 0.0 ? "+" : "") + juce::String (v, 1) + " dB"; };
-        juce::String text = tr ("Seat ") + juce::String (hovered + 1) + ":  " + juce::String (juce::roundToInt (100.0 * (1.0 - penalties[(size_t) hovered]))) + " %";
         const auto h = (size_t) hovered;
+        const auto value = [h] (const std::vector<double>& v) { return h < v.size() ? v[h] : std::nan (""); };
+        const auto signedDb = [] (double v) { return std::isnan (v) ? juce::String ("--") : (v >= 0.0 ? "+" : "") + juce::String (v, 1) + " dB"; };
+        const auto phon = [] (double v) { return std::isnan (v) ? juce::String ("--") : juce::String (juce::roundToInt (v)); };
 
-        if (h < parts[RoomResult::allParts].size())
-            text << "   " << tr ("bass ") << signedDb (parts[RoomResult::allParts][h])
-                 << "  (L C R " << signedDb (h < parts[RoomResult::lcrPart].size() ? parts[RoomResult::lcrPart][h] : std::nan (""))
-                 << ", LFE " << signedDb (h < parts[RoomResult::lfePart].size() ? parts[RoomResult::lfePart][h] : std::nan ("")) << ")";
+        text = tr ("Seat ") + juce::String (hovered + 1) + ":  " + juce::String (juce::roundToInt (100.0 * (1.0 - penalties[h]))) + " %   "
+             + phon (value (details.phon[RoomResult::allParts])) + tr (" phon (mix ") + phon (details.mixPhon[RoomResult::allParts]) + ")   L C R "
+             + phon (value (details.phon[RoomResult::lcrPart])) + "  LFE " + phon (value (details.phon[RoomResult::lfePart]));
 
-        if (h < interference.size())
-            text << "   " << tr ("interference ") << signedDb (interference[h]);
+        second = tr ("bass ") + signedDb (value (details.partDb[RoomResult::allParts])) + " = " + tr ("room ")
+               + signedDb (value (details.causeDb[RoomResult::roomCause])) + "  " + tr ("speakers ")
+               + signedDb (value (details.causeDb[RoomResult::speakersCause])) + "  " + tr ("mix ")
+               + signedDb (value (details.causeDb[RoomResult::mixCause]));
 
-        if (hovered < (int) heard.size() && hovered < (int) felt.size())
-            text << "   " << tr ("hears ") << (heard[(size_t) hovered] < 20.0 ? tr ("under 20 phon") : juce::String (juce::roundToInt (heard[(size_t) hovered])) + tr (" phon"))
-                 << ", " << tr ("feels ") << juce::String (juce::roundToInt (felt[(size_t) hovered])) << tr (" dB SPL under 40 Hz");
-
-        const auto at = seatPoints[(size_t) hovered];
-        auto box = juce::Rectangle<float> (at.x + 12.0f, at.y - 26.0f, 16.0f + juce::GlyphArrangement::getStringWidth (uiFont (11.5f, true), text), 20.0f);
+        if (h < heard.size() && h < felt.size())
+            second << "   " << tr ("feels ") << juce::String (juce::roundToInt (felt[h])) << tr (" dB SPL under 40 Hz");
+        const auto at = seatPoints[h];
+        const float width = 16.0f + juce::jmax (juce::GlyphArrangement::getStringWidth (uiFont (11.5f, true), text),
+                                                juce::GlyphArrangement::getStringWidth (uiFont (11.0f), second));
+        auto box = juce::Rectangle<float> (at.x + 12.0f, at.y - 44.0f, width, 38.0f);
         box = box.constrainedWithin (getLocalBounds().toFloat().reduced (4.0f));
         g.setColour (juce::Colour (0xee0e0f11));
         g.fillRoundedRectangle (box, 4.0f);
-        g.setColour (seatColour (100.0 * (1.0 - penalties[(size_t) hovered])));
+        g.setColour (seatColour (100.0 * (1.0 - penalties[h])));
         g.drawRoundedRectangle (box, 4.0f, 1.0f);
+        auto lines = box.reduced (8.0f, 3.0f);
         g.setColour (juce::Colours::white);
         g.setFont (uiFont (11.5f, true));
-        g.drawText (text, box, juce::Justification::centred);
+        g.drawText (text, lines.removeFromTop (lines.getHeight() / 2.0f), juce::Justification::centredLeft);
+        g.setColour (juce::Colour (0xffd0d0d0));
+        g.setFont (uiFont (11.0f));
+        g.drawText (second, lines, juce::Justification::centredLeft);
     }
 
     g.setColour (theme::dimText);
@@ -428,6 +429,65 @@ juce::Colour bassChangeColour (double db)
     return ramp[2];
 }
 
+juce::Colour loudnessColour (double phon)
+{
+    // A heat scale of loudness: about 30 phon is blue, 60 green, 80 orange, 90 and above red to magenta
+    struct Stop { double phon; juce::uint32 argb; };
+    static const Stop stops[] = { { 0.0, 0xff2b2b30 }, { 15.0, 0xff1b2f8a }, { 30.0, 0xff1f5bff }, { 45.0, 0xff17b8e8 },
+                                  { 60.0, 0xff2fd36b }, { 70.0, 0xffd9e021 }, { 80.0, 0xffff8a00 }, { 90.0, 0xffff2a2a },
+                                  { 100.0, 0xffff3ad6 } };
+    phon = juce::jlimit (0.0, 100.0, phon);
+
+    for (size_t i = 1; i < std::size (stops); ++i)
+        if (phon <= stops[i].phon)
+            return juce::Colour (stops[i - 1].argb).interpolatedWith (juce::Colour (stops[i].argb),
+                                                                     (float) ((phon - stops[i - 1].phon) / (stops[i].phon - stops[i - 1].phon)));
+
+    return juce::Colour (stops[std::size (stops) - 1].argb);
+}
+
+void drawScale (juce::Graphics& g, juce::Rectangle<float> area, bool absolute, double mixValue, const juce::String& caption)
+{
+    // A loudness scale 0..100 phon with the mix's own value marked, or a change scale -9..+9 dB
+    auto bar = area.removeFromTop (10.0f);
+
+    for (int x = 0; x < (int) bar.getWidth(); ++x)
+    {
+        const double t = x / (double) bar.getWidth();
+        g.setColour (absolute ? loudnessColour (100.0 * t) : bassChangeColour (-9.0 + 18.0 * t));
+        g.fillRect (bar.getX() + (float) x, bar.getY(), 1.0f, bar.getHeight());
+    }
+
+    g.setColour (theme::dimText);
+    g.setFont (uiFont (10.0f));
+
+    if (absolute)
+    {
+        for (int tick : { 0, 20, 40, 60, 80, 100 })
+            g.drawText (juce::String (tick), juce::Rectangle<float> (bar.getX() + bar.getWidth() * (float) tick / 100.0f - 16.0f,
+                                                                    bar.getBottom() + 1.0f, 32.0f, 12.0f), juce::Justification::centred);
+
+        // The mix as approved: a white mark on the scale
+        const float x = bar.getX() + bar.getWidth() * (float) juce::jlimit (0.0, 1.0, mixValue / 100.0);
+        g.setColour (juce::Colours::white);
+        g.fillRect (x - 1.0f, bar.getY() - 3.0f, 2.0f, bar.getHeight() + 6.0f);
+        g.setFont (uiFont (9.5f, true));
+        g.drawText (tr ("mix ") + juce::String (juce::roundToInt (mixValue)), juce::Rectangle<float> (x - 30.0f, bar.getY() - 14.0f, 60.0f, 11.0f),
+                    juce::Justification::centred);
+    }
+    else
+    {
+        for (int tick : { -9, -6, -3, 0, 3, 6, 9 })
+            g.drawText ((tick > 0 ? "+" : "") + juce::String (tick), juce::Rectangle<float> (bar.getX() + bar.getWidth() * (float) (tick + 9) / 18.0f - 16.0f,
+                                                                                               bar.getBottom() + 1.0f, 32.0f, 12.0f),
+                        juce::Justification::centred);
+    }
+
+    g.setColour (theme::dimText);
+    g.setFont (uiFont (10.0f));
+    g.drawText (caption, area.withTrimmedTop (4.0f), juce::Justification::centredLeft);
+}
+
 RoomLayerView::RoomLayerView()
 {
     // Layer spacing: 1 is the first version (layers 30 % of the room height apart), 3 by default
@@ -473,14 +533,14 @@ void RoomLayerView::resized()
     amplitudeLabel.setBounds (row.removeFromRight (70));
 }
 
-void RoomLayerView::setData (const ProRoom& r, const RoomPaths* paths, const RoomResult* result, int lensShown, int partShown)
+void RoomLayerView::setData (const ProRoom& r, const RoomPaths* paths, const RoomResult* result, int lensShown, int shown)
 {
     room = r;
     lens = juce::jlimit (0, RoomResult::numLenses - 1, lensShown);
-    part = juce::jlimit (0, RoomResult::numParts - 1, partShown);
+    which = juce::jlimit (0, 2, shown);
     hasData = paths != nullptr && result != nullptr && paths->gridPoints > 0
-                && (int) result->gridLayerDb[0].size() == paths->gridPoints
-                && (int) result->gridCoverageLayerDb[(size_t) part][0].size() == paths->gridPoints;
+                && (int) result->gridLayerPhon[(size_t) which][0].size() == paths->gridPoints
+                && (int) result->gridCauseLayerDb[(size_t) which][0].size() == paths->gridPoints;
 
     if (hasData)
     {
@@ -488,8 +548,12 @@ void RoomLayerView::setData (const ProRoom& r, const RoomPaths* paths, const Roo
         rows = paths->gridRows;
         index = paths->gridIndex;
         nodes = paths->gridPositions;
-        layers = lens == RoomResult::coverageLens ? result->gridCoverageLayerDb[(size_t) part] : result->gridLayerDb;
-        seatLayers = lens == RoomResult::coverageLens ? result->seatCoverageLayerDb[(size_t) part] : result->seatLayerDb;
+        const bool loudness = lens == RoomResult::coverageLens;
+        layers = loudness ? result->gridLayerPhon[(size_t) which] : result->gridCauseLayerDb[(size_t) which];
+        seatLayers = loudness ? result->seatLayerPhon[(size_t) which] : result->seatCauseLayerDb[(size_t) which];
+        neutral = loudness ? result->approvedLayerPhon[(size_t) which] : std::array<double, RoomResult::numLayers> {};
+        fade = result->layerHeard;
+        mixValue = result->approvedPhon[(size_t) which];
         seats = r.seatPositions();
     }
 
@@ -501,9 +565,11 @@ void RoomLayerView::paint (juce::Graphics& g)
     g.fillAll (juce::Colour (0xff121315));
 
     const juce::String partNames[] = { tr ("all of it"), "L C R", "LFE" };
-    const juce::String caption = lens == RoomResult::coverageLens
-                                   ? tr ("Where the bass goes, against the approved mix") + " (" + partNames[part] + ")"
-                                   : tr ("Interference between the LFE and L C R, against the approved mix");
+    const juce::String causeNames[] = { tr ("the room"), tr ("the speakers"), tr ("the mix") };
+    const bool loudness = lens == RoomResult::coverageLens;
+    const juce::String caption = loudness
+                                   ? tr ("Loudness of the bass (phon; infra: dB above the threshold)") + " (" + partNames[which] + ")"
+                                   : tr ("What changes the bass against the approved mix: ") + causeNames[which];
     g.setColour (theme::dimText);
     g.setFont (uiFont (10.5f));
     g.drawText (caption + ". " + tr ("Drag to turn, wheel to zoom, double-click to reset."),
@@ -518,6 +584,15 @@ void RoomLayerView::paint (juce::Graphics& g)
     // limit (tanh) so that a large boost or dip cannot throw a layer out of the room
     const double scale = 0.11 * roomHeight / 12.0 * amplitude.getValue();
     const auto lift = [scale] (double db) { return scale * 12.0 * std::tanh (db / 12.0); };
+
+    // Loudness: the height is the gap to the mix's own loudness in that layer, the colour the loudness itself.
+    // Causes: the change in dB; both fade to grey and flat as the mix's bass in that layer is less likely heard.
+    const auto heightOf = [&] (int l, double v) { return loudness ? lift (v - neutral[(size_t) l]) : lift (v * fade[(size_t) l]); };
+    const auto colourOf = [&] (int l, double v)
+    {
+        return loudness ? loudnessColour (v)
+                        : juce::Colour (0xff8a8a8a).interpolatedWith (bassChangeColour (v), (float) juce::jlimit (0.0, 1.0, fade[(size_t) l]));
+    };
 
     const juce::String names[] = { tr ("Infra, under 20 Hz (not heard, felt)"), tr ("Very low, 20-60 Hz"), tr ("Low, 60-120 Hz") };
     const auto outline = room.boundaryPoints (room.shape == ProRoom::rectangle ? 4 : 64);
@@ -573,7 +648,7 @@ void RoomLayerView::paint (juce::Graphics& g)
                 if (k < 0 || std::isnan (values[(size_t) k]))
                     return false;
 
-                db = juce::jlimit (-24.0, 24.0, values[(size_t) k]);
+                db = juce::jlimit (loudness ? 0.0 : -24.0, loudness ? 120.0 : 24.0, values[(size_t) k]);
                 return true;
             };
 
@@ -609,7 +684,7 @@ void RoomLayerView::paint (juce::Graphics& g)
                     const auto at = [&] (double u, double w, double& db)
                     {
                         db = (1 - u) * (1 - w) * v[0] + u * (1 - w) * v[1] + u * w * v[2] + (1 - u) * w * v[3];
-                        return Point3 { p0[0] + u * (p2[0] - p0[0]), p0[1] + w * (p2[1] - p0[1]), base + lift (db) };
+                        return Point3 { p0[0] + u * (p2[0] - p0[0]), p0[1] + w * (p2[1] - p0[1]), base + heightOf (l, db) };
                     };
 
                     for (int sy = 0; sy < subdivision; ++sy)
@@ -619,7 +694,7 @@ void RoomLayerView::paint (juce::Graphics& g)
                             const double w0 = sy / (double) subdivision, w1 = (sy + 1) / (double) subdivision;
                             double d[4];
                             Quad q { { at (u0, w0, d[0]), at (u1, w0, d[1]), at (u1, w1, d[2]), at (u0, w1, d[3]) },
-                                     bassChangeColour (0.25 * (d[0] + d[1] + d[2] + d[3])), false };
+                                     colourOf (l, 0.25 * (d[0] + d[1] + d[2] + d[3])), false };
 
                             for (const auto& c : q.corners)
                                 addPoint (c);
@@ -639,7 +714,7 @@ void RoomLayerView::paint (juce::Graphics& g)
                             const auto b = at (ua + t1 * (ub - ua), wa + t1 * (wb - wa), db);
                             const auto wallA = wallPoint (a[0], a[1]), wallB = wallPoint (b[0], b[1]);
                             Quad q { { a, b, Point3 { wallB[0], wallB[1], base }, Point3 { wallA[0], wallA[1], base } },
-                                     bassChangeColour (0.5 * (da + db)), true };
+                                     colourOf (l, 0.5 * (da + db)), true };
 
                             for (const auto& c : q.corners)
                                 addPoint (c);
@@ -700,20 +775,20 @@ void RoomLayerView::paint (juce::Graphics& g)
 
     for (int l = 0; l < RoomResult::numLayers; ++l)
     {
-        // The neutral plane, a thin grey outline at the layer's own height: where 0 dB (as approved) sits
-        juce::Path neutral;
+        // The neutral plane, a thin grey outline at the layer's own height: where the mix as approved sits
+        juce::Path plane;
 
         for (size_t k = 0; k <= outline.size(); ++k)
         {
             const auto& p = outline[k % outline.size()];
             const auto at = project (p[0], p[1], baseOf (l));
 
-            if (k == 0)     neutral.startNewSubPath (at);
-            else            neutral.lineTo (at);
+            if (k == 0)     plane.startNewSubPath (at);
+            else            plane.lineTo (at);
         }
 
         g.setColour (juce::Colour (0xff8c8c8c).withAlpha (0.75f));
-        g.strokePath (neutral, juce::PathStrokeType (1.0f));
+        g.strokePath (plane, juce::PathStrokeType (1.0f));
 
         // The layer's name at its left edge
         const auto label = project (0.0, 0.0, baseOf (l));
@@ -767,7 +842,15 @@ void RoomLayerView::paint (juce::Graphics& g)
         {
             const double v = hovered < (int) seatLayers[(size_t) l].size() ? seatLayers[(size_t) l][(size_t) hovered] : std::nan ("");
             const juce::String short_[] = { "infra", tr ("very low"), tr ("low") };
-            text << "   " << short_[l] << " " << (std::isnan (v) ? juce::String ("--") : (v >= 0.0 ? "+" : "") + juce::String (v, 1) + " dB");
+            text << "   " << short_[l] << " ";
+
+            if (std::isnan (v))
+                text << "--";
+            else if (loudness)
+                text << juce::String (juce::roundToInt (v)) << (l == 0 ? tr (" dB SL") : tr (" phon")) << " (" << tr ("mix ")
+                     << juce::String (juce::roundToInt (neutral[(size_t) l])) << ")";
+            else
+                text << (v >= 0.0 ? "+" : "") << juce::String (v, 1) << " dB";
         }
 
         g.setColour (juce::Colours::white);
@@ -775,21 +858,9 @@ void RoomLayerView::paint (juce::Graphics& g)
         g.drawText (text, getLocalBounds().reduced (8, 4).removeFromBottom (32).removeFromTop (16), juce::Justification::centredLeft);
     }
 
-    // Legend: a dip on the left, 0 dB (grey) in the middle, a boost on the right
-    auto legend = getLocalBounds().reduced (10, 8).removeFromBottom (28).removeFromRight (300).toFloat();
-    auto bar = legend.removeFromTop (10.0f);
-
-    for (int x = 0; x < (int) bar.getWidth(); ++x)
-    {
-        g.setColour (bassChangeColour (-9.0 + 18.0 * x / bar.getWidth()));
-        g.fillRect (bar.getX() + (float) x, bar.getY(), 1.0f, bar.getHeight());
-    }
-
-    g.setColour (theme::dimText);
-    g.setFont (uiFont (10.0f));
-    g.drawText (tr ("dip -9 dB"), legend, juce::Justification::centredLeft);
-    g.drawText ("0", legend, juce::Justification::centred);
-    g.drawText (tr ("+9 dB boost"), legend, juce::Justification::centredRight);
+    // Legend: the loudness scale with the mix marked, or a dip on the left, 0 dB (grey) in the middle, a boost on the right
+    drawScale (g, getLocalBounds().reduced (10, 8).removeFromBottom (36).removeFromRight (300).toFloat(), loudness, mixValue,
+               loudness ? tr ("Neutral plane: the mix's own loudness") : tr ("Grey and flat where the mix's bass is not heard"));
 }
 
 void RoomLayerView::mouseDown (const juce::MouseEvent&)
@@ -1556,19 +1627,27 @@ RoomProView::RoomProView()
         addAndMakeVisible (*countedTicks[(size_t) i]);
     }
 
-    // The lens selector, and the part of the bass shown in the coverage lens
+    // The lens selector, with the part of the bass (lens 1) or the cause (lens 2) shown
     {
-        const juce::String lensNames[] = { tr ("Where the bass goes"), tr ("LFE / L C R interference") };
+        const juce::String lensNames[] = { tr ("Who gets bass, how much"), tr ("Why") };
         const juce::String lensTips[] = {
-            tr ("For the venue: the bass level at every point against the approved mix, the room and the placement of every speaker "
-                "included. Blue: the bass is lost; red: too much. For placing the subwoofers, the fills and L C R."),
-            tr ("For the mix: what the LFE adds to or takes from L C R at every point, the room's modes included, against what it "
-                "did in the approved mix. A speaker placed or set badly is not in it; an LFE that shares nothing with L C R shows nothing.") };
+            tr ("How loud the bass is at every head and point (phon, ISO 226), on the same scale as the mix as approved, "
+                "the room and the placement of every speaker included. A mix with little bass shows little everywhere."),
+            tr ("Why the bass changes against the approved mix, cut in three causes that add up: the room (what each speaker "
+                "gives there on its own), the speakers (their interference: placement, delay, polarity) and the mix (the LFE "
+                "against L C R). Grey where the mix's bass is not heard.") };
         const juce::String partNames[] = { tr ("All"), "L C R", "LFE" };
         const juce::String partTips[] = {
             tr ("All the bass heard."),
             tr ("L C R alone, through every speaker that plays them (Lc / Rc fills included): a hole here comes from L C R or the fills."),
             tr ("The LFE alone, through the subwoofers and the LFE fills: a hole here comes from them.") };
+        const juce::String causeNames[] = { tr ("Room"), tr ("Speakers"), tr ("Mix") };
+        const juce::String causeTips[] = {
+            tr ("What each speaker gives there on its own: modes, distance, materials. Placing the speakers or the audience changes it."),
+            tr ("The interference between speakers: subwoofer against subwoofer, fill against the speaker it repeats, L against R, "
+                "two L C R sets. Placement, delay and polarity in the venue change it."),
+            tr ("The interference between the LFE and L C R that the mix makes, against the approved mix. The LFE's delay, "
+                "polarity, level and low-pass in the mix change it.") };
 
         const auto style = [] (juce::TextButton& b, int group)
         {
@@ -1580,13 +1659,18 @@ RoomProView::RoomProView()
             b.setColour (juce::TextButton::textColourOnId, juce::Colours::white);
         };
 
+        const auto edges = [] (int i, int count)
+        {
+            return (i > 0 ? juce::Button::ConnectedOnLeft : 0) | (i + 1 < count ? juce::Button::ConnectedOnRight : 0);
+        };
+
         for (int i = 0; i < RoomResult::numLenses; ++i)
         {
             auto& b = lensButtons[(size_t) i];
             b.setButtonText (lensNames[i]);
             b.setTooltip (lensTips[i]);
             style (b, 7101);
-            b.setConnectedEdges (i == 0 ? juce::Button::ConnectedOnRight : juce::Button::ConnectedOnLeft);
+            b.setConnectedEdges (edges (i, RoomResult::numLenses));
             b.setToggleState (i == lens, juce::dontSendNotification);
             b.onClick = [this, i] { if (lensButtons[(size_t) i].getToggleState()) { lens = i; showSelected(); resized(); repaint(); } };
             addAndMakeVisible (b);
@@ -1598,9 +1682,21 @@ RoomProView::RoomProView()
             b.setButtonText (partNames[i]);
             b.setTooltip (partTips[i]);
             style (b, 7102);
-            b.setConnectedEdges ((i > 0 ? juce::Button::ConnectedOnLeft : 0) | (i + 1 < RoomResult::numParts ? juce::Button::ConnectedOnRight : 0));
+            b.setConnectedEdges (edges (i, RoomResult::numParts));
             b.setToggleState (i == part, juce::dontSendNotification);
-            b.onClick = [this, i] { if (partButtons[(size_t) i].getToggleState()) { part = i; showSelected(); } };
+            b.onClick = [this, i] { if (partButtons[(size_t) i].getToggleState()) { part = i; showSelected(); repaint(); } };
+            addAndMakeVisible (b);
+        }
+
+        for (int i = 0; i < RoomResult::numCauses; ++i)
+        {
+            auto& b = causeButtons[(size_t) i];
+            b.setButtonText (causeNames[i]);
+            b.setTooltip (causeTips[i]);
+            style (b, 7103);
+            b.setConnectedEdges (edges (i, RoomResult::numCauses));
+            b.setToggleState (i == cause, juce::dontSendNotification);
+            b.onClick = [this, i] { if (causeButtons[(size_t) i].getToggleState()) { cause = i; showSelected(); repaint(); } };
             addAndMakeVisible (b);
         }
     }
@@ -1672,32 +1768,50 @@ void RoomProView::selectRoom (int index)
     repaint();
 }
 
+int RoomProView::shownRating() const
+{
+    if (lens == RoomResult::coverageLens || cause == RoomResult::roomCause)
+        return RoomResult::coverageRating;
+
+    return cause == RoomResult::speakersCause ? RoomResult::speakersRating : RoomResult::mixRating;
+}
+
 void RoomProView::showSelected()
 {
     const auto& res = results[(size_t) selected];
     const auto& p = paths[(size_t) selected];
     const auto& room = config.rooms[(size_t) selected];
-    const bool rated = ready && hasBass && ! dirty && res.seatLensPenalty[(size_t) lens].size() == room.seatPositions().size();
+    const int rating = shownRating();
+    const bool loudness = lens == RoomResult::coverageLens;
+    const bool rated = ready && hasBass && ! dirty && res.seatRatingPenalty[(size_t) rating].size() == room.seatPositions().size();
 
-    view3d.setCaption (lens == RoomResult::coverageLens ? tr ("Heads: the bass they get against the approved mix")
-                                                        : tr ("Heads: the interference against the approved mix"));
+    const juce::String headCaptions[] = { tr ("Heads: the change caused by the room, against the approved mix"),
+                                          tr ("Heads: the change caused by the speakers, against the approved mix"),
+                                          tr ("Heads: the change caused by the mix, against the approved mix") };
+    view3d.setCaption (loudness ? tr ("Heads: how loud their bass is (phon)") : headCaptions[cause]);
 
     if (! rated)
     {
-        view3d.setRoom (room, {});
+        view3d.setRoom (room, {}, {}, loudness);
         view3d.setWorstSpot (std::nullopt, 100.0);
-        layerView.setData (room, nullptr, nullptr, lens, part);
+        layerView.setData (room, nullptr, nullptr, lens, loudness ? part : cause);
         return;
     }
 
-    view3d.setRoom (room, res.seatLensPenalty[(size_t) lens], lens == RoomResult::coverageLens ? res.seatPartDb[(size_t) part] : res.seatChangeDb);
-    view3d.setDetails (res.seatPartDb, res.seatChangeDb);
+    view3d.setRoom (room, res.seatRatingPenalty[(size_t) rating], loudness ? res.seatPhon[(size_t) part] : res.seatCauseDb[(size_t) cause],
+                    loudness, res.approvedPhon[(size_t) part], res.seatHeard);
+    Room3DView::Details details;
+    details.phon = res.seatPhon;
+    details.partDb = res.seatPartDb;
+    details.mixPhon = res.approvedPhon;
+    details.causeDb = res.seatCauseDb;
+    view3d.setDetails (details);
     view3d.setHeads (res.seatHeardPhon, res.seatFeltDb);
-    layerView.setData (room, &p, &res, lens, part);
-    const int worst = res.lensWorstProbe[(size_t) lens];
+    layerView.setData (room, &p, &res, lens, loudness ? part : cause);
+    const int worst = res.ratingWorstProbe[(size_t) rating];
     view3d.setWorstSpot (worst >= 0 && worst < (int) p.probePositions.size()
                            ? std::optional<std::array<double, 3>> (p.probePositions[(size_t) worst]) : std::nullopt,
-                         res.lensWorstPointScore[(size_t) lens]);
+                         res.ratingWorstPointScore[(size_t) rating]);
 }
 
 void RoomProView::configChanged()
@@ -1795,8 +1909,8 @@ void RoomProView::update (const Analysis& a, const Translation& electricalTransl
             counted.push_back (config.rooms[(size_t) i].counted);
             shownRoom[(size_t) i] = roomSmooth[(size_t) i].update (results[(size_t) i].roomScore, seconds, scoreSpeed);
 
-            for (int l = 0; l < RoomResult::numLenses; ++l)
-                shownLens[(size_t) i][(size_t) l] = lensSmooth[(size_t) i][(size_t) l].update (results[(size_t) i].lensScore[(size_t) l], seconds, scoreSpeed);
+            for (int l = 0; l < RoomResult::numRatings; ++l)
+                shownLens[(size_t) i][(size_t) l] = lensSmooth[(size_t) i][(size_t) l].update (results[(size_t) i].ratingScore[(size_t) l], seconds, scoreSpeed);
         }
 
         auto withRooms = electricalTranslation;
@@ -1871,10 +1985,18 @@ void RoomProView::paint (juce::Graphics& g)
                       + (room.fillsOn ? tr (",  fills") : ""),
                     inner.removeFromTop (14.0f), juce::Justification::centredLeft);
 
-        // Seats on a -12..+12 dB line, in the lens shown, coloured by their score in it
+        // Seats on a -12..+12 line, in the lens shown (phon against the mix's, or dB of the cause shown),
+        // coloured by their score in it
         const auto& res = results[(size_t) i];
-        const auto& values = lens == RoomResult::coverageLens ? res.seatPartDb[(size_t) part] : res.seatChangeDb;
-        const auto& penalties = res.seatLensPenalty[(size_t) lens];
+        const int rating = shownRating();
+        const bool loudness = lens == RoomResult::coverageLens;
+        auto values = loudness ? res.seatPhon[(size_t) part] : res.seatCauseDb[(size_t) cause];
+
+        if (loudness)
+            for (auto& v : values)
+                v -= res.approvedPhon[(size_t) part];
+
+        const auto& penalties = res.seatRatingPenalty[(size_t) rating];
         auto line = inner.reduced (0.0f, 4.0f);
         const float mid = line.getCentreX(), y = line.getCentreY();
         g.setColour (juce::Colours::white.withAlpha (0.12f));
@@ -1890,19 +2012,20 @@ void RoomProView::paint (juce::Graphics& g)
                     g.fillEllipse (x - 2.5f, y - 2.5f, 5.0f, 5.0f);
                 }
 
-        // The two scores, the lens shown in a coloured box; under it its 10th percentile and the worst point found
+        // The three scores, the one that goes with what is shown in a coloured box; under them its
+        // 10th percentile and the worst point found
         const bool computing = dirty || job.valid();
         const bool show = ready && hasBass && ! computing;
-        const juce::String names[] = { tr ("Coverage"), tr ("Interference") };
-        const float h = scores.getHeight() / 3.0f;
+        const juce::String names[] = { tr ("Coverage"), tr ("Placement"), tr ("Mix") };
+        const float h = scores.getHeight() / 4.0f;
 
-        for (int l = 0; l < RoomResult::numLenses; ++l)
+        for (int l = 0; l < RoomResult::numRatings; ++l)
         {
             auto row = scores.removeFromTop (h).reduced (0.0f, 1.0f);
             const double v = shownLens[(size_t) i][(size_t) l];
             const auto number = show ? juce::String (juce::roundToInt (v)) : juce::String (computing ? "..." : "--");
 
-            if (l == lens)
+            if (l == rating)
             {
                 g.setColour (show ? ChainsView::colourFor (1.0 - v / 100.0) : juce::Colour (0xff2a2a2a));
                 g.fillRoundedRectangle (row, 3.0f);
@@ -1920,10 +2043,10 @@ void RoomProView::paint (juce::Graphics& g)
         }
 
         g.setFont (uiFont (9.5f));
-        const int worst = res.lensWorstProbe[(size_t) lens];
+        const int worst = res.ratingWorstProbe[(size_t) rating];
         g.setColour (show && worst >= 0 ? juce::Colour (0xffff5ad2) : theme::dimText);
-        g.drawText (show ? "P10 " + juce::String (juce::roundToInt (res.lensP10[(size_t) lens])) + "   " + tr ("worst ")
-                             + juce::String (juce::roundToInt (res.lensWorstPointScore[(size_t) lens]))
+        g.drawText (show ? "P10 " + juce::String (juce::roundToInt (res.ratingP10[(size_t) rating])) + "   " + tr ("worst ")
+                             + juce::String (juce::roundToInt (res.ratingWorstPointScore[(size_t) rating]))
                          : juce::String (computing ? tr ("computing...") : juce::String()),
                     scores, juce::Justification::centred);
     }
@@ -1940,7 +2063,7 @@ void RoomProView::resized()
     loadButton.setBounds (buttons);
 
     area.removeFromTop (6);
-    auto cardRow = area.removeFromTop (62);
+    auto cardRow = area.removeFromTop (72);
     const int cardWidth = (cardRow.getWidth() - 2 * 10) / ProRooms::count;
 
     for (int i = 0; i < ProRooms::count; ++i)
@@ -1966,6 +2089,14 @@ void RoomProView::resized()
         {
             b.setBounds (row.removeFromLeft (64));
             b.setVisible (lens == RoomResult::coverageLens);
+        }
+
+        row = lensRow.withTrimmedLeft (2 * 190 + 16);
+
+        for (auto& b : causeButtons)
+        {
+            b.setBounds (row.removeFromLeft (84));
+            b.setVisible (lens == RoomResult::causesLens);
         }
     }
     area.removeFromTop (6);

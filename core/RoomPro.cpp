@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <map>
 #include <sstream>
+#include <thread>
 
 namespace subguard
 {
@@ -1765,11 +1766,13 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
 
     // Which groups have speakers, and whether a level offset makes the set-up differ from the calibrated one
     bool used[ng] = {}, offset[ng] = {};
+    int speakersIn[ng] = {};
 
     for (const auto& s : sources)
     {
         used[s.group] = true;
-        offset[s.group] = offset[s.group] || s.gain != s.nominalWeight;
+        offset[s.group] = offset[s.group] || ! same (s.gain, s.nominalWeight);
+        ++speakersIn[s.group];
     }
 
     // Each grid point stands for a band about 2.3 % wide. When the modes are
@@ -1795,8 +1798,12 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
     }
 
     // Group responses at a set of points, averaged over each band as products: G_g conj(G_h)
+    // With it, for each group, its speakers added in power (each speaker alone,
+    // no interference between them): sum over the group's speakers of |H_s|^2
     using GroupMatrix = std::array<cd, ng * ng>;
-    const auto computeGroups = [&] (const std::vector<Point>& points, std::vector<GroupMatrix>& actual, std::vector<GroupMatrix>& nominal)
+    using GroupPowers = std::array<double, ng>;
+    const auto computeGroups = [&] (const std::vector<Point>& points, std::vector<GroupMatrix>& actual, std::vector<GroupMatrix>& nominal,
+                                    std::vector<GroupPowers>& alone)
     {
         std::vector<double> atSeats (points.size() * numModes);
 
@@ -1807,10 +1814,15 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
         // Group responses at every seat, averaged over each band as products: G_g conj(G_h)
         actual.assign (points.size() * n, GroupMatrix {});
         nominal = actual;
+        alone.assign (points.size() * n, GroupPowers {});
+        // The band points are shared between threads: each writes only its own points
+        const auto work = [&] (size_t from, size_t to)
+        {
         std::vector<std::vector<cd>> groupAt (ng, std::vector<cd> (numModes)), groupNominalAt = groupAt;
-        std::vector<cd> term (numModes);
+        std::vector<std::vector<cd>> speakerAt (sources.size(), std::vector<cd> (numModes));     // groups of two speakers or more
+        std::vector<cd> term (numModes), weighted (numModes);
 
-        for (size_t i = 0; i < n; ++i)
+        for (size_t i = from; i < to; ++i)
         {
             for (const auto& sub : subs[i])
             {
@@ -1831,10 +1843,15 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
                     auto& sum = groupAt[(size_t) sources[s].group];
                     auto& nominalSum = groupNominalAt[(size_t) sources[s].group];
 
+                    const bool alsoAlone = speakersIn[sources[s].group] > 1;
+
                     for (size_t k = 0; k < numModes; ++k)
                     {
                         sum[k] += atSource[s][k] * gain;
                         nominalSum[k] += atSource[s][k] * nominalGain;
+
+                        if (alsoAlone)
+                            speakerAt[s][k] = atSource[s][k] * gain;
                     }
                 }
 
@@ -1845,6 +1862,10 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
                 {
                     const double* shapes = &atSeats[(size_t) seat * numModes];
                     std::array<cd, ng> h {}, hn {};
+                    cd* st = weighted.data();
+
+                    for (size_t k = 0; k < numModes; ++k)
+                        st[k] = shapes[k] * term[k];
 
                     for (int g = 0; g < ng; ++g)
                     {
@@ -1855,7 +1876,7 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
                         cd sum;
 
                         for (size_t k = 0; k < numModes; ++k)
-                            sum += a[k] * (shapes[k] * term[k]);
+                            sum += a[k] * st[k];
 
                         h[(size_t) g] = sum;
 
@@ -1865,7 +1886,7 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
                             cd nominalSum;
 
                             for (size_t k = 0; k < numModes; ++k)
-                                nominalSum += b[k] * (shapes[k] * term[k]);
+                                nominalSum += b[k] * st[k];
 
                             hn[(size_t) g] = nominalSum;
                         }
@@ -1877,6 +1898,7 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
 
                     auto& ma = actual[(size_t) seat * n + i];
                     auto& mn = nominal[(size_t) seat * n + i];
+                    auto& pa = alone[(size_t) seat * n + i];
 
                     for (int g = 0; g < ng; ++g)
                         for (int k = 0; k < ng; ++k)
@@ -1884,14 +1906,45 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
                             ma[(size_t) (g * ng + k)] += sub.weight * h[(size_t) g] * std::conj (h[(size_t) k]);
                             mn[(size_t) (g * ng + k)] += sub.weight * hn[(size_t) g] * std::conj (hn[(size_t) k]);
                         }
+
+                    // Each speaker alone: one speaker in its group, the group itself; more, each one summed on its own
+                    for (int g = 0; g < ng; ++g)
+                        if (used[g] && speakersIn[g] == 1)
+                            pa[(size_t) g] += sub.weight * std::norm (h[(size_t) g]);
+
+                    for (size_t sp = 0; sp < sources.size(); ++sp)
+                    {
+                        if (speakersIn[sources[sp].group] <= 1)
+                            continue;
+
+                        const cd* a = speakerAt[sp].data();
+                        cd one;
+
+                        for (size_t k = 0; k < numModes; ++k)
+                            one += a[k] * st[k];
+
+                        pa[(size_t) sources[sp].group] += sub.weight * std::norm (one);
+                    }
                 }
             }
         }
+        };
 
+        const size_t threads = std::clamp<size_t> (std::thread::hardware_concurrency(), 1, 8);
+        std::vector<std::thread> pool;
+
+        for (size_t t = 1; t < threads; ++t)
+            pool.emplace_back (work, n * t / threads, n * (t + 1) / threads);
+
+        work (0, n / threads);
+
+        for (auto& thread : pool)
+            thread.join();
     };
 
     std::vector<GroupMatrix> actual, nominal;
-    computeGroups (seats, actual, nominal);
+    std::vector<GroupPowers> alone;
+    computeGroups (seats, actual, nominal, alone);
 
     // Calibration on the room as set up normally (every speaker at its level),
     // one speaker group at a time, over all seats or the reference seat:
@@ -1975,11 +2028,11 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
 
                 for (int g = 0; g < ng; ++g)
                 {
-                    if (R[a][g] == 0.0)
+                    if (same (R[a][g], 0.0))
                         continue;
 
                     for (int k = 0; k < ng; ++k)
-                        if (R[b][k] != 0.0)
+                        if (! same (R[b][k], 0.0))
                             sum += R[a][g] * R[b][k] * m[(size_t) (g * ng + k)];
                 }
 
@@ -1989,13 +2042,34 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
         return out;
     };
 
+    // Every speaker alone, added in power: each speaker plays its channels together, but no two speakers interfere
+    const auto toChannelsAlone = [&R] (const GroupPowers& q)
+    {
+        RoomPaths::ChannelMatrix out {};
+
+        for (int a = 0; a < nc; ++a)
+            for (int b = 0; b < nc; ++b)
+            {
+                double sum = 0.0;
+
+                for (int g = 0; g < ng; ++g)
+                    sum += R[a][g] * R[b][g] * q[(size_t) g];
+
+                out[(size_t) (a * nc + b)] = sum;
+            }
+
+        return out;
+    };
+
     paths.p.resize (actual.size());
     paths.pRef.resize (actual.size());
+    paths.pAlone.resize (actual.size());
 
     for (size_t i = 0; i < actual.size(); ++i)
     {
         paths.p[i] = toChannels (actual[i]);
         paths.pRef[i] = toChannels (nominal[i]);
+        paths.pAlone[i] = toChannelsAlone (alone[i]);
     }
 
     // Extra points around the riskiest seats: those where the room plays the
@@ -2049,12 +2123,14 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
         if (! probes.empty())
         {
             std::vector<GroupMatrix> probeActual, probeNominal;
-            computeGroups (probes, probeActual, probeNominal);
+            std::vector<GroupPowers> probeAlone;
+            computeGroups (probes, probeActual, probeNominal, probeAlone);
 
             for (size_t i = 0; i < probeActual.size(); ++i)
             {
                 paths.p.push_back (toChannels (probeActual[i]));
                 paths.pRef.push_back (toChannels (probeNominal[i]));
+                paths.pAlone.push_back (toChannelsAlone (probeAlone[i]));
             }
 
             paths.probes = (int) probes.size();
@@ -2086,12 +2162,14 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
         if (! nodes.empty())
         {
             std::vector<GroupMatrix> gridActual, gridNominal;
-            computeGroups (nodes, gridActual, gridNominal);
+            std::vector<GroupPowers> gridAlone;
+            computeGroups (nodes, gridActual, gridNominal, gridAlone);
 
             for (size_t i = 0; i < gridActual.size(); ++i)
             {
                 paths.p.push_back (toChannels (gridActual[i]));
                 paths.pRef.push_back (toChannels (gridNominal[i]));
+                paths.pAlone.push_back (toChannelsAlone (gridAlone[i]));
             }
         }
 

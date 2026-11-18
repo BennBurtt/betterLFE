@@ -2121,14 +2121,14 @@ static void testRoomPro()
         std::printf ("  LFE as loud as the screen, unrelated: subwoofers under the screen room %.1f (coverage %.1f, interference %.1f, "
                      "seats spread %.1f dB, LFE alone spread %.1f dB), one in a back corner %.1f (coverage %.1f, interference %.1f, %.1f dB, "
                      "LFE alone %.1f dB)\n",
-                     front.roomScore, front.lensScore[RoomResult::coverageLens], front.lensScore[RoomResult::interferenceLens], spread (front),
-                     partSpread (front, RoomResult::lfePart), corner.roomScore, corner.lensScore[RoomResult::coverageLens],
-                     corner.lensScore[RoomResult::interferenceLens], spread (corner), partSpread (corner, RoomResult::lfePart));
-        check (std::abs (front.lensScore[RoomResult::coverageLens] - corner.lensScore[RoomResult::coverageLens]) > 3.0
+                     front.roomScore, front.ratingScore[RoomResult::coverageRating], front.ratingScore[RoomResult::mixRating], spread (front),
+                     partSpread (front, RoomResult::lfePart), corner.roomScore, corner.ratingScore[RoomResult::coverageRating],
+                     corner.ratingScore[RoomResult::mixRating], spread (corner), partSpread (corner, RoomResult::lfePart));
+        check (std::abs (front.ratingScore[RoomResult::coverageRating] - corner.ratingScore[RoomResult::coverageRating]) > 3.0
                  && std::abs (partSpread (front, RoomResult::lfePart) - partSpread (corner, RoomResult::lfePart)) > 1.0,
-               "moving the subwoofer to a back corner changes the coverage and where the LFE goes", corner.lensScore[RoomResult::coverageLens]);
-        check (spread (corner) < 0.1 && corner.lensScore[RoomResult::interferenceLens] > 99.0,
-               "an LFE unrelated to L C R: no interference, wherever the subwoofer is", corner.lensScore[RoomResult::interferenceLens]);
+               "moving the subwoofer to a back corner changes the coverage and where the LFE goes", corner.ratingScore[RoomResult::coverageRating]);
+        check (spread (corner) < 0.1 && corner.ratingScore[RoomResult::mixRating] > 99.0,
+               "an LFE unrelated to L C R: no interference, wherever the subwoofer is", corner.ratingScore[RoomResult::mixRating]);
 
         double lcrMoved = 0.0, lcrValues = 0.0;
 
@@ -2436,10 +2436,10 @@ static void testRoomPro()
 
         std::printf ("  subwoofers 6 dB too loud, LFE identical to the screen: room %.1f -> %.1f, coverage %.1f -> %.1f, "
                      "LFE alone %+.2f dB at every seat on average, L C R alone %.2f dB at most\n",
-                     even.roomScore, loud.roomScore, even.lensScore[RoomResult::coverageLens], loud.lensScore[RoomResult::coverageLens], lfeRise, lcrRise);
+                     even.roomScore, loud.roomScore, even.ratingScore[RoomResult::coverageRating], loud.ratingScore[RoomResult::coverageRating], lfeRise, lcrRise);
         check (n > 0 && std::abs (lfeRise - 6.0) < 0.3 && lcrRise < 1e-6, "a subwoofer level offset stays after calibration, in the LFE part only", lfeRise);
-        check (std::abs (loud.lensScore[RoomResult::coverageLens] - even.lensScore[RoomResult::coverageLens]) > 2.0,
-               "subwoofers set 6 dB off their level change the coverage", loud.lensScore[RoomResult::coverageLens]);
+        check (std::abs (loud.ratingScore[RoomResult::coverageRating] - even.ratingScore[RoomResult::coverageRating]) > 2.0,
+               "subwoofers set 6 dB off their level change the coverage", loud.ratingScore[RoomResult::coverageRating]);
     }
 
     // A fill speaker playing Lc / Rc moved: the L C R part changes, the LFE part does not
@@ -2475,6 +2475,68 @@ static void testRoomPro()
         std::printf ("  Lc / Rc fills moved from half way to 80 %% of the length: L C R alone changes by up to %.1f dB at a seat, "
                      "the LFE alone by %.2f dB\n", lcrMoved, lfeMoved);
         check (lcrMoved > 0.5 && lfeMoved < 1e-6, "moving an Lc / Rc fill changes the L C R part, never the LFE part", lfeMoved);
+    }
+
+    // Why a seat gets what it gets: room, speakers and mix add up to the whole change
+    {
+        auto room = ProRoom::fromSpec (RoomSimulator::defaultRooms()[6]);
+        room.numSubs = 2;
+        room.subs[0].fx = 0.05; room.subs[0].fy = 0.3; room.subs[0].fz = 0.05;
+        room.subs[1].fx = 0.05; room.subs[1].fy = 0.7; room.subs[1].fz = 0.05;
+        const auto rated = RoomSimulator::rate (ProRoomModel::prepare (room, sharedAnalysis.grid), sharedAnalysis, sharedT, sim.tuning,
+                                                PlaybackSimulator::Level::strong, 10.0);
+        double worstSum = 0.0;
+        int agree = 0, compared = 0;
+
+        for (size_t i = 0; i < rated.seatPartDb[RoomResult::allParts].size(); ++i)
+        {
+            const double sum = rated.seatCauseDb[RoomResult::roomCause][i] + rated.seatCauseDb[RoomResult::speakersCause][i]
+                             + rated.seatCauseDb[RoomResult::mixCause][i];
+            worstSum = std::max (worstSum, std::abs (sum - rated.seatPartDb[RoomResult::allParts][i]));
+            const double db = rated.seatPartDb[RoomResult::allParts][i];
+            const double phon = rated.seatPhon[RoomResult::allParts][i] - rated.approvedPhon[RoomResult::allParts];
+
+            if (std::abs (db) > 2.0)
+            {
+                ++compared;
+                agree += (db > 0.0) == (phon > 0.0) ? 1 : 0;
+            }
+        }
+
+        std::printf ("  room + speakers + mix against the whole change: %.2g dB at most; mix %.0f phon; heads 2 dB or more off: "
+                     "%d of %d louder or quieter in phon too\n", worstSum, rated.approvedPhon[RoomResult::allParts], agree, compared);
+        check (worstSum < 1e-6, "room, speakers and mix add up exactly to the change of every seat", worstSum);
+        check (rated.approvedPhon[RoomResult::allParts] > 20.0 && compared > 0 && agree >= 0.8 * compared,
+               "each head's loudness is on the mix's scale: a head that loses bass is quieter than the mix", (double) agree);
+
+        // The second subwoofer inverted: the speakers cause changes, the room cause does not
+        room.subs[1].inverted = true;
+        const auto inverted = RoomSimulator::rate (ProRoomModel::prepare (room, apartAnalysis.grid), apartAnalysis, apartT, sim.tuning,
+                                                   PlaybackSimulator::Level::strong, 10.0);
+        room.subs[1].inverted = false;
+        const auto upright = RoomSimulator::rate (ProRoomModel::prepare (room, apartAnalysis.grid), apartAnalysis, apartT, sim.tuning,
+                                                  PlaybackSimulator::Level::strong, 10.0);
+        // The room cause may only move one way everywhere: the subwoofers are calibrated again, as installed,
+        // which scales the LFE alone (each subwoofer's own response does not depend on its polarity)
+        double roomLow = 1e9, roomHigh = -1e9, speakersMoved = 0.0, mixLargest = 0.0;
+        const size_t n = upright.seatCauseDb[RoomResult::roomCause].size();
+
+        for (size_t i = 0; i < n; ++i)
+        {
+            const double d = inverted.seatCauseDb[RoomResult::roomCause][i] - upright.seatCauseDb[RoomResult::roomCause][i];
+            roomLow = std::min (roomLow, d);
+            roomHigh = std::max (roomHigh, d);
+            speakersMoved += std::abs (inverted.seatCauseDb[RoomResult::speakersCause][i] - upright.seatCauseDb[RoomResult::speakersCause][i]) / (double) n;
+            mixLargest = std::max ({ mixLargest, std::abs (inverted.seatCauseDb[RoomResult::mixCause][i]), std::abs (upright.seatCauseDb[RoomResult::mixCause][i]) });
+        }
+
+        const double roomMoved = roomHigh - roomLow;
+        std::printf ("  second subwoofer inverted, LFE unrelated to L C R: speakers cause moves %.1f dB per seat on average, room cause "
+                     "%+.2f to %+.2f dB (calibrated again), mix cause at most %.2g dB; speakers score %.1f -> %.1f\n",
+                     speakersMoved, roomLow, roomHigh, mixLargest,
+                     upright.ratingScore[RoomResult::speakersRating], inverted.ratingScore[RoomResult::speakersRating]);
+        check (n > 0 && speakersMoved > 1.0 && roomLow * roomHigh >= 0.0 && roomMoved < speakersMoved * 4.0 && mixLargest < 0.1,
+               "a subwoofer inverted shows in the speakers cause only (LFE unrelated: no mix cause)", speakersMoved);
     }
 
     // A large configured room: prepared in reasonable time

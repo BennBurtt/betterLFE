@@ -35,26 +35,37 @@ juce::Point<float> projectRoomPoint (const ProRoom&, const ProCamera&, int width
     grey within 0.5 dB, then blue to violet for a dip, yellow to red for a boost, full from 6 dB. */
 juce::Colour bassChangeColour (double db);
 
+/** Colour of a loudness (phon, 0 to 100): dark grey for nothing heard, then blue, cyan, green, yellow, orange, red, magenta. */
+juce::Colour loudnessColour (double phon);
+
+/** A colour scale with its ticks and caption: loudness (0..100 phon, the mix's value marked) or change (-9..+9 dB). */
+void drawScale (juce::Graphics&, juce::Rectangle<float> area, bool absolute, double mixValue, const juce::String& caption);
+
 /** A room drawn in 3D: walls, screen, speakers, and the heads coloured by the lens shown (the bass level, or the
     interference, against the approved mix). Drag to turn, wheel to zoom, double-click to reset. */
 class Room3DView : public juce::Component
 {
 public:
-    /** The room, each seat's score in the lens shown (penalty 0..1) and the change its head is coloured by (dB). */
-    void setRoom (const ProRoom& r, const std::vector<double>& seatPenalties, const std::vector<double>& seatChangeDb = {});
+    /** The room, each seat's score in the lens shown (penalty 0..1) and what its head is coloured by: a loudness in
+        phon (`absolute`, the mix's own value marked on the scale) or a change in dB, faded to grey by `fade` (0..1). */
+    void setRoom (const ProRoom& r, const std::vector<double>& seatPenalties, const std::vector<double>& seatValues = {},
+                  bool absolute = false, double mixValue = 0.0, const std::vector<double>& fade = {});
 
-    /** For the seat under the mouse: its level against the approved mix (all, L C R alone, LFE alone) and its interference. */
-    void setDetails (const std::array<std::vector<double>, RoomResult::numParts>& partDb, const std::vector<double>& interferenceDb)
+    /** For the head under the mouse: its loudness and level by part, and the three causes of its change. */
+    struct Details
     {
-        if (partDb != parts || interferenceDb != interference)
+        std::array<std::vector<double>, RoomResult::numParts> phon, partDb;
+        std::array<double, RoomResult::numParts> mixPhon {};
+        std::array<std::vector<double>, RoomResult::numCauses> causeDb;
+        bool operator== (const Details& o) const
         {
-            parts = partDb;
-            interference = interferenceDb;
-            repaint();
+            return phon == o.phon && partDb == o.partDb && causeDb == o.causeDb
+                     && std::equal (mixPhon.begin(), mixPhon.end(), o.mixPhon.begin(), [] (double x, double y) { return same (x, y); });
         }
-    }
+    };
 
-    /** What the heads' colour says, under the colour scale. */
+    void setDetails (const Details& d)              { if (! (d == details)) { details = d; repaint(); } }
+
     void setCaption (const juce::String& text)      { if (text != caption) { caption = text; repaint(); } }
 
     /** The worst point found between the seats (extra points), drawn when there is one below every seat. */
@@ -110,8 +121,10 @@ private:
     double worstSpotScore = 100.0;
     std::vector<juce::Point<float>> seatPoints;     // where each seat was drawn
     std::vector<double> heard, felt;
-    std::array<std::vector<double>, RoomResult::numParts> parts;
-    std::vector<double> interference;
+    Details details;
+    bool absolute = false;
+    double mixValue = 0.0;
+    std::vector<double> fades;
     juce::String caption;
     int hovered = -1;
     std::shared_ptr<ProCamera> camera = std::make_shared<ProCamera>();
@@ -127,8 +140,9 @@ public:
     RoomLayerView();
     void resized() override;
 
-    /** The room and its results (nothing to show when either is null), in a lens, with a part of the bass for the coverage. */
-    void setData (const ProRoom&, const RoomPaths*, const RoomResult*, int lens, int part);
+    /** The room and its results (nothing to show when either is null), in a lens: the loudness of a part of the bass
+        (`shown`: RoomResult::Part), or one of the causes of its change (RoomResult::Cause). */
+    void setData (const ProRoom&, const RoomPaths*, const RoomResult*, int lens, int shown);
     void setHovered (int seat)                      { if (seat != hovered) { hovered = seat; repaint(); } }
 
     void paint (juce::Graphics&) override;
@@ -140,7 +154,9 @@ public:
 private:
     ProRoom room;
     bool hasData = false;
-    int lens = RoomResult::coverageLens, part = RoomResult::allParts;
+    int lens = RoomResult::coverageLens, which = 0;
+    std::array<double, RoomResult::numLayers> neutral {}, fade {};
+    double mixValue = 0.0;
     int columns = 0, rows = 0;
     std::vector<int> index;
     std::vector<std::array<double, 3>> nodes, seats;
@@ -286,15 +302,17 @@ private:
         void reset()    { inertia.reset(); slow = shown = -1.0; }
     };
     std::array<Smoothed, ProRooms::count> roomSmooth;
-    std::array<std::array<Smoothed, RoomResult::numLenses>, ProRooms::count> lensSmooth;
-    std::array<std::array<double, RoomResult::numLenses>, ProRooms::count> shownLens {};
+    std::array<std::array<Smoothed, RoomResult::numRatings>, ProRooms::count> lensSmooth;
+    std::array<std::array<double, RoomResult::numRatings>, ProRooms::count> shownLens {};
     Smoothed proSmooth;
 
-    // The lens: where the bass goes (for the venue: all of it, L C R alone or the LFE alone),
-    // or the interference between the LFE and L C R (for the mix)
-    int lens = RoomResult::coverageLens, part = RoomResult::allParts;
+    // The lens: who gets bass and how much (all of it, L C R alone or the LFE alone),
+    // or why (the room, the speakers, the mix)
+    int lens = RoomResult::coverageLens, part = RoomResult::allParts, cause = RoomResult::speakersCause;
     std::array<juce::TextButton, RoomResult::numLenses> lensButtons;
     std::array<juce::TextButton, RoomResult::numParts> partButtons;
+    std::array<juce::TextButton, RoomResult::numCauses> causeButtons;
+    int shownRating() const;        // the score that goes with what is shown
     juce::Rectangle<int> lensRow;
     bool hasBass = false, ready = false;
 

@@ -880,7 +880,8 @@ indépendant du mix : trouvé une fois), et on calcule huit points à 0,6 m
 autour de chacune, 32 points de plus. Ils sont notés comme les places mais
 n'entrent pas dans le score de la salle ; chaque carte affiche le percentile
 10 des places (la note sous laquelle tombent 10 % des places) et le pire point
-trouvé, sièges et points de sonde compris. Quand ce pire point est entre les
+trouvé, sièges et points de sonde compris, pour la note qui va avec ce qui est
+montré. Quand ce pire point est entre les
 sièges, la vue 3D le marque en magenta (vérifié : 32 points de plus pour une
 salle de 20 places, pire point ≤ pire place ≤ P10). Aux fréquences du grave,
 un creux fait de 1 à 4 m de large : 0,6 m d'écart suffit à le voir.
@@ -889,8 +890,10 @@ un creux fait de 1 à 4 m de large : 0,6 m d'écart suffit à le voir.
 (on la tourne et la zoome indépendamment), trois couches du grave empilées, chacune un maillage sur une grille régulière du sol à hauteur
 d'oreille (20 points sur le grand côté, chaque maille subdivisée en 3 × 3
 facettes à l'affichage) : un boost soulève la couche, un creux l'abaisse (12 dB
-la déplacent de 11 % de la hauteur de la salle, à l'amplitude 1). Couleur de
-chaque facette : gris à ±0,5 dB, puis directement des couleurs saturées pour
+la déplacent de 11 % de la hauteur de la salle, à l'amplitude 1). Elle montre
+la lentille choisie (voir « Deux lentilles ») : en lentille 1, la couleur est
+la sonie et la hauteur l'écart à celle du mix ; en lentille 2, l'écart dû à la
+cause choisie. Couleur d'un écart en dB, sur chaque facette : gris à ±0,5 dB, puis directement des couleurs saturées pour
 que le gris ne les dilue pas : bleu vif, bleu profond puis violet pour un
 creux, jaune, orange puis rouge pour un boost, pleine à 6 dB (à peu près là où
 la sonie du grave double, la pénalité pleine d'une place). Les facettes sont
@@ -942,50 +945,82 @@ infrasons :
 Le reste de la notation est le même (tolérance, poids selon le grave entendu).
 Room Sim, lui, reste sur 20–120 Hz.
 
-**Deux lentilles : la répartition (le lieu) et les interférences (le mix).**
-Room Sim Pro sépare deux questions qui n'ont pas la même cause ni le même
-remède. Le calcul raisonne par **canal du mix**, pas par endroit : « LCR »
+**Deux lentilles : qui a du grave, et pourquoi.** Room Sim Pro répond à deux
+questions. Le calcul raisonne par **canal du mix**, pas par endroit : « LCR »
 veut dire les canaux L, C, R joués par toutes les enceintes qui les jouent
 (un ou deux jeux LCR, rappels Lc/Rc, divergences), où qu'elles soient ; « LFE »
-veut dire le canal LFE joué par les caissons et les rappels LFE, où qu'ils
-soient. Il n'y a pas d'écran dans le calcul.
+le canal LFE joué par les caissons et les rappels LFE. Il n'y a pas d'écran
+dans le calcul.
 
-En chaque point et à chaque fréquence, la puissance entendue est
-`Σ_ab P_ab S_ab` (P : chemins de la salle, S : inter-spectres du mix). Elle se
-coupe exactement en trois termes :
+*Lentille 1 : qui a du grave, et combien.* La sonie du grave à chaque tête et
+en chaque point de la grille, en **phones** (ISO 226:2023 [37], 0 sous le
+seuil d'audition), sur la même échelle que le mix validé, joué au niveau
+d'écoute choisi : on prend la bande la plus forte. Si le mix a un grave à
+62 phones, une tête qui le reçoit tel quel est à 62 ; une tête au fond qui en
+perd est à 45, une tête qui en prend trop à 70. Un mix avec peu de grave en
+montre peu partout : rien ne s'allume pour un grave que personne n'entend.
+Couleur : une échelle de chaleur de 0 à 100 phones (gris foncé pour rien,
+bleu vers 30, vert vers 60, orange vers 80, rouge puis magenta au-delà de 90),
+la valeur du mix marquée en blanc sur l'échelle. Dans la vue en couches, la
+couleur est la sonie de la couche, et la hauteur l'écart à la sonie du mix dans
+cette couche (le plan neutre est le mix). L'infra, sous 20 Hz, n'a pas de
+phones : il est donné en dB au-dessus du seuil de Møller & Pedersen [38].
+Filtre « Tout | LCR | LFE » : un trou en « LCR » vient des LCR ou des rappels
+Lc/Rc, un trou en « LFE » des caissons ou des rappels LFE. Près du seuil, les
+courbes d'isosonie se resserrent : quelques dB de moins font beaucoup de
+phones (vérifié : un mix à 37 phones, des places qui s'en écartent d'environ
+10 phones pour ±3 dB).
 
-| Terme | Formule | Contenu | Qui peut corriger |
+*Lentille 2 : pourquoi.* En chaque point et à chaque fréquence, la puissance
+entendue est `T = Σ_ab P_ab S_ab` (P : chemins de la salle, S : inter-spectres
+du mix). Elle se coupe en trois termes : LCR (`Σ_{a,b ∈ L,C,R} P_ab S_ab`),
+LFE (`P_EE S_EE`) et le croisement LFE × LCR (`2 Re Σ_c P_cE S_cE`, nul quand le
+LFE du mix ne partage rien avec les LCR). On calcule aussi `A`, chaque enceinte
+jouée seule et les enceintes additionnées en puissance : chacune joue ses
+canaux, mais deux enceintes n'interfèrent pas
+(`A_ab = Σ_g R_ag R_bg Σ_{s ∈ g} |H_s|²`, R : routage étalonné, g : groupe
+d'enceintes). Dans le mix validé, une enceinte par canal et des chemins unité :
+`A0 = Σ_a S_aa`, `T0 = Σ_ab S_ab`. L'écart au mix validé `T / T0` se coupe
+alors exactement en trois causes, dont les dB s'additionnent :
+
+| Cause | Formule | Ce que c'est | Qui corrige |
 |---|---|---|---|
-| LCR | `Σ_{a,b ∈ L,C,R} P_ab S_ab` | L, C, R par toutes leurs enceintes, leurs croisements entre eux compris (rappel contre l'enceinte qu'il répète, divergence) | le lieu |
-| LFE | `P_EE S_EE` | le LFE par toutes ses enceintes, caisson contre caisson compris | le lieu |
-| croisement | `2 Re Σ_c P_cE S_cE` | l'interférence entre le LFE et les LCR ; nul quand le LFE du mix ne partage rien avec les LCR | le mix (et le lieu, pour une salle donnée) |
+| Salle | `A / A0` | ce que chaque enceinte donne seule à cet endroit : modes, distance, matériaux | le placement des enceintes ou du public |
+| Enceintes | `[(LCR + LFE) / A] / [(LCR0 + LFE0) / A0]` | les interférences entre enceintes : caisson contre caisson, rappel contre l'enceinte qu'il répète, L contre R, deux jeux LCR ; face à ce que faisaient les mêmes canaux dans le mix validé | le placement, le délai, la polarité dans le lieu |
+| Mix | `[T / (LCR + LFE)] / [T0 / (LCR0 + LFE0)]` | l'interférence entre le LFE et les LCR, face au mix validé | le mix : délai, polarité, niveau, coupure du LFE |
 
-Dans le mix validé, les mêmes termes valent `S_LCR`, `S_EE` et
-`2 Re Σ_c S_cE` (chemins unité).
+Le produit des trois vaut `T / T0` (vérifié : la somme des trois écarts égale
+l'écart total à chaque place à 2·10⁻¹⁵ dB près). Au survol d'une tête :
+« grave −5,8 dB = salle −2,0 · enceintes −3,4 · mix −0,4 » : ici, c'est le
+placement des enceintes qui coince. Les couleurs de cette lentille vont du
+bleu (la cause retire du grave) au rouge (elle en ajoute), et passent au gris,
+la vue en couches s'aplatissant, à mesure que le grave du mix a moins de
+chances d'être entendu (même audibilité que la notation). Vérifications :
 
-- **Répartition** (pour placer les caissons, les rappels et les LCR) : le
-  niveau en chaque point face au mix validé, couleur de la salle et placement
-  compris : `entendu / validé`. Filtre « Tout | LCR | LFE » : `LCR / S_LCR` ou
-  `LFE / S_EE`. Un trou en « LCR » vient des LCR ou des rappels Lc/Rc, un trou
-  en « LFE » des caissons ou des rappels LFE.
-- **Interférences** (pour l'assistant mixage) : ce que fait le croisement,
-  face à ce qu'il faisait dans le mix validé :
-  `[entendu / (LCR + LFE)] / [validé / (S_LCR + S_EE)]`. Le niveau propre de
-  chaque partie s'annule : un caisson mal placé ou mal réglé, un rappel mal
-  placé n'y entrent pas. Un LFE décorrélé donne 0 dB partout (vérifié : note
-  d'interférences 100 et couches plates, caisson sous l'écran ou dans un coin
-  du fond).
+- un LFE sans rapport avec les LCR : cause « mix » nulle partout, couches
+  plates, que le caisson soit sous l'écran ou dans un coin du fond ;
+- le deuxième caisson inversé : la cause « enceintes » bouge de 1,2 dB par
+  place en moyenne, la note de placement passe de 97 à 89 ; la cause « salle »
+  ne bouge que par le nouvel étalonnage (chaque caisson seul ne dépend pas de
+  sa polarité) ;
+- déplacer un caisson laisse la partie LCR de chaque place identique ;
+  déplacer des rappels Lc/Rc change la partie LCR (jusqu'à 3,7 dB à une place)
+  et pas la partie LFE.
 
-Les deux sont notées place par place de la même façon (bande par bande, même
-tolérance, mêmes dB de doublement, même audibilité, infra compris), puis en
-note de salle avec la même règle (moyenne et pire part). Chaque carte affiche
-les deux notes ; la lentille choisie est en couleur, avec son P10 et son pire
-point. La note combinée, `1 − (1 − interférences) × (1 − w × répartition)`
-par place, avec `w` = 0,5 par défaut (réglage Dev « Couverture (Pro),
-poids »), ne sert qu'au score Room Sim Pro qui joint les salles cochées.
-Vérifications : déplacer un caisson laisse la partie LCR de chaque place
-identique ; déplacer des rappels Lc/Rc change la partie LCR (jusqu'à 3,7 dB
-à une place) et pas la partie LFE.
+Chaque enceinte seule coûte une somme sur les modes de plus par point pour les
+groupes de deux enceintes ou plus ; la préparation se répartit sur les cœurs
+du processeur (IMAX, 96 places, 11 enceintes : 1,8 s sur 4 cœurs).
+
+*Notes.* Trois notes par salle, notées place par place de la même façon (bande
+par bande, même tolérance, mêmes dB de doublement, même audibilité, infra
+compris), puis en note de salle avec la même règle (moyenne et pire part) :
+**répartition** (l'écart total au mix validé), **placement** (la cause
+« enceintes », pour l'assistant placement) et **mix** (la cause « mix », pour
+l'assistant mixage). La note qui va avec ce qui est montré est en couleur,
+avec son P10 et son pire point. La note combinée,
+`1 − (1 − mix) × (1 − w × répartition)` par place, avec `w` = 0,5 par défaut
+(réglage Dev « Couverture (Pro), poids »), ne sert qu'au score Room Sim Pro
+qui joint les salles cochées.
 
 **Étalonnage du système LFE.** Caissons et rappels LFE sont réglés ensemble,
 comme le ferait un installateur : joués ensemble, ils atteignent le niveau du
@@ -996,14 +1031,12 @@ fond face au mix validé ; avec deux rappels LFE à mi-salle sur les côtés,
 +0,4 / −1,7 dB, et la note de la salle passe de 76 à 80.
 
 **Ce que reçoit chaque tête.** Pour chaque place : le niveau du grave de 20 à
-120 Hz (dB SPL), sa sonie (phones de la bande la plus forte, ISO 226) et le
-niveau sous 40 Hz, infra compris, ressenti plus qu'entendu. La couleur de
-chaque tête suit la lentille choisie, avec la même échelle que la vue en
-couches : en répartition, son niveau face au mix validé (tout, LCR ou LFE) ;
-en interférences, ce que le croisement change. Gris : comme validé ; bleu :
-un creux ; rouge : un boost. Au survol : la note dans la lentille, le grave
-(tout, LCR seuls, LFE seul), l'interférence, ce que la tête entend et ce
-qu'elle ressent.
+120 Hz (dB SPL), sa sonie (phones de la bande la plus forte, ISO 226), pour le
+tout, les LCR seuls et le LFE seul, et le niveau sous 40 Hz, infra compris,
+ressenti plus qu'entendu. La couleur de chaque tête suit la lentille choisie :
+sa sonie (lentille 1) ou l'écart dû à la cause choisie (lentille 2). Au
+survol, sur deux lignes : la note, la sonie (tout, LCR, LFE) face à celle du
+mix, puis l'écart en dB coupé en ses trois causes et ce que la tête ressent.
 
 **Couleurs des notes.** Sur la ligne des places de chaque carte, une échelle
 à dix paliers (violet 0, magenta 40, rouge 55, orange 65 à 75, jaune 82,

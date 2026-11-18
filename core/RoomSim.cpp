@@ -454,15 +454,21 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
     r.probeChangeDb.assign ((size_t) room.probes, 0.0);
     r.probePenalty.assign ((size_t) room.probes, 0.0);
     const double nothing = std::numeric_limits<double>::quiet_NaN();
+    constexpr int numParts = RoomResult::numParts, numCauses = RoomResult::numCauses, numRatings = RoomResult::numRatings;
 
     for (auto& v : r.seatLayerDb)   v.assign ((size_t) room.seats, nothing);
     for (auto& v : r.gridLayerDb)   v.assign ((size_t) room.gridPoints, nothing);
 
-    for (auto& part : r.seatCoverageLayerDb)    for (auto& v : part) v.assign ((size_t) room.seats, nothing);
-    for (auto& part : r.gridCoverageLayerDb)    for (auto& v : part) v.assign ((size_t) room.gridPoints, nothing);
+    for (auto& cause : r.seatCauseLayerDb)      for (auto& v : cause) v.assign ((size_t) room.seats, nothing);
+    for (auto& cause : r.gridCauseLayerDb)      for (auto& v : cause) v.assign ((size_t) room.gridPoints, nothing);
+    for (auto& v : r.seatCauseDb)               v.assign ((size_t) room.seats, nothing);
     for (auto& v : r.seatPartDb)                v.assign ((size_t) room.seats, nothing);
-    for (auto& v : r.seatLensPenalty)           v.assign ((size_t) room.seats, 0.0);
-    for (auto& v : r.probeLensPenalty)          v.assign ((size_t) room.probes, 0.0);
+    for (auto& v : r.seatPhon)                  v.assign ((size_t) room.seats, 0.0);
+    for (auto& part : r.seatLayerPhon)          for (auto& v : part) v.assign ((size_t) room.seats, 0.0);
+    for (auto& part : r.gridLayerPhon)          for (auto& v : part) v.assign ((size_t) room.gridPoints, 0.0);
+    for (auto& v : r.seatRatingPenalty)         v.assign ((size_t) room.seats, 0.0);
+    for (auto& v : r.probeRatingPenalty)        v.assign ((size_t) room.probes, 0.0);
+    r.seatHeard.assign ((size_t) room.seats, 0.0);
 
     r.seatBassDb.assign ((size_t) room.seats, 0.0);
     r.seatLevelDb.clear();
@@ -482,25 +488,113 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
         return levelBand < 0 ? -100.0 : t.bandSplDb[(size_t) levelBand] + 10.0 * std::log10 ((power + 1e-60) / (approved[levelBand] + 1e-60));
     };
 
-    // Each seat (then the extra points, then the floor grid). The power heard
-    // is split in three exact parts (sum over a, b of P_ab x S_ab):
+    // Loudness level (ISO 226:2023), 0 under the threshold of hearing
+    const auto phonOf = [] (int b, double spl)
+    {
+        const double hz = PlaybackSimulator::bandCentreHz[b];
+        return spl <= PlaybackSimulator::hearingThresholdDb (hz) ? 0.0 : std::max (0.0, PlaybackSimulator::iso226Phon (hz, spl));
+    };
+
+    const auto layerOfBand = [&] (int b) { return layerOf (PlaybackSimulator::bandCentreHz[b]); };
+
+    // The infra of the mix: where it sits, and the threshold there (Moller & Pedersen 2004:
+    // 97 dB at 10 Hz, rising 11.9 dB per octave towards lower frequencies)
+    double infraThreshold = 97.0;
+    {
+        double centre = 0.0, weight = 0.0;
+
+        for (size_t i = 0; i < points.size(); ++i)
+        {
+            const double hz = a.grid[(size_t) points[i]];
+
+            if (hz < RoomResult::layerEdgesHz[1])
+            {
+                const double power = std::max (0.0, played (flat, mix[i], false));
+                centre += hz * power * std::log (hz);
+                weight += hz * power;
+            }
+        }
+
+        const double hz = weight > 0.0 ? std::exp (centre / weight) : 14.0;
+        infraThreshold = 97.0 - 11.9 * std::log2 (hz / 10.0);
+    }
+
+    const auto infraSensation = [&] (double power) { return std::max (0.0, splOfPower (power) - infraThreshold); };
+
+    // Each seat (then the extra points, then the floor grid). The power heard is
+    // split in three exact parts (sum over a, b of P_ab x S_ab):
     //   L C R: the three channels through every speaker that plays them, their
-    //          crosses with each other included (fills against the speaker they
-    //          repeat, divergence);
-    //   LFE:   the LFE through every speaker that plays it (subwoofers, LFE fills);
+    //          crosses with each other included;
+    //   LFE:   the LFE through every speaker that plays it;
     //   the cross between the LFE and L C R: 2 Re sum_c P_c,LFE S_c,LFE, zero
     //          when the mix's LFE shares nothing with L C R.
-    // Interference (lens 2) is what the cross does: the level heard against the
-    // two parts added in power, against the same ratio in the approved mix, so a
-    // speaker placed or set badly is left out. Coverage (lens 1) is the level
-    // heard against the approved mix, the room's colour and the placement
-    // included, also for each part on its own (where the L C R or the LFE goes).
+    // With every speaker alone added in power (A; at the stage, one speaker per
+    // channel: A0 = sum_a S_aa), the level against the approved mix T / T0 is
+    // cut in three causes whose product is exactly T / T0:
+    //   room     = A / A0
+    //   speakers = [(LCR + LFE) / A] / [(LCR0 + LFE0) / A0]
+    //   mix      = [T / (LCR + LFE)] / [T0 / (LCR0 + LFE0)]
     const double partFloor = 1e-6 * (approvedPowerTotal + 1e-60);
+    const bool hasAlone = room.pAlone.size() == room.p.size();
+
+    double approvedAlone[numBands] = {}, approvedAloneLayer[numLayers] = {};
+
+    for (size_t i = 0; i < points.size(); ++i)
+    {
+        const auto g = (size_t) points[i];
+        const double hz = a.grid[g], alone = mix[i][0].real() + mix[i][5].real() + mix[i][10].real() + mix[i][15].real();
+        const int b = bandOf (hz), layer = layerOf (hz);
+
+        if (layer >= 0)     approvedAloneLayer[layer] += hz * alone;
+        if (b >= 0)         approvedAlone[b] += hz * alone;
+    }
+
+    // The mix as approved on the loudness scale, and how likely it is heard at all, layer by layer
+    {
+        const double* parts[numParts] = { approved, approvedLcr, approvedLfe };
+        const double* layerParts[numParts] = { approvedLayer, approvedLcrLayer, approvedLfeLayer };
+
+        for (int part = 0; part < numParts; ++part)
+        {
+            for (int b = 0; b < numBands; ++b)
+            {
+                if (parts[part][b] <= partFloor)
+                    continue;
+
+                const double phon = phonOf (b, splAt (b, parts[part][b]));
+                r.approvedPhon[(size_t) part] = std::max (r.approvedPhon[(size_t) part], phon);
+
+                if (layerOfBand (b) >= 0)
+                    r.approvedLayerPhon[(size_t) part][(size_t) layerOfBand (b)] = std::max (r.approvedLayerPhon[(size_t) part][(size_t) layerOfBand (b)], phon);
+            }
+
+            if (layerParts[part][0] > partFloor)
+                r.approvedLayerPhon[(size_t) part][0] = infraSensation (layerParts[part][0]);
+        }
+
+        for (int b = 0; b < numBands; ++b)
+            if (approved[b] > partFloor && layerOfBand (b) >= 0)
+                r.layerHeard[(size_t) layerOfBand (b)] = std::max (r.layerHeard[(size_t) layerOfBand (b)], audible (b, t.bandSplDb[(size_t) b]));
+
+        if (room.lcrReference && approvedLayer[0] > partFloor)
+            r.layerHeard[0] = tuning.audibility ? 0.5 * std::erfc (-((splOfPower (approvedLayer[0]) - infraThreshold)
+                                                                      / std::max (tuning.thresholdSpreadDb, 0.1)) / std::sqrt (2.0))
+                                                : 1.0;
+    }
+
+    const auto causesOf = [] (double heard, double lcrLfe, double alone, double approvedHeard, double approvedLcrLfe, double approvedAloneHere,
+                              double* out)
+    {
+        out[RoomResult::roomCause] = limitedDb ((alone / (approvedAloneHere + 1e-60)));
+        out[RoomResult::speakersCause] = limitedDb ((lcrLfe / (alone + 1e-60)) / (approvedLcrLfe / (approvedAloneHere + 1e-60) + 1e-30));
+        out[RoomResult::mixCause] = limitedDb ((heard / (lcrLfe + 1e-60)) / (approvedHeard / (approvedLcrLfe + 1e-60) + 1e-30));
+    };
 
     for (int seat = 0; seat < room.seats + room.probes + room.gridPoints; ++seat)
     {
-        double actual[numBands] = {}, inPower[numBands] = {}, lcrBand[numBands] = {}, lfeBand[numBands] = {};
-        double actualLayer[numLayers] = {}, inPowerLayer[numLayers] = {}, lcrLayer[numLayers] = {}, lfeLayer[numLayers] = {}, felt = 0.0;
+        double actual[numBands] = {}, inPower[numBands] = {}, lcrBand[numBands] = {}, lfeBand[numBands] = {}, aloneBand[numBands] = {};
+        double actualLayer[numLayers] = {}, inPowerLayer[numLayers] = {}, lcrLayer[numLayers] = {}, lfeLayer[numLayers] = {};
+        double aloneLayer[numLayers] = {}, felt = 0.0;
 
         for (size_t i = 0; i < points.size(); ++i)
         {
@@ -512,11 +606,19 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
                 continue;
 
             const double hz = a.grid[g];
-            const auto& paths = room.p[(size_t) seat * points.size() + i];
+            const size_t at = (size_t) seat * points.size() + i;
+            const auto& paths = room.p[at];
             const auto& x = mix[i];
             const double lcr = played (paths, x, true);
             const double lfe = paths[15].real() * x[15].real();
             const double here = std::max (0.0, played (paths, x, false));
+            double alone = lcr + lfe;
+
+            if (hasAlone)
+            {
+                const auto& q = room.pAlone[at];
+                alone = std::max (0.0, played (q, x, true) + q[15].real() * x[15].real());
+            }
 
             if (layer >= 0)
             {
@@ -524,6 +626,7 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
                 actualLayer[layer] += hz * here;
                 lcrLayer[layer] += hz * lcr;
                 lfeLayer[layer] += hz * lfe;
+                aloneLayer[layer] += hz * alone;
             }
 
             if (hz < 40.0)
@@ -536,18 +639,39 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
             actual[b] += hz * here;
             lcrBand[b] += hz * lcr;
             lfeBand[b] += hz * lfe;
+            aloneBand[b] += hz * alone;
         }
 
-        // Each layer: the interference, and the coverage of the whole and of each part
-        double layerDb[numLayers], coverageDb[RoomResult::numParts][numLayers];
+        // Each layer: the three causes (the mix one is the interference shown before), and the loudness of each part
+        double causeDb[numCauses][numLayers], layerPhon[numParts][numLayers] = {};
 
         for (int l = 0; l < numLayers; ++l)
         {
-            const bool inMix = approvedLayerPower[l] > partFloor && inPowerLayer[l] > 0.0;
-            layerDb[l] = inMix ? limitedDb ((actualLayer[l] / inPowerLayer[l]) / (approvedLayer[l] / approvedLayerPower[l] + 1e-30)) : nothing;
-            coverageDb[RoomResult::allParts][l] = inMix && approvedLayer[l] > partFloor ? limitedDb (actualLayer[l] / approvedLayer[l]) : nothing;
-            coverageDb[RoomResult::lcrPart][l] = inMix && approvedLcrLayer[l] > partFloor ? limitedDb (lcrLayer[l] / approvedLcrLayer[l]) : nothing;
-            coverageDb[RoomResult::lfePart][l] = inMix && approvedLfeLayer[l] > partFloor ? limitedDb (lfeLayer[l] / approvedLfeLayer[l]) : nothing;
+            const bool inMix = approvedLayerPower[l] > partFloor && inPowerLayer[l] > 0.0 && aloneLayer[l] > 0.0;
+            double c[numCauses] = { nothing, nothing, nothing };
+
+            if (inMix)
+                causesOf (actualLayer[l], inPowerLayer[l], aloneLayer[l], approvedLayer[l], approvedLayerPower[l], approvedAloneLayer[l], c);
+
+            for (int k = 0; k < numCauses; ++k)
+                causeDb[k][l] = c[k];
+        }
+
+        {
+            const double* parts[numParts] = { actual, lcrBand, lfeBand };
+            const double* approvedParts[numParts] = { approved, approvedLcr, approvedLfe };
+            const double* layerParts[numParts] = { actualLayer, lcrLayer, lfeLayer };
+            const double* approvedLayerParts[numParts] = { approvedLayer, approvedLcrLayer, approvedLfeLayer };
+
+            for (int part = 0; part < numParts; ++part)
+            {
+                for (int b = 0; b < numBands; ++b)
+                    if (approvedParts[part][b] > partFloor && layerOfBand (b) >= 0)
+                        layerPhon[part][layerOfBand (b)] = std::max (layerPhon[part][layerOfBand (b)], phonOf (b, splAt (b, std::max (0.0, parts[part][b]))));
+
+                if (approvedLayerParts[part][0] > partFloor)
+                    layerPhon[part][0] = infraSensation (std::max (0.0, layerParts[part][0]));
+            }
         }
 
         if (seat >= room.seats + room.probes)
@@ -556,60 +680,47 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
 
             for (int l = 0; l < numLayers; ++l)
             {
-                r.gridLayerDb[(size_t) l][k] = layerDb[l];
+                r.gridLayerDb[(size_t) l][k] = causeDb[RoomResult::mixCause][l];
 
-                for (int part = 0; part < RoomResult::numParts; ++part)
-                    r.gridCoverageLayerDb[(size_t) part][(size_t) l][k] = coverageDb[part][l];
+                for (int c = 0; c < numCauses; ++c)
+                    r.gridCauseLayerDb[(size_t) c][(size_t) l][k] = causeDb[c][l];
+
+                for (int part = 0; part < numParts; ++part)
+                    r.gridLayerPhon[(size_t) part][(size_t) l][k] = layerPhon[part][l];
             }
 
             continue;
         }
 
         // Room Sim Pro: the infra (under 20 Hz) is rated too, with the threshold
-        // proposed by Moller & Pedersen (2004) below 20 Hz: 97 dB at 10 Hz,
-        // rising 11.9 dB per octave towards lower frequencies (about 97 dB(G),
-        // ISO 7196). The dB that double the loudness are taken from ISO 226 at
-        // 20 Hz, the lowest standardised: infra is more compressed still, so this
-        // counts an infra change at least as much as one at 20 Hz.
-        double infraWeight = 0.0, infraRated = 0.0, infraCoverage = 0.0, infraHeard = 0.0;
+        // proposed by Moller & Pedersen (2004) below 20 Hz. The dB that double the
+        // loudness are taken from ISO 226 at 20 Hz, the lowest standardised: infra
+        // is more compressed still, so this counts an infra change at least as
+        // much as one at 20 Hz.
+        double infraWeight = 0.0, infraHeard = 0.0, infraRated[numRatings] = {};
 
-        if (room.lcrReference && approvedLayerPower[0] > partFloor && inPowerLayer[0] > 0.0)
+        if (room.lcrReference && approvedLayerPower[0] > partFloor && inPowerLayer[0] > 0.0 && aloneLayer[0] > 0.0)
         {
-            double centre = 0.0, weight = 0.0;
-
-            for (size_t i = 0; i < points.size(); ++i)
-            {
-                const double hz = a.grid[(size_t) points[i]];
-
-                if (hz < RoomResult::layerEdgesHz[1])
-                {
-                    const double power = std::max (0.0, played (flat, mix[i], false));
-                    centre += hz * power * std::log (hz);
-                    weight += hz * power;
-                }
-            }
-
-            const double hz = weight > 0.0 ? std::exp (centre / weight) : 14.0;      // where the infra of the mix sits
-            const double threshold = 97.0 - 11.9 * std::log2 (hz / 10.0);
             const double approvedHere = inPowerLayer[0] * approvedLayer[0] / approvedLayerPower[0];
             const double spl = splOfPower (std::max (approvedHere, actualLayer[0]));
-            infraHeard = tuning.audibility ? 0.5 * std::erfc (-((spl - threshold) / std::max (tuning.thresholdSpreadDb, 0.1)) / std::sqrt (2.0)) : 1.0;
+            infraHeard = tuning.audibility ? 0.5 * std::erfc (-((spl - infraThreshold) / std::max (tuning.thresholdSpreadDb, 0.1)) / std::sqrt (2.0)) : 1.0;
 
             const double doubling = PlaybackSimulator::iso226Spl (20.0, 30.0) - PlaybackSimulator::iso226Spl (20.0, 20.0);
             const double allowed = std::min (toleranceDb, doubling - 0.5);
-            const double change = limitedDb ((actualLayer[0] / inPowerLayer[0]) / (approvedLayer[0] / approvedLayerPower[0] + 1e-30));
-            const double level = limitedDb (actualLayer[0] / (approvedLayer[0] + 1e-60));
-            infraRated = std::clamp ((std::abs (change) - allowed) / (doubling - allowed), 0.0, 1.0);
-            infraCoverage = std::clamp ((std::abs (level) - allowed) / (doubling - allowed), 0.0, 1.0);
+            const auto rateDb = [&] (double db) { return std::clamp ((std::abs (db) - allowed) / (doubling - allowed), 0.0, 1.0); };
+            infraRated[RoomResult::coverageRating] = rateDb (limitedDb (actualLayer[0] / (approvedLayer[0] + 1e-60)));
+            infraRated[RoomResult::speakersRating] = rateDb (causeDb[RoomResult::speakersCause][0]);
+            infraRated[RoomResult::mixRating] = rateDb (causeDb[RoomResult::mixCause][0]);
             infraWeight = approvedHere * infraHeard;
         }
 
-        // What the interference adds at this seat, against what it added in the
-        // approved mix; and how far the level is from the approved mix. Both
-        // judged the same way: audibility and loudness at the level the bass has
-        // at this seat, room peaks and dips included.
-        double weights[numBands] = {}, rated[numBands] = {}, covered[numBands] = {}, weightTotal = 0.0, heardAtAll = 0.0;
-        double totalActual = 0.0, totalPower = 0.0, totalLcr = 0.0, totalLfe = 0.0, approvedLcrTotal = 0.0, approvedLfeTotal = 0.0;
+        // Each band, against the approved mix: the whole level (coverage), the
+        // interference between speakers and the one the mix makes; all judged the
+        // same way, audibility and loudness at the level the bass has at this
+        // seat, room peaks and dips included.
+        double weights[numBands] = {}, rated[numRatings][numBands] = {}, weightTotal = 0.0, heardAtAll = 0.0;
+        double totalActual = 0.0, totalPower = 0.0, totalLcr = 0.0, totalLfe = 0.0, totalAlone = 0.0;
+        double approvedLcrTotal = 0.0, approvedLfeTotal = 0.0, approvedAloneTotal = 0.0;
 
         for (int b = 0; b < numBands; ++b)
         {
@@ -617,42 +728,45 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
             totalPower += inPower[b];
             totalLcr += lcrBand[b];
             totalLfe += lfeBand[b];
+            totalAlone += aloneBand[b];
             approvedLcrTotal += approvedLcr[b];
             approvedLfeTotal += approvedLfe[b];
+            approvedAloneTotal += approvedAlone[b];
 
-            if (inPower[b] <= 0.0 || approvedPower[b] <= 0.0)
+            if (inPower[b] <= 0.0 || approvedPower[b] <= 0.0 || aloneBand[b] <= 0.0)
                 continue;
 
+            double c[numCauses];
+            causesOf (actual[b], inPower[b], aloneBand[b], approved[b], approvedPower[b], approvedAlone[b], c);
             const double approvedHere = inPower[b] * approved[b] / approvedPower[b];     // this seat, with the approved mix's interference
-            const double change = limitedDb ((actual[b] / inPower[b]) / (approved[b] / approvedPower[b] + 1e-30));
             const double spl = splAt (b, std::max (approvedHere, actual[b]));
             const double heard = audible (b, spl);
             const double doubling = doublingAt (b, spl);
             const double allowed = std::min (toleranceDb, doubling - 0.5);
+            const auto rateDb = [&] (double db) { return std::clamp ((std::abs (db) - allowed) / (doubling - allowed), 0.0, 1.0); };
 
-            rated[b] = std::clamp ((std::abs (change) - allowed) / (doubling - allowed), 0.0, 1.0);
-
-            const double level = limitedDb (actual[b] / (approved[b] + 1e-60));
-            covered[b] = std::clamp ((std::abs (level) - allowed) / (doubling - allowed), 0.0, 1.0);
+            rated[RoomResult::coverageRating][b] = rateDb (limitedDb (actual[b] / (approved[b] + 1e-60)));
+            rated[RoomResult::speakersRating][b] = rateDb (c[RoomResult::speakersCause]);
+            rated[RoomResult::mixRating][b] = rateDb (c[RoomResult::mixCause]);
             weights[b] = approvedHere * heard;
             weightTotal += weights[b];
             heardAtAll = std::max (heardAtAll, heard);
         }
 
-        double interference = 0.0, coverage = 0.0;
+        double penalties[numRatings] = {};
         weightTotal += infraWeight;
         heardAtAll = std::max (heardAtAll, infraHeard);
 
-        for (int b = 0; b < numBands; ++b)
+        for (int k = 0; k < numRatings; ++k)
         {
-            interference += weights[b] / (weightTotal + 1e-60) * rated[b];
-            coverage += weights[b] / (weightTotal + 1e-60) * covered[b];
+            for (int b = 0; b < numBands; ++b)
+                penalties[k] += weights[b] / (weightTotal + 1e-60) * rated[k][b];
+
+            penalties[k] = std::min (1.0, penalties[k] + infraWeight / (weightTotal + 1e-60) * infraRated[k]);
         }
 
-        interference = std::min (1.0, interference + infraWeight / (weightTotal + 1e-60) * infraRated);
-        coverage = std::min (1.0, coverage + infraWeight / (weightTotal + 1e-60) * infraCoverage);
-
-        // Room Sim: the interference only. Room Sim Pro: both, as two risks
+        // Room Sim: the interference only. Room Sim Pro: the interference and the coverage, as two risks
+        const double interference = penalties[RoomResult::mixRating], coverage = penalties[RoomResult::coverageRating];
         const double penalty = room.lcrReference ? 1.0 - (1.0 - interference) * (1.0 - std::clamp (tuning.coverageWeight, 0.0, 1.0) * coverage)
                                                  : interference;
         const double seatPenalty = std::min (penalty, 1.0) * heardAtAll;
@@ -664,18 +778,40 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
             const auto k = (size_t) seat;
             r.seatPenalty[k] = seatPenalty;
             r.seatChangeDb[k] = seatChange;
-            r.seatLensPenalty[RoomResult::coverageLens][k] = coverage * heardAtAll;
-            r.seatLensPenalty[RoomResult::interferenceLens][k] = interference * heardAtAll;
+            r.seatHeard[k] = heardAtAll;
+
+            for (int q = 0; q < numRatings; ++q)
+                r.seatRatingPenalty[(size_t) q][k] = penalties[q] * heardAtAll;
 
             for (int l = 0; l < numLayers; ++l)
             {
-                r.seatLayerDb[(size_t) l][k] = layerDb[l];
+                r.seatLayerDb[(size_t) l][k] = causeDb[RoomResult::mixCause][l];
 
-                for (int part = 0; part < RoomResult::numParts; ++part)
-                    r.seatCoverageLayerDb[(size_t) part][(size_t) l][k] = coverageDb[part][l];
+                for (int c = 0; c < numCauses; ++c)
+                    r.seatCauseLayerDb[(size_t) c][(size_t) l][k] = causeDb[c][l];
+
+                for (int part = 0; part < numParts; ++part)
+                    r.seatLayerPhon[(size_t) part][(size_t) l][k] = layerPhon[part][l];
             }
 
-            // What reaches this head: level, loudness of its loudest band, level under 40 Hz
+            if (totalPower > 0.0 && totalAlone > 0.0)
+            {
+                double c[numCauses];
+                causesOf (totalActual, totalPower, totalAlone, approvedTotal, approvedPowerTotal, approvedAloneTotal, c);
+
+                for (int q = 0; q < numCauses; ++q)
+                    r.seatCauseDb[(size_t) q][k] = c[q];
+            }
+
+            // What reaches this head: level, loudness of its loudest band (for each part), level under 40 Hz
+            const double* parts[numParts] = { actual, lcrBand, lfeBand };
+            const double* approvedParts[numParts] = { approved, approvedLcr, approvedLfe };
+
+            for (int part = 0; part < numParts; ++part)
+                for (int b = 0; b < numBands; ++b)
+                    if (approvedParts[part][b] > partFloor)
+                        r.seatPhon[(size_t) part][k] = std::max (r.seatPhon[(size_t) part][k], phonOf (b, splAt (b, std::max (0.0, parts[part][b]))));
+
             double phon = -100.0;
 
             for (int b = 0; b < numBands; ++b)
@@ -695,8 +831,9 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
             const auto k = (size_t) (seat - room.seats);
             r.probePenalty[k] = seatPenalty;
             r.probeChangeDb[k] = seatChange;
-            r.probeLensPenalty[RoomResult::coverageLens][k] = coverage * heardAtAll;
-            r.probeLensPenalty[RoomResult::interferenceLens][k] = interference * heardAtAll;
+
+            for (int q = 0; q < numRatings; ++q)
+                r.probeRatingPenalty[(size_t) q][k] = penalties[q] * heardAtAll;
         }
     }
 
@@ -707,11 +844,11 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
     const auto worstOf = [] (const std::vector<double>& seatPenalties, const std::vector<double>& probePenalties,
                              double& p10, double& worstPoint, int& worstProbe)
     {
-        auto penalties = seatPenalties;
-        std::sort (penalties.begin(), penalties.end(), std::greater<double>());
-        const size_t at = std::min (penalties.size() - 1, (size_t) std::floor (0.1 * (double) penalties.size()));
-        p10 = 100.0 * (1.0 - penalties[at]);
-        worstPoint = 100.0 * (1.0 - penalties.front());
+        auto sortedPenalties = seatPenalties;
+        std::sort (sortedPenalties.begin(), sortedPenalties.end(), std::greater<double>());
+        const size_t at = std::min (sortedPenalties.size() - 1, (size_t) std::floor (0.1 * (double) sortedPenalties.size()));
+        p10 = 100.0 * (1.0 - sortedPenalties[at]);
+        worstPoint = 100.0 * (1.0 - sortedPenalties.front());
         worstProbe = -1;
 
         for (size_t k = 0; k < probePenalties.size(); ++k)
@@ -724,11 +861,11 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
 
     worstOf (r.seatPenalty, r.probePenalty, r.p10Score, r.worstPointScore, r.worstProbe);
 
-    for (int lens = 0; lens < RoomResult::numLenses; ++lens)
+    for (int q = 0; q < numRatings; ++q)
     {
-        worstOf (r.seatLensPenalty[(size_t) lens], r.probeLensPenalty[(size_t) lens], r.lensP10[(size_t) lens],
-                 r.lensWorstPointScore[(size_t) lens], r.lensWorstProbe[(size_t) lens]);
-        r.lensScore[(size_t) lens] = roomScoreOf (r.seatLensPenalty[(size_t) lens], tuning);
+        worstOf (r.seatRatingPenalty[(size_t) q], r.probeRatingPenalty[(size_t) q], r.ratingP10[(size_t) q],
+                 r.ratingWorstPointScore[(size_t) q], r.ratingWorstProbe[(size_t) q]);
+        r.ratingScore[(size_t) q] = roomScoreOf (r.seatRatingPenalty[(size_t) q], tuning);
     }
 
     auto sorted = r.seatChangeDb;

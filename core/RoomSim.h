@@ -89,24 +89,52 @@ struct RoomResult
     std::vector<double> seatLevelDb;            // the bass level at the seat against the approved mix, 20-120 Hz (coverage)
     double combinedScore = 100.0;                         // bass robustness x room score / 100
 
-    // Two lenses on a room (Room Sim Pro shows them apart; the room score above
-    // joins them). Coverage: where the bass goes, the level against the approved
-    // mix, room and placement included: for the venue. Interference: what the
-    // cross between the LFE and L C R does, against what it did in the approved
-    // mix, every speaker's own level and place left out: for the mix.
-    enum Lens { coverageLens, interferenceLens, numLenses };
-    std::array<std::vector<double>, numLenses> seatLensPenalty, probeLensPenalty;   // 0..1
-    std::array<double, numLenses> lensScore { { 100.0, 100.0 } }, lensP10 { { 100.0, 100.0 } }, lensWorstPointScore { { 100.0, 100.0 } };
-    std::array<int, numLenses> lensWorstProbe { { -1, -1 } };
+    // Room Sim Pro shows a room through two lenses.
+    //
+    // 1. Who gets bass, and how much: the loudness of the bass at every head and
+    //    grid point (phon, ISO 226), on the same scale as the mix as approved;
+    //    for all of it, L C R alone or the LFE alone.
+    //
+    // 2. Why: the change of level against the approved mix, cut in three causes
+    //    whose dB add up exactly to the whole change:
+    //      room:     what each speaker gives there on its own (modes, distance,
+    //                materials), speakers added in power;
+    //      speakers: the interference between speakers (subwoofer against
+    //                subwoofer, fill against the speaker it repeats, L against R,
+    //                two L C R sets), against what the same channels did in the
+    //                approved mix; for the venue (placement, delay, polarity);
+    //      mix:      the cross between the LFE and L C R against the approved
+    //                mix (seatLayerDb and gridLayerDb above); for the mix.
+    //
+    // Scores: coverage (the whole level against the approved mix), speakers and
+    // mix, each rated seat by seat as the room score.
+    enum Lens { coverageLens, causesLens, numLenses };
+    enum Cause { roomCause, speakersCause, mixCause, numCauses };
+    enum Rating { coverageRating, speakersRating, mixRating, numRatings };
+    std::array<std::vector<double>, numRatings> seatRatingPenalty, probeRatingPenalty;     // 0..1
+    std::array<double, numRatings> ratingScore { { 100.0, 100.0, 100.0 } }, ratingP10 { { 100.0, 100.0, 100.0 } },
+                                   ratingWorstPointScore { { 100.0, 100.0, 100.0 } };
+    std::array<int, numRatings> ratingWorstProbe { { -1, -1, -1 } };
+    std::array<std::vector<double>, numCauses> seatCauseDb;                                 // 20-120 Hz
+    std::array<std::array<std::vector<double>, numLayers>, numCauses> seatCauseLayerDb, gridCauseLayerDb;
 
     // The bass split in its parts: all of it, L C R alone (every speaker playing
-    // them), the LFE alone (subwoofers, LFE fills). The level of each against the
-    // same part in the approved mix, 20-120 Hz per seat and per layer on the seats
-    // and the grid (seatLayerDb and gridLayerDb above are the interference).
-    // NaN where the mix has nothing of that part.
+    // them), the LFE alone (subwoofers, LFE fills). Level of each against the same
+    // part in the approved mix (dB, 20-120 Hz; NaN where the mix has none of it).
     enum Part { allParts, lcrPart, lfePart, numParts };
     std::array<std::vector<double>, numParts> seatPartDb;
-    std::array<std::array<std::vector<double>, numLayers>, numParts> seatCoverageLayerDb, gridCoverageLayerDb;
+
+    // Loudness of the bass, for each part: in phon (ISO 226:2023), the loudest
+    // band, 0 under the threshold of hearing; for the infra layer, the dB above
+    // the threshold of Moller & Pedersen (2004). The mix as approved on the same
+    // scale. heard: how likely the mix's bass is heard at all, 0..1 (per layer,
+    // and per seat for the whole 20-120 Hz).
+    std::array<std::vector<double>, numParts> seatPhon;
+    std::array<std::array<std::vector<double>, numLayers>, numParts> seatLayerPhon, gridLayerPhon;
+    std::array<double, numParts> approvedPhon {};
+    std::array<std::array<double, numLayers>, numParts> approvedLayerPhon {};
+    std::array<double, numLayers> layerHeard {};
+    std::vector<double> seatHeard;
 };
 
 /** A room's calibrated paths, per seat and grid point, as averages over the band of that point.
@@ -138,6 +166,12 @@ struct RoomPaths
     // Room Sim Pro: the room as set up normally (no level offsets), calibrated:
     // used to place the extra points. Empty in Room Sim.
     std::vector<ChannelMatrix> pRef;
+
+    // Room Sim Pro: every speaker alone, added in power (each speaker plays its
+    // channels, but no two speakers interfere), same layout as p. What the room
+    // and the distance give each speaker, without the interference between
+    // speakers. Empty in Room Sim (one speaker per channel: the same as p).
+    std::vector<ChannelMatrix> pAlone;
 
     // false (Room Sim): the room score is the interference between L C R and
     // the LFE only; the colour each path gets from the room is left out.

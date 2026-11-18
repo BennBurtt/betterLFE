@@ -346,6 +346,38 @@ namespace
             { "Heads: the bass they get against the approved mix", "Têtes : le grave reçu face au mix validé" },
             { "Heads: the interference against the approved mix", "Têtes : l'interférence face au mix validé" },
             { "Coverage", "Répartition" }, { "Interference", "Interférences" }, { "interference ", "interférence " },
+            { "Who gets bass, how much", "Qui a du grave, et combien" }, { "Why", "Pourquoi" },
+            { "How loud the bass is at every head and point (phon, ISO 226), on the same scale as the mix as approved, "
+              "the room and the placement of every speaker included. A mix with little bass shows little everywhere.",
+              "La sonie du grave à chaque tête et en chaque point (phones, ISO 226), sur la même échelle que le mix validé, "
+              "salle et placement de chaque enceinte compris. Un mix avec peu de grave en montre peu partout." },
+            { "Why the bass changes against the approved mix, cut in three causes that add up: the room (what each speaker "
+              "gives there on its own), the speakers (their interference: placement, delay, polarity) and the mix (the LFE "
+              "against L C R). Grey where the mix's bass is not heard.",
+              "Pourquoi le grave change face au mix validé, en trois causes qui s'additionnent : la salle (ce que chaque enceinte "
+              "donne seule à cet endroit), les enceintes (leurs interférences : placement, délai, polarité) et le mix (le LFE "
+              "contre les LCR). Gris là où le grave du mix ne s'entend pas." },
+            { "Speakers", "Enceintes" }, { "Mix", "Mix" }, { "Placement", "Placement" },
+            { "What each speaker gives there on its own: modes, distance, materials. Placing the speakers or the audience changes it.",
+              "Ce que chaque enceinte donne seule à cet endroit : modes, distance, matériaux. Le placement des enceintes ou du public le change." },
+            { "The interference between speakers: subwoofer against subwoofer, fill against the speaker it repeats, L against R, "
+              "two L C R sets. Placement, delay and polarity in the venue change it.",
+              "Les interférences entre enceintes : caisson contre caisson, rappel contre l'enceinte qu'il répète, L contre R, "
+              "deux jeux LCR. Le placement, le délai et la polarité dans le lieu le changent." },
+            { "The interference between the LFE and L C R that the mix makes, against the approved mix. The LFE's delay, "
+              "polarity, level and low-pass in the mix change it.",
+              "L'interférence entre le LFE et les LCR que crée le mix, face au mix validé. Le délai, la polarité, le niveau et "
+              "le filtre passe-bas du LFE dans le mix la changent." },
+            { "the room", "la salle" }, { "the speakers", "les enceintes" }, { "the mix", "le mix" },
+            { "Heads: how loud their bass is (phon)", "Têtes : la sonie de leur grave (phones)" },
+            { "Heads: the change caused by the room, against the approved mix", "Têtes : l'écart dû à la salle, face au mix validé" },
+            { "Heads: the change caused by the speakers, against the approved mix", "Têtes : l'écart dû aux enceintes, face au mix validé" },
+            { "Heads: the change caused by the mix, against the approved mix", "Têtes : l'écart dû au mix, face au mix validé" },
+            { "Loudness of the bass (phon; infra: dB above the threshold)", "Sonie du grave (phones ; infra : dB au-dessus du seuil)" },
+            { "What changes the bass against the approved mix: ", "Ce qui change le grave face au mix validé : " },
+            { " dB SL", " dB au-dessus du seuil" }, { "mix ", "mix " }, { " phon (mix ", " phones (mix " }, { "speakers ", "enceintes " },
+            { "Neutral plane: the mix's own loudness", "Plan neutre : la sonie du mix lui-même" },
+            { "Grey and flat where the mix's bass is not heard", "Gris et plat là où le grave du mix ne s'entend pas" },
             { "all of it", "tout" },
             { "Where the bass goes, against the approved mix", "Répartition du grave face au mix validé" },
             { "Interference between the LFE and L C R, against the approved mix", "Interférence entre le LFE et les LCR, face au mix validé" },
