@@ -1744,7 +1744,7 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
     RoomPaths paths;
     paths.spec = { r.name, r.name, r.length, r.width, r.height, r.rt60At (63.0) };
     paths.lcrReference = true;
-    paths.points = RoomSimulator::bandPoints (grid);
+    paths.points = RoomSimulator::bandPoints (grid, RoomResult::layerEdgesHz[0]);     // from 10 Hz: the infra layer of the layered view
     const auto seats = r.seatPositions();
     paths.seats = (int) seats.size();
     const auto modes = modesOf (r, highestModeHz);
@@ -1905,6 +1905,9 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
         {
             const double hz = grid[(size_t) paths.points[i]];
 
+            if (hz < RoomSimulator::bandLoHz)
+                continue;       // calibrated over 20-120 Hz, as before; the infra points are only shown
+
             for (int g = 0; g < ng; ++g)
                 mean[g] += hz * nominal[(size_t) seat * n + i][(size_t) (g * ng + g)].real();
 
@@ -2025,6 +2028,45 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
             paths.probes = (int) probes.size();
             paths.probePositions = probes;
         }
+    }
+
+    // A regular grid over the floor at ear height, for the layered view: 12
+    // points along the longer side, in proportion across the other
+    {
+        const double longer = std::max (r.length, r.width);
+        const int columns = std::clamp ((int) std::lround (12.0 * r.length / longer), 4, 12);
+        const int rows = std::clamp ((int) std::lround (12.0 * r.width / longer), 4, 12);
+        std::vector<Point> nodes;
+        paths.gridIndex.assign ((size_t) (columns * rows), -1);
+
+        for (int row = 0; row < rows; ++row)
+            for (int column = 0; column < columns; ++column)
+            {
+                const double x = r.length * (column + 0.5) / columns, y = r.width * (row + 0.5) / rows;
+
+                if (! r.isInside (x, y))
+                    continue;
+
+                paths.gridIndex[(size_t) (row * columns + column)] = (int) nodes.size();
+                nodes.push_back (r.keptInside ({ x, y, r.earHeight }));
+            }
+
+        if (! nodes.empty())
+        {
+            std::vector<GroupMatrix> gridActual, gridNominal;
+            computeGroups (nodes, gridActual, gridNominal);
+
+            for (size_t i = 0; i < gridActual.size(); ++i)
+            {
+                paths.p.push_back (toChannels (gridActual[i]));
+                paths.pRef.push_back (toChannels (gridNominal[i]));
+            }
+        }
+
+        paths.gridPoints = (int) nodes.size();
+        paths.gridColumns = columns;
+        paths.gridRows = rows;
+        paths.gridPositions = nodes;
     }
 
     return paths;

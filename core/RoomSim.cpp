@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <limits>
 
 namespace subguard
 {
@@ -154,12 +155,12 @@ void RoomPaths::accumulate (ChannelMatrix& m, const std::array<cd, numChannels>&
             m[(size_t) (a * numChannels + b)] += weight * h[(size_t) a] * std::conj (h[(size_t) b]);
 }
 
-std::vector<int> RoomSimulator::bandPoints (const std::vector<double>& grid)
+std::vector<int> RoomSimulator::bandPoints (const std::vector<double>& grid, double lowHz)
 {
     std::vector<int> points;
 
     for (size_t g = 0; g < grid.size(); ++g)
-        if (grid[g] >= bandLoHz && grid[g] < bandHiHz)
+        if (grid[g] >= lowHz && grid[g] < bandHiHz)
             points.push_back ((int) g);
 
     return points;
@@ -328,7 +329,7 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
         return -1;
     };
 
-    if (m.cLC.size() != a.grid.size() || room.p.size() != (size_t) (room.seats + room.probes) * points.size())
+    if (m.cLC.size() != a.grid.size() || room.p.size() != (size_t) (room.seats + room.probes + room.gridPoints) * points.size())
         return r;
 
     // The mix's cross-spectral matrix (L, C, R, LFE) at each band point, the
@@ -381,11 +382,29 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
 
     // The mix as approved, per band: as heard (all crosses) and with the LFE added in power
     double approved[numBands] = {}, approvedPower[numBands] = {};
+    constexpr int numLayers = RoomResult::numLayers;
+    double approvedLayer[numLayers] = {}, approvedLayerPower[numLayers] = {};
+
+    const auto layerOf = [] (double hz)
+    {
+        for (int l = 0; l < numLayers; ++l)
+            if (hz >= RoomResult::layerEdgesHz[l] && hz < RoomResult::layerEdgesHz[l + 1])
+                return l;
+
+        return -1;
+    };
 
     for (size_t i = 0; i < points.size(); ++i)
     {
         const auto g = (size_t) points[i];
         const int b = bandOf (a.grid[g]);
+        const int layer = layerOf (a.grid[g]);
+
+        if (layer >= 0)
+        {
+            approvedLayerPower[layer] += a.grid[g] * (played (flat, mix[i], true) + mix[i][15].real());
+            approvedLayer[layer] += a.grid[g] * std::max (0.0, played (flat, mix[i], false));
+        }
 
         if (b < 0)
             continue;
@@ -426,17 +445,40 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
     r.seatPenalty.assign ((size_t) room.seats, 0.0);
     r.probeChangeDb.assign ((size_t) room.probes, 0.0);
     r.probePenalty.assign ((size_t) room.probes, 0.0);
+    const double nothing = std::numeric_limits<double>::quiet_NaN();
 
-    for (int seat = 0; seat < room.seats + room.probes; ++seat)
+    for (auto& v : r.seatLayerDb)   v.assign ((size_t) room.seats, nothing);
+    for (auto& v : r.gridLayerDb)   v.assign ((size_t) room.gridPoints, nothing);
+
+    r.seatBassDb.assign ((size_t) room.seats, 0.0);
+    r.seatHeardPhon.assign ((size_t) room.seats, 0.0);
+    r.seatFeltDb.assign ((size_t) room.seats, 0.0);
+
+    // Sound pressure level of any power in the same units (the grid being
+    // logarithmic, hz-weighted sums are proportional to the power over the band)
+    int levelBand = -1;
+
+    for (int b = 0; b < numBands; ++b)
+        if (approved[b] > 0.0 && (levelBand < 0 || approved[b] > approved[levelBand]))
+            levelBand = b;
+
+    const auto splOfPower = [&] (double power)
+    {
+        return levelBand < 0 ? -100.0 : t.bandSplDb[(size_t) levelBand] + 10.0 * std::log10 ((power + 1e-60) / (approved[levelBand] + 1e-60));
+    };
+
+    for (int seat = 0; seat < room.seats + room.probes + room.gridPoints; ++seat)
     {
         double actual[numBands] = {}, inPower[numBands] = {};
+        double actualLayer[numLayers] = {}, inPowerLayer[numLayers] = {}, felt = 0.0;
 
         for (size_t i = 0; i < points.size(); ++i)
         {
             const auto g = (size_t) points[i];
             const int b = bandOf (a.grid[g]);
+            const int layer = layerOf (a.grid[g]);
 
-            if (b < 0)
+            if (b < 0 && layer < 0)
                 continue;
 
             const double hz = a.grid[g];
@@ -462,8 +504,38 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
                 lfePart = x[15].real() * (total > 1e-30 ? share / total : screenMean);
             }
 
+            const double here = std::max (0.0, played (paths, x, false));
+
+            if (layer >= 0)
+            {
+                inPowerLayer[layer] += hz * (screenPart + lfePart);
+                actualLayer[layer] += hz * here;
+            }
+
+            if (hz < 40.0)
+                felt += hz * here;
+
+            if (b < 0)
+                continue;
+
             inPower[b] += hz * (screenPart + lfePart);
-            actual[b] += hz * std::max (0.0, played (paths, x, false));
+            actual[b] += hz * here;
+        }
+
+        // Each layer against the stage, where the mix has something in it
+        double layerDb[numLayers];
+
+        for (int l = 0; l < numLayers; ++l)
+            layerDb[l] = approvedLayerPower[l] > 1e-6 * (approvedPowerTotal + 1e-60) && inPowerLayer[l] > 0.0
+                           ? limitedDb ((actualLayer[l] / inPowerLayer[l]) / (approvedLayer[l] / approvedLayerPower[l] + 1e-30))
+                           : nothing;
+
+        if (seat >= room.seats + room.probes)
+        {
+            for (int l = 0; l < numLayers; ++l)
+                r.gridLayerDb[(size_t) l][(size_t) (seat - room.seats - room.probes)] = layerDb[l];
+
+            continue;
         }
 
         // What the interaction adds at this seat, against what it added on the
@@ -507,6 +579,20 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
         {
             r.seatPenalty[(size_t) seat] = seatPenalty;
             r.seatChangeDb[(size_t) seat] = seatChange;
+
+            for (int l = 0; l < numLayers; ++l)
+                r.seatLayerDb[(size_t) l][(size_t) seat] = layerDb[l];
+
+            // What reaches this head: level, loudness of its loudest band, level under 40 Hz
+            double phon = -100.0;
+
+            for (int b = 0; b < numBands; ++b)
+                if (actual[b] > 0.0 && approved[b] > 0.0)
+                    phon = std::max (phon, PlaybackSimulator::iso226Phon (PlaybackSimulator::bandCentreHz[b], splAt (b, actual[b])));
+
+            r.seatBassDb[(size_t) seat] = splOfPower (totalActual);
+            r.seatHeardPhon[(size_t) seat] = phon;
+            r.seatFeltDb[(size_t) seat] = splOfPower (felt);
         }
         else
         {

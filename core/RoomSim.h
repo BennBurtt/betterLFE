@@ -73,6 +73,19 @@ struct RoomResult
     std::vector<double> probePenalty, probeChangeDb;      // Pro: extra points around the riskiest seats (not in the room score)
     double worstPointScore = 100.0;                       // the lowest score found, seats and extra points together
     int worstProbe = -1;                                  // the extra point that scored lowest, if one did below every seat
+
+    // Three layers of the bass, for the layered view: infra (under 20 Hz, ISO 7196;
+    // not in the score), very low (20-60 Hz) and low (60-120 Hz, up to the LFE's
+    // upper limit). The change of each against the approved mix, in dB; NaN where
+    // the mix has nothing in that layer.
+    static constexpr int numLayers = 3;
+    static constexpr double layerEdgesHz[numLayers + 1] = { 10.0, 20.0, 60.0, 120.0 };
+    std::array<std::vector<double>, numLayers> seatLayerDb, gridLayerDb;
+
+    // What each seat receives of the bass: its level 20-120 Hz (dB SPL), its
+    // loudness (phon, the loudest band, ISO 226), and what is felt more than
+    // heard: the level under 40 Hz, infra included (dB SPL)
+    std::vector<double> seatBassDb, seatHeardPhon, seatFeltDb;
     double combinedScore = 100.0;                         // bass robustness x room score / 100
 };
 
@@ -94,6 +107,13 @@ struct RoomPaths
     // than the seats themselves. Rated, shown, not in the room score.
     int probes = 0;
     std::vector<std::array<double, 3>> probePositions;
+
+    // Room Sim Pro: a regular grid over the floor at ear height, for the layered
+    // view (after the probes). gridIndex [row * gridColumns + column] gives the
+    // point, -1 where the grid falls off the floor.
+    int gridPoints = 0, gridColumns = 0, gridRows = 0;
+    std::vector<int> gridIndex;
+    std::vector<std::array<double, 3>> gridPositions;
 
     // The room as set up normally (no level offsets), calibrated: what each seat
     // is measured against, so that the room's own colour is left out but a
@@ -144,7 +164,7 @@ public:
     static void applyToScore (Translation&, const RoomSimResult&, const std::vector<bool>& selected, double levelDependenceWeight);
 
     /** Grid indices the rooms are computed on (20-120 Hz). */
-    static std::vector<int> bandPoints (const std::vector<double>& grid);
+    static std::vector<int> bandPoints (const std::vector<double>& grid, double lowHz = bandLoHz);
 
     /** Calibration: scales the screen and LFE paths so that their level, averaged over the given seats
         (all when empty), equals the stage's. */

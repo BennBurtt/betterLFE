@@ -33,7 +33,7 @@ juce::Colour Room3DView::seatColour (double score)
     struct Stop { double score; juce::uint32 argb; };
     static const Stop stops[] = { { 0.0, 0xff5a1a8a }, { 40.0, 0xffa8227a }, { 55.0, 0xffe02c3c }, { 65.0, 0xfff25a2a },
                                   { 75.0, 0xfff79a2e }, { 82.0, 0xfff5cf35 }, { 88.0, 0xffcde23a }, { 93.0, 0xff86e04a },
-                                  { 97.0, 0xff3ddc6e }, { 100.0, 0xff16c9a0 } };
+                                  { 97.0, 0xff52d33f }, { 100.0, 0xff22c33a } };     // 100: classic green
     score = juce::jlimit (0.0, 100.0, score);
 
     for (size_t i = 1; i < std::size (stops); ++i)
@@ -46,24 +46,24 @@ juce::Colour Room3DView::seatColour (double score)
     return juce::Colour (stops[std::size (stops) - 1].argb);
 }
 
-juce::Point<float> Room3DView::project (double x, double y, double z, float* depth) const
+juce::Point<float> projectRoomPoint (const ProRoom& room, const ProCamera& camera, int width, int height, double x, double y, double z, float* depth)
 {
     // View space: X across, Y up, Z along the room (front wall far away, at -L/2)
     const double X = y - room.width * 0.5, Y = z - room.height * 0.5, Z = x - room.length * 0.5;
 
-    const double cy = std::cos (yaw), sy = std::sin (yaw), cp = std::cos (pitch), sp = std::sin (pitch);
+    const double cy = std::cos (camera.yaw), sy = std::sin (camera.yaw), cp = std::cos (camera.pitch), sp = std::sin (camera.pitch);
     const double x1 = X * cy + Z * sy, z1 = -X * sy + Z * cy;
     const double y2 = Y * cp - z1 * sp, z2 = Y * sp + z1 * cp;
 
     const double size = std::max ({ room.length, room.width, room.height, 1.0 });
-    const double distance = 1.6 * size * zoom;
+    const double distance = 1.6 * size * camera.zoom;
     const double d = std::max (0.2, distance - z2);
-    const double focal = 0.75 * std::min (getWidth(), getHeight()) * 1.6;
+    const double focal = 0.75 * std::min (width, height) * 1.6;
 
     if (depth != nullptr)
         *depth = (float) d;
 
-    return { (float) (getWidth() * 0.5 + focal * x1 / d), (float) (getHeight() * 0.5 - focal * y2 / d) };
+    return { (float) (width * 0.5 + focal * x1 / d), (float) (height * 0.5 - focal * y2 / d) };
 }
 
 void Room3DView::paint (juce::Graphics& g)
@@ -209,7 +209,12 @@ void Room3DView::paint (juce::Graphics& g)
         float d = 0.0f;
         const auto at = project (seats[i][0], seats[i][1], seats[i][2], &d);
         seatPoints[i] = at;
-        const auto colour = rated ? seatColour (100.0 * (1.0 - penalties[i])) : juce::Colour (0xff8a8a8a);
+        auto colour = rated ? seatColour (100.0 * (1.0 - penalties[i])) : juce::Colour (0xff8a8a8a);
+
+        // Brightness from the bass that reaches this head: dim when little does (20 phon or less), full from 80 phon
+        if (i < heard.size())
+            colour = colour.withMultipliedBrightness ((float) juce::jmap (juce::jlimit (20.0, 80.0, heard[i]), 20.0, 80.0, 0.3, 1.0));
+
         marks.push_back ({ d, at, colour, {}, false, (int) i });
     }
 
@@ -292,6 +297,10 @@ void Room3DView::paint (juce::Graphics& g)
         if (hovered < (int) changes.size())
             text << ",  " << (changes[(size_t) hovered] >= 0.0 ? "+" : "") << juce::String (changes[(size_t) hovered], 1) << " dB";
 
+        if (hovered < (int) heard.size() && hovered < (int) felt.size())
+            text << "   " << tr ("hears ") << (heard[(size_t) hovered] < 20.0 ? tr ("under 20 phon") : juce::String (juce::roundToInt (heard[(size_t) hovered])) + tr (" phon"))
+                 << ", " << tr ("feels ") << juce::String (juce::roundToInt (felt[(size_t) hovered])) << tr (" dB SPL under 40 Hz");
+
         const auto at = seatPoints[(size_t) hovered];
         auto box = juce::Rectangle<float> (at.x + 12.0f, at.y - 26.0f, 16.0f + juce::GlyphArrangement::getStringWidth (uiFont (11.5f, true), text), 20.0f);
         box = box.constrainedWithin (getLocalBounds().toFloat().reduced (4.0f));
@@ -330,6 +339,9 @@ void Room3DView::mouseMove (const juce::MouseEvent& e)
     {
         hovered = nearest;
         repaint();
+
+        if (onHover)
+            onHover (hovered);
     }
 }
 
@@ -337,33 +349,249 @@ void Room3DView::mouseExit (const juce::MouseEvent&)
 {
     hovered = -1;
     repaint();
+
+    if (onHover)
+        onHover (-1);
+}
+
+namespace
+{
+    // Turning, zooming and resetting the shared camera, from either view
+    void turnCamera (ProCamera& camera, double yawAtDrag, double pitchAtDrag, const juce::MouseEvent& e)
+    {
+        camera.yaw = yawAtDrag + e.getDistanceFromDragStartX() * 0.008;
+        camera.pitch = juce::jlimit (-1.4, 1.4, pitchAtDrag + e.getDistanceFromDragStartY() * 0.008);
+    }
+
+    void zoomCamera (ProCamera& camera, const juce::MouseWheelDetails& wheel)
+    {
+        camera.zoom = juce::jlimit (0.5, 3.0, camera.zoom * (wheel.deltaY > 0 ? 0.92 : 1.08));
+    }
 }
 
 void Room3DView::mouseDown (const juce::MouseEvent&)
 {
-    yawAtDrag = yaw;
-    pitchAtDrag = pitch;
+    yawAtDrag = camera->yaw;
+    pitchAtDrag = camera->pitch;
 }
 
 void Room3DView::mouseDrag (const juce::MouseEvent& e)
 {
-    yaw = yawAtDrag + e.getDistanceFromDragStartX() * 0.008;
-    pitch = juce::jlimit (-1.4, 1.4, pitchAtDrag + e.getDistanceFromDragStartY() * 0.008);
+    turnCamera (*camera, yawAtDrag, pitchAtDrag, e);
     repaint();
+
+    if (onCameraChanged)
+        onCameraChanged();
 }
 
 void Room3DView::mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel)
 {
-    zoom = juce::jlimit (0.5, 3.0, zoom * (wheel.deltaY > 0 ? 0.92 : 1.08));
+    zoomCamera (*camera, wheel);
     repaint();
+
+    if (onCameraChanged)
+        onCameraChanged();
 }
 
 void Room3DView::mouseDoubleClick (const juce::MouseEvent&)
 {
-    yaw = 0.0;
-    pitch = 0.32;
-    zoom = 1.0;
+    *camera = ProCamera();
     repaint();
+
+    if (onCameraChanged)
+        onCameraChanged();
+}
+
+//==============================================================================
+// Layered view
+void RoomLayerView::setData (const ProRoom& r, const RoomPaths* paths, const RoomResult* result)
+{
+    room = r;
+    hasData = paths != nullptr && result != nullptr && paths->gridPoints > 0
+                && (int) result->gridLayerDb[0].size() == paths->gridPoints;
+
+    if (hasData)
+    {
+        columns = paths->gridColumns;
+        rows = paths->gridRows;
+        index = paths->gridIndex;
+        nodes = paths->gridPositions;
+        layers = result->gridLayerDb;
+        seatLayers = result->seatLayerDb;
+        seats = r.seatPositions();
+    }
+
+    repaint();
+}
+
+void RoomLayerView::paint (juce::Graphics& g)
+{
+    g.fillAll (juce::Colour (0xff121315));
+    const double H = room.height;
+    const auto project = [this] (double x, double y, double z) { return projectRoomPoint (room, *camera, getWidth(), getHeight(), x, y, z); };
+
+    // The room as a thin wireframe: its outline at the floor and the ceiling, and the corners between
+    {
+        const auto outline = room.boundaryPoints (room.shape == ProRoom::rectangle ? 4 : 64);
+        juce::Path frame;
+
+        for (double z : { 0.0, H })
+            for (size_t k = 0; k <= outline.size(); ++k)
+            {
+                const auto& p = outline[k % outline.size()];
+                const auto at = project (p[0], p[1], z);
+
+                if (k == 0)     frame.startNewSubPath (at);
+                else            frame.lineTo (at);
+            }
+
+        const size_t step = room.shape == ProRoom::rectangle ? 1 : outline.size() / 8;
+
+        for (size_t k = 0; k < outline.size(); k += std::max<size_t> (1, step))
+        {
+            frame.startNewSubPath (project (outline[k][0], outline[k][1], 0.0));
+            frame.lineTo (project (outline[k][0], outline[k][1], H));
+        }
+
+        g.setColour (juce::Colours::white.withAlpha (0.22f));
+        g.strokePath (frame, juce::PathStrokeType (0.8f));
+    }
+
+    const juce::String names[] = { tr ("Infra, under 20 Hz (not heard, felt)"), tr ("Very low, 20-60 Hz"), tr ("Low, 60-120 Hz") };
+    const auto severity = [] (double db)
+    {
+        // Cream when nothing changes, red from 6 dB of boost or dip
+        const float t = (float) juce::jlimit (0.0, 1.0, std::abs (db) / 6.0);
+        return juce::Colour (0xffe9dfb8).interpolatedWith (juce::Colour (0xffe8303a), t);
+    };
+
+    if (! hasData)
+    {
+        g.setColour (theme::dimText);
+        g.setFont (uiFont (12.0f));
+        g.drawText (tr ("computing..."), getLocalBounds(), juce::Justification::centred);
+        return;
+    }
+
+    // Each layer at its height (infra at the bottom), lifted where the bass is boosted, lowered where it dips
+    const double scale = 0.11 * H / 12.0;     // 12 dB move a layer by 11 % of the height
+
+    for (int l = 0; l < RoomResult::numLayers; ++l)
+    {
+        const double base = H * (0.2 + 0.3 * l);
+        const auto& values = layers[(size_t) l];
+        bool any = false;
+
+        const auto pointOf = [&] (int column, int row, juce::Point<float>& at, double& db)
+        {
+            if (column < 0 || row < 0 || column >= columns || row >= rows)
+                return false;
+
+            const int k = index[(size_t) (row * columns + column)];
+
+            if (k < 0 || std::isnan (values[(size_t) k]))
+                return false;
+
+            db = juce::jlimit (-12.0, 12.0, values[(size_t) k]);
+            at = project (nodes[(size_t) k][0], nodes[(size_t) k][1], base + scale * db);
+            return true;
+        };
+
+        for (int row = 0; row < rows; ++row)
+            for (int column = 0; column < columns; ++column)
+            {
+                juce::Point<float> a, b;
+                double da = 0.0, db = 0.0;
+
+                if (! pointOf (column, row, a, da))
+                    continue;
+
+                any = true;
+
+                for (const auto& [dc, dr] : { std::pair<int, int> { 1, 0 }, { 0, 1 } })
+                    if (pointOf (column + dc, row + dr, b, db))
+                    {
+                        g.setColour (severity (0.5 * (da + db)).withAlpha (0.9f));
+                        g.drawLine (juce::Line<float> (a, b), 1.2f);
+                    }
+            }
+
+        // The layer's name at its left edge
+        const auto label = project (0.0, 0.0, base);
+        g.setColour (any ? juce::Colour (0xffe9dfb8) : theme::dimText);
+        g.setFont (uiFont (10.5f, true));
+        g.drawText (any ? names[l] : names[l] + "  -  " + tr ("nothing in the mix"),
+                    juce::Rectangle<float> (label.x - 4.0f, label.y - 16.0f, 260.0f, 14.0f), juce::Justification::centredLeft);
+    }
+
+    // The seat pointed at in the 3D view: a line through the layers and its three values
+    if (hovered >= 0 && hovered < (int) seats.size())
+    {
+        const auto& p = seats[(size_t) hovered];
+        g.setColour (juce::Colours::white.withAlpha (0.7f));
+        g.drawLine (juce::Line<float> (project (p[0], p[1], 0.0), project (p[0], p[1], H)), 1.0f);
+        juce::String text = tr ("Seat ") + juce::String (hovered + 1) + ":";
+
+        for (int l = 0; l < RoomResult::numLayers; ++l)
+        {
+            const double v = hovered < (int) seatLayers[(size_t) l].size() ? seatLayers[(size_t) l][(size_t) hovered] : std::nan ("");
+            const juce::String short_[] = { "infra", tr ("very low"), tr ("low") };
+            text << "   " << short_[l] << " " << (std::isnan (v) ? juce::String ("--") : (v >= 0.0 ? "+" : "") + juce::String (v, 1) + " dB");
+        }
+
+        g.setFont (uiFont (11.0f, true));
+        g.drawText (text, getLocalBounds().reduced (8, 4).removeFromBottom (32).removeFromTop (16), juce::Justification::centredLeft);
+    }
+
+    // Legend
+    auto legend = getLocalBounds().reduced (10, 8).removeFromBottom (16).removeFromRight (240).toFloat();
+    auto bar = legend.removeFromRight (120.0f).withSizeKeepingCentre (120.0f, 8.0f);
+
+    for (int x = 0; x < (int) bar.getWidth(); ++x)
+    {
+        g.setColour (severity (6.0 * x / bar.getWidth()));
+        g.fillRect (bar.getX() + (float) x, bar.getY(), 1.0f, bar.getHeight());
+    }
+
+    g.setColour (theme::dimText);
+    g.setFont (uiFont (10.0f));
+    g.drawText (tr ("dip down, boost up:  0 dB"), legend, juce::Justification::centredRight);
+    g.drawText ("6 dB", bar.translated (bar.getWidth() + 4.0f, -3.0f).withWidth (40.0f), juce::Justification::centredLeft);
+    g.drawText (tr ("Bass layers against the approved mix. Drag to turn, as the 3D view."),
+                getLocalBounds().reduced (8, 4).removeFromTop (14), juce::Justification::centredLeft);
+}
+
+void RoomLayerView::mouseDown (const juce::MouseEvent&)
+{
+    yawAtDrag = camera->yaw;
+    pitchAtDrag = camera->pitch;
+}
+
+void RoomLayerView::mouseDrag (const juce::MouseEvent& e)
+{
+    turnCamera (*camera, yawAtDrag, pitchAtDrag, e);
+    repaint();
+
+    if (onCameraChanged)
+        onCameraChanged();
+}
+
+void RoomLayerView::mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel)
+{
+    zoomCamera (*camera, wheel);
+    repaint();
+
+    if (onCameraChanged)
+        onCameraChanged();
+}
+
+void RoomLayerView::mouseDoubleClick (const juce::MouseEvent&)
+{
+    *camera = ProCamera();
+    repaint();
+
+    if (onCameraChanged)
+        onCameraChanged();
 }
 
 //==============================================================================
@@ -1105,6 +1333,12 @@ RoomProView::RoomProView()
     }
 
     addAndMakeVisible (view3d);
+    addAndMakeVisible (layerView);
+    view3d.setCamera (camera);
+    layerView.setCamera (camera);
+    view3d.onCameraChanged = [this] { layerView.repaint(); };
+    layerView.onCameraChanged = [this] { view3d.repaint(); };
+    view3d.onHover = [this] (int seat) { layerView.setHovered (seat); };
     editorViewport.setViewedComponent (&editor, false);
     editorViewport.setScrollBarsShown (true, false);
     addAndMakeVisible (editorViewport);
@@ -1172,6 +1406,8 @@ void RoomProView::configChanged()
     changedAt = now();
     view3d.setRoom (config.rooms[(size_t) selected], {});
     view3d.setWorstSpot (std::nullopt, 100.0);
+    view3d.setHeads ({}, {});
+    layerView.setData (config.rooms[(size_t) selected], nullptr, nullptr);
     repaint();
 
     if (onConfigChanged)
@@ -1269,6 +1505,8 @@ void RoomProView::update (const Analysis& a, const Translation& electricalTransl
             const auto& res = results[(size_t) selected];
             const auto& p = paths[(size_t) selected];
             view3d.setRoom (config.rooms[(size_t) selected], res.seatPenalty, res.seatChangeDb);
+            view3d.setHeads (res.seatHeardPhon, res.seatFeltDb);
+            layerView.setData (config.rooms[(size_t) selected], &p, &res);
             view3d.setWorstSpot (res.worstProbe >= 0 && res.worstProbe < (int) p.probePositions.size()
                                    ? std::optional<std::array<double, 3>> (p.probePositions[(size_t) res.worstProbe]) : std::nullopt,
                                  res.worstPointScore);
@@ -1410,7 +1648,11 @@ void RoomProView::resized()
     area.removeFromTop (10);
     auto settings = area.removeFromRight (RoomProEditor::preferredWidth + editorViewport.getScrollBarThickness() + 2);
     area.removeFromRight (10);
+    // The 3D view and the layered view side by side, the same size
+    auto right = area.removeFromRight ((area.getWidth() - 10) / 2);
+    area.removeFromRight (10);
     view3d.setBounds (area);
+    layerView.setBounds (right);
     editorViewport.setBounds (settings);
     editor.setSize (RoomProEditor::preferredWidth, juce::jmax (100, editor.getHeight()));     // never shrunk first: that would scroll to the top
     editor.resized();

@@ -2074,6 +2074,22 @@ static void testRoomPro()
             worst = std::max (worst, std::abs (d));
 
         check (worst < 0.1 && r.roomScore > 99.0, "no LFE in the mix: L C R is the reference, nothing changes at any seat", worst);
+
+        // The layered view too: every grid point, every layer (infra, very low, low)
+        double worstLayer = 0.0;
+        size_t values = 0;
+
+        for (const auto& layer : r.gridLayerDb)
+            for (double v : layer)
+                if (! std::isnan (v))
+                {
+                    worstLayer = std::max (worstLayer, std::abs (v));
+                    ++values;
+                }
+
+        check (values > 0 && worstLayer < 0.1, "no LFE: the three layers stay flat over the whole floor", worstLayer);
+        check (! r.seatHeardPhon.empty() && r.seatHeardPhon[0] > 20.0 && r.seatFeltDb[0] < r.seatBassDb[0],
+               "each head: the bass it hears (phon) and the part under 40 Hz it feels", r.seatHeardPhon.empty() ? 0.0 : r.seatHeardPhon[0]);
     }
 
     // Where the subwoofers are matters (LFE as loud as the screen, unrelated to it)

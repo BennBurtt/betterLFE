@@ -22,6 +22,15 @@
 namespace subguard
 {
 
+/** The camera shared by the 3D view and the layered view: turning one turns the other. */
+struct ProCamera
+{
+    double yaw = 0.0, pitch = 0.32, zoom = 1.0;
+};
+
+/** Where a point of the room (metres) falls on a view of the given size. */
+juce::Point<float> projectRoomPoint (const ProRoom&, const ProCamera&, int width, int height, double x, double y, double z, float* depth = nullptr);
+
 /** A room drawn in 3D: walls, screen, speakers, seats coloured by their rating. Drag to turn, wheel to zoom, double-click to reset. */
 class Room3DView : public juce::Component
 {
@@ -44,21 +53,71 @@ public:
 
     /** Colour of a seat score (0..100), in many steps over the range where seats fall. */
     static juce::Colour seatColour (double score);
+
+    /** What each head receives: loudness of the bass (phon), level under 40 Hz (dB SPL). The brightness of a head follows its loudness. */
+    void setHeads (const std::vector<double>& heardPhon, const std::vector<double>& feltDb)
+    {
+        if (heardPhon != heard || feltDb != felt)
+        {
+            heard = heardPhon;
+            felt = feltDb;
+            repaint();
+        }
+    }
+
+    void setCamera (std::shared_ptr<ProCamera> c)    { camera = std::move (c); }
+    std::function<void()> onCameraChanged;          // the other view repaints
+    std::function<void (int)> onHover;              // seat under the mouse, -1 for none
+
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
     void mouseDoubleClick (const juce::MouseEvent&) override;
 
 private:
-    juce::Point<float> project (double x, double y, double z, float* depth = nullptr) const;
+    juce::Point<float> project (double x, double y, double z, float* depth = nullptr) const
+    {
+        return projectRoomPoint (room, *camera, getWidth(), getHeight(), x, y, z, depth);
+    }
 
     ProRoom room;
     std::vector<double> penalties, changes;
     std::optional<std::array<double, 3>> worstSpot;
     double worstSpotScore = 100.0;
     std::vector<juce::Point<float>> seatPoints;     // where each seat was drawn
+    std::vector<double> heard, felt;
     int hovered = -1;
-    double yaw = 0.0, pitch = 0.32, zoom = 1.0;
+    std::shared_ptr<ProCamera> camera = std::make_shared<ProCamera>();
+    double yawAtDrag = 0.0, pitchAtDrag = 0.0;
+};
+
+/** The three layers of the bass stacked in the room: infra (under 20 Hz), very low (20-60 Hz), low (60-120 Hz).
+    Each is a mesh over the floor: a boost lifts it, a dip lowers it, its colour says how much. Same camera as the 3D view. */
+class RoomLayerView : public juce::Component
+{
+public:
+    void setCamera (std::shared_ptr<ProCamera> c)    { camera = std::move (c); }
+    std::function<void()> onCameraChanged;
+
+    /** The room and its results (nothing to show when either is null). */
+    void setData (const ProRoom&, const RoomPaths*, const RoomResult*);
+    void setHovered (int seat)                      { if (seat != hovered) { hovered = seat; repaint(); } }
+
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+
+private:
+    ProRoom room;
+    bool hasData = false;
+    int columns = 0, rows = 0;
+    std::vector<int> index;
+    std::vector<std::array<double, 3>> nodes, seats;
+    std::array<std::vector<double>, RoomResult::numLayers> layers, seatLayers;
+    int hovered = -1;
+    std::shared_ptr<ProCamera> camera = std::make_shared<ProCamera>();
     double yawAtDrag = 0.0, pitchAtDrag = 0.0;
 };
 
@@ -200,6 +259,8 @@ private:
     std::array<juce::Rectangle<float>, ProRooms::count> cards;
     std::array<std::unique_ptr<juce::ToggleButton>, ProRooms::count> countedTicks;
     Room3DView view3d;
+    RoomLayerView layerView;
+    std::shared_ptr<ProCamera> camera = std::make_shared<ProCamera>();
     RoomProEditor editor;
     juce::Viewport editorViewport;
     juce::TextButton saveButton { tr ("Save config...") }, loadButton { tr ("Load config...") };

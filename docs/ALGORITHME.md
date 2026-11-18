@@ -885,6 +885,30 @@ sièges, la vue 3D le marque en magenta (vérifié : 32 points de plus pour une
 salle de 20 places, pire point ≤ pire place ≤ P10). Aux fréquences du grave,
 un creux fait de 1 à 4 m de large : 0,6 m d'écart suffit à le voir.
 
+**Vue en couches.** À droite de la vue 3D, même taille et même caméra (tourner
+ou zoomer l'une fait tourner l'autre), trois couches du grave empilées dans la
+salle, chacune un maillage sur une grille régulière du sol à hauteur
+d'oreille (12 points sur le grand côté) : un boost soulève la couche, un creux
+l'abaisse (12 dB la déplacent de 11 % de la hauteur), sa couleur va du crème
+(rien) au rouge (6 dB et plus). La place survolée dans la vue 3D est marquée
+par un trait vertical et ses trois valeurs. Les couches :
+
+| Couche | Bande | Pourquoi ces limites |
+|---|---|---|
+| Infra | sous 20 Hz (calculée dès 10 Hz) | 20 Hz : limite de l'infrason (ISO 7196) et limite basse des courbes d'isosonie d'ISO 226 ; ressenti plus qu'entendu |
+| Très grave | 20–60 Hz | 60 Hz : pas de norme ; convention courante entre « sub-bass » et « bass », et limite de nos bandes de notation |
+| Grave | 60–120 Hz | 120 Hz : limite haute du canal LFE (Dolby, ATSC A/52) |
+
+L'infra n'entre pas (encore) dans le score : il faut d'abord une base
+documentée pour juger ce qui est ressenti sous 20 Hz.
+
+**Ce que reçoit chaque tête.** Pour chaque place : le niveau du grave de 20 à
+120 Hz (dB SPL), sa sonie (phones de la bande la plus forte, ISO 226) et le
+niveau sous 40 Hz, infra compris, ressenti plus qu'entendu. La luminosité de
+chaque tête suit la sonie du grave qui l'atteint (sombre à 20 phones, pleine à
+80) ; une note de 100 est en vert franc. Au survol : la note, l'écart, ce que
+la tête entend et ce qu'elle ressent.
+
 **Couleurs des places.** Une échelle à dix paliers (violet 0, magenta 40,
 rouge 55, orange 65 à 75, jaune 82, vert-jaune 88, vert 93 à 97, turquoise
 100) : des places à quelques points d'écart se distinguent. Au survol, la vue

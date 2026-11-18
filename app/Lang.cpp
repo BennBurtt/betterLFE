@@ -305,6 +305,12 @@ namespace
             { "Bass playing now, at the listening level", "Grave joué maintenant, au niveau d'écoute" }, { "Band", "Bande" }, { "Level", "Niveau" },
             { "Loudness", "Sonie" }, { "dB to double it", "dB pour la doubler" },
 
+            { "hears ", "entend " }, { "feels ", "ressent " }, { " dB SPL under 40 Hz", " dB SPL sous 40 Hz" },
+            { "Infra, under 20 Hz (not heard, felt)", "Infra, sous 20 Hz (ressenti plus qu'entendu)" }, { "Very low, 20-60 Hz", "Très grave, 20-60 Hz" },
+            { "Low, 60-120 Hz", "Grave, 60-120 Hz" }, { "nothing in the mix", "rien dans le mix" }, { "very low", "très grave" }, { "low", "grave" },
+            { "dip down, boost up:  0 dB", "creux en bas, boost en haut :  0 dB" },
+            { "Bass layers against the approved mix. Drag to turn, as the 3D view.", "Couches du grave face au mix validé. Glisser pour tourner, comme la vue 3D." },
+
             // The fifteen cinema rooms
             { "Corridor room, live", "Salle couloir, vive" }, { "Small multiplex, live", "Petit multiplexe, vif" },
             { "Old cinema, near-cubic, live", "Ancien cinéma, presque cubique, vif" }, { "Narrow 120 seats", "Étroite 120 places" },
