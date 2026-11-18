@@ -411,7 +411,7 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
 
     const auto audible = [&] (int b, double spl)
     {
-        return tuning.audibility ? PlaybackSimulator::audibleShare (PlaybackSimulator::bandCentreHz[b], spl, tuning.thresholdSpreadDb) : 1.0;
+        return t.audibleAt (b, spl - t.bandSplDb[(size_t) b], tuning.thresholdSpreadDb, tuning.audibility);
     };
 
     // dB that double the loudness of a band at the level it has at that seat (ISO 226)

@@ -123,6 +123,18 @@ struct Translation
     // PlaybackSimulator::audibleShare): 1 when audibility is switched off.
     std::array<double, ChainResult::numBands> bandAudible { { 1.0, 1.0, 1.0, 1.0 } };
 
+    // Audibility, point by point: the reference's bass at each grid point of a
+    // band (its weight in the band, its frequency, and its level summed over
+    // one auditory filter around it, dB SPL). A band's audibility is the share
+    // of its power above threshold, each point against the threshold at its
+    // own frequency: between 31.5 and 63 Hz the threshold falls by about 22 dB,
+    // too much for one value per band.
+    struct AudibilityPoint { double weight, hz, levelDb; };
+    std::array<std::vector<AudibilityPoint>, ChainResult::numBands> audibilityProfile;
+
+    /** Share of a band's bass heard when its level moves by `shiftDb` from the reference (1 when audibility is off). */
+    double audibleAt (int band, double shiftDb, double spreadDb, bool enabled) const;
+
     double levelDependence = 0.0;       // 0..1, drives the warning and the score: the mean against the "red" value
     double levelMeanDb = 0.0;           // mean of that difference over every system and subwoofer level, in dB
     double levelDeviationDb = 0.0;      // the largest one, signed: negative when the bass falls short

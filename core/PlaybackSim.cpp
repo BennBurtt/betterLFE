@@ -141,6 +141,27 @@ double PlaybackSimulator::audibleShare (double hz, double splDb, double spreadDb
 }
 
 //==============================================================================
+double Translation::audibleAt (int band, double shiftDb, double spreadDb, bool enabled) const
+{
+    if (! enabled)
+        return 1.0;
+
+    const auto& profile = audibilityProfile[(size_t) band];
+    double heard = 0.0, total = 0.0;
+
+    for (const auto& p : profile)
+    {
+        heard += p.weight * PlaybackSimulator::audibleShare (p.hz, p.levelDb + shiftDb, spreadDb);
+        total += p.weight;
+    }
+
+    // No reference bass in the band: the whole band against the threshold at its centre
+    if (total <= 0.0)
+        return PlaybackSimulator::audibleShare (PlaybackSimulator::bandCentreHz[band], bandSplDb[(size_t) band] + shiftDb, spreadDb);
+
+    return heard / total;
+}
+
 Translation PlaybackSimulator::compute (const Analysis& a, Level level, double lfeGainDb) const
 {
     Translation t;
@@ -221,6 +242,10 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
     double reference[numBands] = {}, referenceTotal = 0.0, weightTotal = 0.0, bandWeight[numBands] = {};
     double smallSystems[numBands] = {};     // reference bass weighted by how much a small system would render it
     double screenTotal = 0.0, lfeTotal = 0.0;
+    std::vector<double> referencePower (n, 0.0);
+
+    for (size_t g = 0; g < n; ++g)
+        referencePower[g] = std::max (0.0, m.pF[g] + lfeGain2 * m.pLfe[g] + 2.0 * lfeGain * cFL[g].real());
 
     for (size_t g = 0; g < n; ++g)
     {
@@ -231,7 +256,7 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
             continue;
 
         const double lfe = lfeGain2 * m.pLfe[g];
-        const double power = std::max (0.0, m.pF[g] + lfe + 2.0 * std::sqrt (lfeGain2) * cFL[g].real());
+        const double power = referencePower[g];
         reference[b] += hz * power;
         bandWeight[b] += hz;
         smallSystems[b] += hz * power * stereoRelevance (hz);
@@ -265,13 +290,39 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
         return tuning.listeningLevelDbC + (10.0 * std::log10 (rms + 1e-30) - referenceDbfs);
     };
 
-    // Share of listeners who hear a band at a given level; 1 when audibility is off.
-    // Each rating band is narrower than about one auditory filter (ERB, Glasberg
-    // & Moore 1990: 27 Hz at 25 Hz, 36 Hz at 100 Hz), so its whole power is
-    // compared with the pure-tone threshold at its centre.
+    // Audibility point by point. At each grid point, the level of the
+    // reference over one auditory filter around it (ERB, Glasberg & Moore
+    // 1990: 24.7 (4.37 f / 1000 + 1) Hz, 27 Hz at 25 Hz), against the
+    // threshold at that frequency; a band's audibility is the share of its
+    // power above threshold. A band at another level (a playback system, a
+    // seat) is the same profile moved by the difference.
+    for (size_t g = 0; g < n; ++g)
+    {
+        const double hz = a.grid[g];
+        const int b = bandOf (hz);
+
+        if (b < 0)
+            continue;
+
+        const double erb = 24.7 * (4.37 * hz / 1000.0 + 1.0);
+        double sum = 0.0, weight = 0.0;
+
+        for (size_t k = 0; k < n; ++k)
+            if (std::abs (a.grid[k] - hz) <= 0.5 * erb)
+            {
+                sum += a.grid[k] * referencePower[k];
+                weight += a.grid[k];
+            }
+
+        const double rms = (weight > 0.0 ? sum / weight : 0.0) * erb * a.windowSeconds / 3.0;     // Hann window
+        const double level = tuning.listeningLevelDbC + (10.0 * std::log10 (rms + 1e-30) - referenceDbfs);
+        t.audibilityProfile[(size_t) b].push_back ({ hz * referencePower[g], hz, level });
+    }
+
+    // Share of listeners who hear a band at a given level; 1 when audibility is off
     const auto audible = [&] (int b, double splDb)
     {
-        return tuning.audibility ? audibleShare (bandCentreHz[b], splDb, tuning.thresholdSpreadDb) : 1.0;
+        return t.audibleAt (b, splDb - t.bandSplDb[(size_t) b], tuning.thresholdSpreadDb, tuning.audibility);
     };
 
     for (int b = 0; b < numBands; ++b)
@@ -284,7 +335,7 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
         t.bandSplDb[(size_t) b] = spl;
         t.bandPhon[(size_t) b] = phon;
         t.bandDoublingDb[(size_t) b] = doubling[b];
-        t.bandAudible[(size_t) b] = audible (b, spl);
+        t.bandAudible[(size_t) b] = t.audibleAt (b, 0.0, tuning.thresholdSpreadDb, tuning.audibility);
     }
 
     // What is heard of the reference: each band weighted by the share of

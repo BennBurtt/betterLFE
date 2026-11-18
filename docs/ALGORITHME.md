@@ -6,8 +6,10 @@ de 5 à 190 Hz (affichée de 5 à 150 Hz), après filtrage anti-repliement et
 décimation vers ~500 Hz.
 
 Tout est calculé sur des rapports ou en énergie logarithmique : les deux
-détecteurs se comportent de la même façon à −10 dBFS et à −120 dBFS. Seul le
-silence numérique est écarté.
+détecteurs se comportent de la même façon de −10 dBFS à −100 dBFS. En dessous
+de −100 dBFS pendant 0,5 s, le LFE est tenu pour absent et ses mesures sont
+effacées (point 5) : à 85 dB(C), −100 dBFS donne environ 5 dB SPL, inaudible à
+toutes les fréquences de la bande. Le silence numérique est écarté.
 
 Deux détecteurs indépendants tournent en parallèle.
 
@@ -41,7 +43,11 @@ Répond à : *sur la durée, le LFE est-il lié au canal d'écran, et dans quel 
    compte du fait qu'un son fort qui démarre écrase tout ce qui précède, et de
    la portion de la fenêtre d'analyse réellement occupée par le signal.
    L'écart-type de `c` sous l'hypothèse « signaux sans rapport » est
-   `σ = 1/√(2K)`.
+   `σ = 1/√(2K)`. Les fenêtres se recouvrant de 96 à 99 %, `K` n'est pas un
+   nombre de fenêtres mais le produit durée × bande effectives, ce qui tient
+   compte de leur dépendance. Vérifié par Monte-Carlo sur des signaux
+   indépendants (test « unrelated signals and onsets ») : 0,00 % de fausses
+   alertes en son tenu, 0,74 % aux attaques, écart mesuré / σ prévu = 0,93.
 4. Alerte quand `|c|` dépasse le seuil choisi **et** `2,5σ`. Trois niveaux, par
    le sélecteur au-dessus du spectre : Soft (0,90), Medium (0,75), Strong
    (0,50, par défaut). En mode « Out of
@@ -264,11 +270,18 @@ seuil compte pour la part des spectateurs qui l'entendent.
    le seuil médian de jeunes auditeurs otologiquement normaux, en champ libre
    et binaural ; il est identique à celui d'ISO 389-7 [28], et de 20 à 250 Hz
    le seuil en champ diffus (une salle) est le même qu'en champ libre [27].
-2. Bandes de bruit et sons purs : chaque bande de notation (20–30, 30–60,
-   60–90, 90–120 Hz) est à peu près aussi étroite qu'un filtre auditif (ERB de
-   Glasberg & Moore [29] : 24,7·(4,37·f/1000 + 1), soit 27 Hz à 25 Hz, 29 Hz à
-   40 Hz, 32 Hz à 70 Hz, 36 Hz à 100 Hz). Toute sa puissance est donc comparée
-   au seuil du son pur à son centre.
+2. Point par point, sur un filtre auditif : le seuil varie trop à l'intérieur
+   d'une bande de notation pour une seule valeur (il baisse d'environ 22 dB
+   entre 31,5 et 63 Hz, dans la seule bande 30–60 Hz). À chaque point de la
+   grille d'analyse (80 points de 20 à 120 Hz), on prend le niveau du grave
+   sur un filtre auditif centré sur ce point (ERB de Glasberg & Moore [29] :
+   24,7·(4,37·f/1000 + 1), soit 27 Hz à 25 Hz, 29 Hz à 40 Hz, 32 Hz à 70 Hz,
+   36 Hz à 100 Hz : l'oreille intègre l'énergie sur cette largeur), qu'on
+   compare au seuil du son pur à **sa** fréquence. L'audibilité d'une bande est
+   la part de sa puissance au-dessus du seuil. Un système de lecture ou une
+   place de salle qui monte ou baisse la bande décale ce profil d'autant.
+   Vérifié : deux sons purs de même niveau dans la bande 30–60 Hz sont
+   entendus par 4 % des auditeurs à 33 Hz et par 86 % à 57 Hz.
 3. Dispersion entre auditeurs : les seuils individuels se répartissent autour
    de la valeur de la norme ; ISO 28961 [27] en donne les centiles, et la
    littérature sur les basses fréquences cite un écart-type de l'ordre de
@@ -313,7 +326,7 @@ en interaction.
 | Famille | Cas | Nombre |
 |---|---|---|
 | Cinéma | sub trop près ou trop loin de 0,9 m et 1,7 m (soit ±2,5 et ±5 ms à 343 m/s), ou en place × polarité normale ou inversée | 10 |
-| Bass management | canaux d'écran croisés vers le sub (Linkwitz-Riley 4ᵉ ordre) à 60, 80, 100 Hz, LFE passe-bas 120 Hz ; avec et sans passe-bas raide à 120 Hz tenant lieu de filtre d'encodeur | 6 |
+| Bass management | canaux d'écran croisés vers le sub (Linkwitz-Riley 4ᵉ ordre) à 60, 80, 100 Hz, LFE passe-bas 120 Hz ; avec et sans passe-bas raide à 120 Hz tenant lieu de filtre d'encodeur. Le grave d'écran redirigé vers le sub garde son niveau (gain 1, recombiné en passe-tout) ; seul le canal LFE reçoit le +10 dB, comme le distingue la SMPTE RP 200 [9] | 6 |
 | Stéréo | le mix sans son LFE, comme dans tout downmix deux canaux. Seul le LFE est retiré : la façade reste sommée comme dans la référence, pour que la façon dont L, C et R se replient (qui ne dépend pas du LFE) ne compte pas comme une perte | 1 |
 
 **Dépendance au niveau du sub (« LFE level dependence »).** Un avertissement,
@@ -343,7 +356,9 @@ Pour chaque système et chaque bande (20–30, 30–60, 60–90, 90–120 Hz) :
 
 1. `écart = niveau du système − niveau de la référence`, en dB, borné à ±24 dB.
 2. `pénalité de bande = borne((|écart| − T) / (D − T), 0, 1)`, avec `D` le
-   nombre de dB qui double la sonie dans cette bande (5,0 ; 5,5 ; 6,4 ; 6,9) et
+   nombre de dB qui double la sonie dans cette bande, calculé par ISO 226 au
+   niveau réel de la bande au niveau d'écoute choisi (voir 3.2 ; vers 80 phones
+   il vaut environ 5,0 ; 5,5 ; 6,4 ; 6,9 dans les quatre bandes), et
    `T` la tolérance du niveau choisi (voir 3.6). Zéro jusqu'à `T`, 1 quand la
    bande est entendue deux fois plus forte ou deux fois plus faible.
 3. `pénalité du système = Σ part de la bande × pénalité de bande`, la part étant
@@ -448,14 +463,16 @@ grave de près de 6 dB entre un sub en polarité et un sub inversé.
 |---|---|
 | LFE à +10 dB, omission du LFE en downmix, rôle d'appoint du LFE | Normes [9][12][13] |
 | Conversion dB → sensation (5,0 à 6,9 dB par doublement) | Calculé depuis ISO 226:2003 [14] |
-| Seuil d'audition par bande | ISO 226:2003 [14] / ISO 389-7 [28] ; bandes de la largeur d'un filtre auditif [29] |
+| Seuil d'audition | ISO 226:2003 [14] / ISO 389-7 [28], point par point sur la grille, niveau pris sur un filtre auditif [29] |
 | Dispersion des seuils (écart-type 5 dB) | Ordre de grandeur publié [25][30] ; ISO 28961 [27] en donne la distribution exacte (non consultée, payante) |
 | Tolérances des trois niveaux (3 ; 2 ; 1 dB) | Choix ; 1 dB est l'ordre de grandeur admis du plus petit écart audible [16] |
 | Filtres de bass management (Linkwitz-Riley 24 dB/oct) | Modèle courant, variable selon les appareils |
 | Filtre d'encodeur (Butterworth 8ᵉ ordre à 120 Hz) | Modèle : le filtre LFE de Dolby Digital Plus n'est pas public |
 | Étendue des défauts de salle (±5 ms, polarité) | **Hypothèse.** Le rapport SMPTE constate de larges écarts mais ses chiffres ne sont pas publics |
 | Pertinences des systèmes, plafond de dépendance (1,00), bornes et poids de l'infra-grave (25 et 40 Hz, 30 %), poids de la dépendance au niveau (20 %) | **Hypothèse** d'ingénierie, suivant la consigne (0 ms ×2, avance ×0,5 ; LFE seul vers 20–25). Aucune statistique publiée sur la fréquence de ces défauts |
-| Acoustique de la salle (modes, places) | Non simulée |
+| Acoustique de la salle (modes, places) | Hors des systèmes électriques ; simulée à part par Room Sim et Room Sim Pro (modèle modal) |
+| ISO 226 pour des bandes de bruit et de la musique | **Approximation** : ISO 226 décrit des sons purs continus. Un modèle de sonie pour sons complexes (ISO 532-3, Moore-Glasberg-Schlittenlacher) serait plus juste, au prix d'un calcul bien plus lourd |
+| Le score sur 100 | **Indice de risque propre à SubGUARD**, construit à partir de mesures et de normes mais avec des pondérations choisies ; ce n'est pas une mesure normalisée de la qualité d'un mix |
 
 ### 3.8 bis Dépendance au LFE : ce que dit la littérature
 
@@ -512,8 +529,8 @@ somme des modes propres [31] :
 avec `ψn = cos(nx·π·x/L)·cos(ny·π·y/W)·cos(nz·π·z/H)`, les fréquences propres de
 Rayleigh `fn = (c/2)·√((nx/L)² + (ny/W)² + (nz/H)²)`, `Λn` le produit de 1
 (indice nul) ou 1/2, et `δ = 6,91/TR60`. Les modes jusqu'à 200 Hz sont sommés
-pour la bande 20–120 Hz. L'écran : trois sources derrière la toile (L, C, R, la
-somme d'écran partagée à parts égales) ; le LFE : deux caissons au pied du mur
+pour la bande 20–120 Hz. L'écran : trois enceintes derrière la toile, chacune
+jouant son propre canal (L, C, R) ; le LFE : deux caissons au pied du mur
 avant ; vingt places (5 × 4) dans la zone des sièges, à 1,2 m. Vérifié : le
 premier mode axial d'une salle de 10 m tombe bien à c/2L = 17,15 Hz, le
 deuxième à 34,3 Hz. Calcul des quinze salles : 0,5 s une fois, puis moins de
@@ -524,6 +541,14 @@ et n'est pas comptée. On garde ce que l'interaction LFE / façade ajoute à
 chaque place, par rapport au mix approuvé :
 
 `écart (dB) = 10·log10 [ (P place / P place en puissance) / (P approuvé / P approuvé en puissance) ]`
+
+avec `P place = Σ_ab H_a·conj(H_b)·S_ab` sur L, C, R et LFE (S : matrice
+interspectrale du mix, H : chemin de chaque canal jusqu'à la place),
+`P place en puissance` la même somme sans les termes croisés entre le LFE et
+l'écran (les croisés L / C / R restent), et `P approuvé` / `P approuvé en
+puissance` la même chose en régie (chemins plats). Les termes croisés LFE /
+écran sont donc bien comptés, à la place et en régie : l'écart dit ce que la
+salle change à leur effet.
 
 Un LFE décorrélé donne 0 dB à toutes les places de toutes les salles (vérifié).
 
@@ -609,8 +634,13 @@ Soft / Medium / Strong, même LFE +10 dB. Une différence voulue :
 - Room Sim ne compte que l'interaction entre l'écran et le LFE ; la couleur
   que chaque chemin prend dans la salle est retirée.
 - **Room Sim Pro prend le chemin de l'écran (L C R) comme référence** :
-  `référence = |H écran|² × (P façade + P LFE)` à chaque place, comme si
-  tout le grave passait par L C R. La couleur propre du chemin d'écran est
+  `référence = Σ_ab∈{L,C,R} H_a·conj(H_b)·S_ab + Q·S_LFE` à chaque place, où
+  `Q` est la réponse moyenne des enceintes d'écran pondérée par les
+  puissances L / C / R du mix : comme si le grave du LFE passait par L C R.
+  L'écart est ensuite rapporté à la régie comme ci-dessus,
+  `(P place / référence) / (P approuvé / P approuvé en puissance)`, ce qui
+  revient à `P place / (référence × P approuvé / P approuvé en puissance)` :
+  le terme croisé LFE / écran du mix validé est dans la comparaison. La couleur propre du chemin d'écran est
   retirée, mais le chemin LFE entendu autrement que lui compte : caissons
   placés ailleurs, réglés hors niveau, dans un autre mode, en proportion du
   grave que le mix confie au LFE. Un mix sans LFE ne change à aucune place
@@ -651,9 +681,9 @@ valeur permet de la taper) :
 - **Fill speakers** (rappels) : On, Link (les rappels 2 et 4 sont les miroirs
   de 1 et 3 : on règle des paires), 1 ou 2 paires (ou 1 à 4 déliés), mêmes
   réglages plus ce qu'ils jouent : **Lc / Rc** (L ou R + C à −3 dB) ou LFE.
-  Le grave d'écran étant pris comme un seul signal partagé par L, C et R
-  (comme dans Room Sim), un rappel Lc / Rc rayonne 1 + 10^(−3/20) = 1,71 fois
-  l'amplitude d'une enceinte d'écran. Délai par défaut : aligné sur l'écran à
+  Un rappel gauche reçoit L avec un gain de 1 et C avec un gain de 0,708 ; la
+  corrélation réelle entre L et C (qu'ils s'additionnent en amplitude ou en
+  puissance) vient de la matrice interspectrale du mix. Délai par défaut : aligné sur l'écran à
   leur propre distance (x / c).
 - **Audience** : trois dispositions. En rangs (premier et dernier rang, part
   de la largeur, rangs, places par rang) ; en deux blocs avec une allée libre
@@ -742,7 +772,7 @@ les modes se recouvrent et le résultat est une moyenne.
 | Pièges à basses (membranes accordées) | 0,60 | 0,70 | estimation (données types) |
 | Bardage ou toit en tôle d'acier | 0,20 | 0,15 | estimation (loi de masse) |
 | Toile de tente (membrane PVC) | 0,80 | 0,70 | estimation (loi de masse) |
-| Côté ouvert (pas de mur) | 1,00 | 1,00 | exact : rien ne revient |
+| Côté ouvert (pas de mur) | 1,00 | 1,00 | approximation : rien ne revient, mais le modèle garde des modes de boîte rigide et plafonne α à 0,95 ; une ouverture rayonne en réalité avec une impédance qui dépend de la fréquence |
 
 Ce qui est établi et ce qui est supposé : les valeurs à 125 Hz viennent des
 tables publiées [33, 34] ; à 63 Hz elles sont rarement publiées, d'où une règle

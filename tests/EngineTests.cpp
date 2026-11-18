@@ -1257,6 +1257,25 @@ static void testPlaybackChains()
             std::printf ("  LFE alone, %3.0f Hz tone: dependence %.2f, robustness %.0f\n", hz, t.dependence, t.robustness);
         }
 
+        // Audibility point by point: two tones in the same rating band (30-60 Hz), at the same
+        // level near threshold, are not heard alike: the threshold is about 15 dB higher at 33 Hz
+        {
+            double heard[2];
+            int i = 0;
+
+            for (double hz : { 33.0, 57.0 })
+            {
+                LfeEngine e (sampleRate, 1.0, 0.0);
+                Scene s;
+                s.c = sine (hz, -55.0, 5.0);
+                run (e, s);
+                heard[i++] = sim.compute (e.result()).bandAudible[1];
+            }
+
+            std::printf ("  tone at -55 dBFS, 85 dB(C): heard by %.0f %% at 33 Hz, %.0f %% at 57 Hz (same band)\n", 100.0 * heard[0], 100.0 * heard[1]);
+            check (heard[1] > heard[0] + 0.2, "audibility follows the threshold inside a band, not only at its centre", heard[1] - heard[0]);
+        }
+
         // The cancellation risk is unchanged: a 20 Hz tone copied into the centre still scores 0
         LfeEngine e (sampleRate, 1.0, 0.0);
         Scene s;

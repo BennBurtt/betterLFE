@@ -78,7 +78,7 @@ const std::vector<ProMaterial>& ProRoom::materialList()
         { "ceilingTile",  "Suspended acoustic ceiling tile",         0.25,  0.50,  "estimate (typical 0.3 to 0.7 at 125 Hz)",  M::treatment, ceilings },
         { "metal",        "Steel sheet cladding or roof",            0.20,  0.15,  "estimate (mass law)",                      M::light,     walls | ceilings },
         { "tent",         "Tent fabric (PVC membrane)",              0.80,  0.70,  "estimate (mass law)",                      M::light,     walls | ceilings },
-        { "open",         "Open side (no wall)",                     1.00,  1.00,  "exact: nothing comes back",                M::open,      walls },
+        { "open",         "Open side (no wall)",                     1.00,  1.00,  "approximation: rigid-box modes, alpha capped at 0.95",                M::open,      walls },
     };
 
     return list;
