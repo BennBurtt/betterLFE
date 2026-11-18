@@ -2058,12 +2058,12 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
         }
     }
 
-    // A regular grid over the floor at ear height, for the layered view: 12
+    // A regular grid over the floor at ear height, for the layered view: 20
     // points along the longer side, in proportion across the other
     {
         const double longer = std::max (r.length, r.width);
-        const int columns = std::clamp ((int) std::lround (12.0 * r.length / longer), 4, 12);
-        const int rows = std::clamp ((int) std::lround (12.0 * r.width / longer), 4, 12);
+        const int columns = std::clamp ((int) std::lround (20.0 * r.length / longer), 6, 20);
+        const int rows = std::clamp ((int) std::lround (20.0 * r.width / longer), 6, 20);
         std::vector<Point> nodes;
         paths.gridIndex.assign ((size_t) (columns * rows), -1);
 

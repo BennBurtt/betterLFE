@@ -311,9 +311,9 @@ namespace
             { "dip down, boost up:  0 dB", "creux en bas, boost en haut :  0 dB" },
             { "Bass layers against the approved mix. Drag to turn, as the 3D view.", "Couches du grave face au mix validé. Glisser pour tourner, comme la vue 3D." },
 
-            { "bass ", "grave " }, { " dB against the stage", " dB face à la régie" }, { "Coverage (Pro), weight:", "Couverture (Pro), poids :" },
-            { "Room Sim Pro: how much the bass level at each seat against the stage counts (back rows losing the bass, holes, boosts). 0: only the interaction, as Room Sim.",
-              "Room Sim Pro : ce que compte le niveau du grave à chaque place face à la régie (rangs du fond qui perdent le grave, trous, boosts). 0 : seulement l'interaction, comme Room Sim." },
+            { "bass ", "grave " }, { " dB against the approved mix", " dB face au mix validé" }, { "Coverage (Pro), weight:", "Couverture (Pro), poids :" },
+            { "Room Sim Pro: how much the bass level at each seat against the approved mix counts (back rows losing the bass, holes, boosts). 0: only the interaction, as Room Sim.",
+              "Room Sim Pro : ce que compte le niveau du grave à chaque place face au mix validé (rangs du fond qui perdent le grave, trous, boosts). 0 : seulement l'interaction, comme Room Sim." },
 
             { "How far apart the three layers are.", "Écart entre les trois calques." }, { "Layer spacing", "Écart des calques" },
             { "Bass layers against the approved mix. Drag to turn, wheel to zoom, double-click to reset.",
@@ -322,6 +322,8 @@ namespace
             { "How far a boost lifts a layer and a dip lowers it.", "De combien un boost soulève un calque et un creux l'abaisse." },
             { "Amplitude", "Amplitude" }, { "Settings", "Réglages" }, { "Fold the settings away", "Replier les réglages" },
             { "Show the room and speaker settings", "Afficher les réglages de la salle et des enceintes" },
+
+            { "dip -9 dB", "creux -9 dB" }, { "+9 dB boost", "boost +9 dB" },
 
             // The fifteen cinema rooms
             { "Corridor room, live", "Salle couloir, vive" }, { "Small multiplex, live", "Petit multiplexe, vif" },

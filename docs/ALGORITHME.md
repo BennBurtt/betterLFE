@@ -580,15 +580,15 @@ avec `P place = Σ_ab H_a·conj(H_b)·S_ab` sur L, C, R et LFE (S : matrice
 interspectrale du mix, H : chemin de chaque canal jusqu'à la place),
 `P place en puissance` la même somme sans les termes croisés entre le LFE et
 l'écran (les croisés L / C / R restent), et `P approuvé` / `P approuvé en
-puissance` la même chose en régie (chemins plats). Les termes croisés LFE /
-écran sont donc bien comptés, à la place et en régie : l'écart dit ce que la
+puissance` la même chose pour le mix validé (chemins plats). Les termes croisés LFE /
+écran sont donc bien comptés, à la place et dans le mix validé : l'écart dit ce que la
 salle change à leur effet.
 
 Un LFE décorrélé donne 0 dB à toutes les places de toutes les salles (vérifié).
 
 **Étalonnage et niveau d'écoute.** Chaque salle est étalonnée comme une vraie :
 l'écran et les caissons sont réglés chacun pour que leur niveau moyen sur les
-places (20–120 Hz) égale celui de la régie, comme un étalonnage à plusieurs
+places (20–120 Hz) égale celui du mix validé, comme un étalonnage à plusieurs
 micros. Chaque place est alors au-dessus ou au-dessous de ce niveau selon ce
 que la salle y fait. L'audibilité (seuil ISO 226, dispersion 5 dB) et le
 nombre de dB qui doublent la sonie sont pris au niveau réel du grave à cette
@@ -618,7 +618,7 @@ l'IMAX traitée (30 × 22 × 16 m, 0,4 s).
 **Ce que le modèle apprend.** Les caissons et l'écran étant sur le même mur,
 leur écart de phase varie peu d'une place à l'autre. Avec un LFE identique à la
 façade et aussi fort, la plupart des places perdent 1 à 4 dB par rapport au
-gain « en phase » entendu en régie, avec 1 à 2 dB d'écart entre places. Un
+gain « en phase » entendu dans le mix validé, avec 1 à 2 dB d'écart entre places. Un
 premier modèle statistique (phase au hasard d'une place à l'autre) annonçait
 16 dB d'écart : trop pessimiste pour des caissons sous l'écran, il a été retiré
 au profit de cette simulation.
@@ -631,7 +631,7 @@ délai par l'installateur).
 
 Onglet « Room Sim Pro » (exclusif avec Room Sim). Le but : sortir de
 l'implantation cinéma standard et tester le mix dans des salles construites à
-la main (exposition, défilé, galerie, tente, église, salon, régie), enceintes
+la main (exposition, défilé, galerie, tente, église, salon, régie de studio), enceintes
 et rappels placés où l'on veut. **Son score n'entre pas dans le score global** ;
 il a le sien.
 
@@ -647,7 +647,7 @@ caisson à droite, les places de gauche bougent de 4,7 dB, celles de droite de
 enceinte. En Pro, la référence est le mix d'écran tel quel ; le grave du LFE
 y est attendu là où est celui de l'écran, dans les proportions L / C / R du
 mix. Étalonnage : chaque groupe d'enceintes (L, C, R, caissons) est réglé
-séparément au niveau de la régie ; les rappels gardent leur niveau face à
+séparément au niveau du mix validé ; les rappels gardent leur niveau face à
 l'enceinte d'écran de leur côté. C'est l'équivalent d'un réglage au bruit
 rose et au sonomètre : la même **énergie totale** de 20 à 120 Hz sur les
 places d'étalonnage, son direct et réverbéré ensemble (sous la fréquence de
@@ -677,7 +677,7 @@ Soft / Medium / Strong, même LFE +10 dB. Une différence voulue :
   `référence = Σ_ab∈{L,C,R} H_a·conj(H_b)·S_ab + Q·S_LFE` à chaque place, où
   `Q` est la réponse moyenne des enceintes d'écran pondérée par les
   puissances L / C / R du mix : comme si le grave du LFE passait par L C R.
-  L'écart est ensuite rapporté à la régie comme ci-dessus,
+  L'écart est ensuite rapporté au mix validé comme ci-dessus,
   `(P place / référence) / (P approuvé / P approuvé en puissance)`, ce qui
   revient à `P place / (référence × P approuvé / P approuvé en puissance)` :
   le terme croisé LFE / écran du mix validé est dans la comparaison. La couleur propre du chemin d'écran est
@@ -849,7 +849,7 @@ d'exposition, hall de centre des congrès, rotonde ovale, galerie en L),
 défilés (showroom, halle industrielle, hangar, tente, salle de bal de palace :
 public de part et d'autre du podium), boutiques (petite boutique, magasin de
 mode, flagship store, concept store à coins arrondis, atrium de centre
-commercial), autres lieux (tente, église, salon, régie, salle ronde avec deux
+commercial), autres lieux (tente, église, salon, régie de studio, salle ronde avec deux
 L C R dos à dos). TR60 d'Eyring à 63 Hz de 0,3 s (tentes) à 6 s (rotonde en
 plâtre et pierre).
 
@@ -887,9 +887,13 @@ un creux fait de 1 à 4 m de large : 0,6 m d'écart suffit à le voir.
 
 **Vue en couches.** À droite de la vue 3D, même taille, avec sa propre caméra
 (on la tourne et la zoome indépendamment), trois couches du grave empilées, chacune un maillage sur une grille régulière du sol à hauteur
-d'oreille (12 points sur le grand côté) : un boost soulève la couche, un creux
-l'abaisse (12 dB la déplacent de 11 % de la hauteur de la salle), sa couleur va du crème
-(rien) au rouge (6 dB et plus). La place survolée dans la vue 3D est marquée
+d'oreille (20 points sur le grand côté, chaque maille subdivisée en 3 × 3
+facettes à l'affichage) : un boost soulève la couche, un creux l'abaisse (12 dB
+la déplacent de 11 % de la hauteur de la salle, à l'amplitude 1). Couleur de
+chaque facette : gris à 0 dB (l'équivalent d'une note de 100), du bleu au
+violet pour un creux, du jaune au rouge pour un boost, pleine à 9 dB. Un
+liseré gris marque, à la hauteur de chaque couche, le plan neutre (0 dB) :
+la référence pour lire les écarts. La place survolée dans la vue 3D est marquée
 par un trait vertical et ses trois valeurs. Le fader « Écart des calques »
 règle leur écartement : 1 = 30 % de la hauteur de la salle entre deux
 couches, 3 par défaut, de 0,5 à 6 ; le cadre suit la hauteur de la pile. Le
@@ -934,26 +938,26 @@ Room Sim, lui, reste sur 20–120 Hz.
 distance, les déphasages entre sources et les modes ; la note d'interaction
 les retire volontairement en comparant chaque place au chemin d'écran à cette
 même place. Room Sim Pro note donc aussi la **couverture** : le niveau du
-grave à chaque place face au niveau de la régie, couleur de la salle comprise
+grave à chaque place face au niveau du mix validé, couleur de la salle comprise
 (rangs du fond qui perdent le grave, trous, boosts), bande par bande, avec la
 même tolérance, les mêmes dB de doublement et la même audibilité. Pénalité de
 la place = `1 − (1 − interaction) × (1 − w × couverture)`, avec `w` = 0,5 par
 défaut (réglage Dev « Couverture (Pro), poids » ; 0 redonne l'interaction
-seule). Au survol, chaque tête affiche son grave face à la régie.
+seule). Au survol, chaque tête affiche son grave face au mix validé.
 
 **Étalonnage du système LFE.** Caissons et rappels LFE sont réglés ensemble,
-comme le ferait un installateur : joués ensemble, ils atteignent le niveau de
-la régie sur les places d'étalonnage. Un rappel déplace donc le grave vers
+comme le ferait un installateur : joués ensemble, ils atteignent le niveau du
+mix validé sur les places d'étalonnage. Un rappel déplace donc le grave vers
 l'endroit où il est, il ne l'ajoute pas partout. Vérifié sur le podium du
 showroom (20 × 10 × 4 m) : sans rappel, grave +0,8 dB devant et −2,7 dB au
-fond face à la régie ; avec deux rappels LFE à mi-salle sur les côtés,
+fond face au mix validé ; avec deux rappels LFE à mi-salle sur les côtés,
 +0,4 / −1,7 dB, et la note de la salle passe de 76 à 80.
 
 **Ce que reçoit chaque tête.** Pour chaque place : le niveau du grave de 20 à
 120 Hz (dB SPL), sa sonie (phones de la bande la plus forte, ISO 226) et le
 niveau sous 40 Hz, infra compris, ressenti plus qu'entendu. La luminosité de
-chaque tête suit la part du grave du mix qui l'atteint, face à la régie :
-pleine au niveau de la régie ou au-dessus, plus sombre à mesure que la place
+chaque tête suit la part du grave du mix qui l'atteint, face au mix validé :
+pleine au niveau du mix validé ou au-dessus, plus sombre à mesure que la place
 en perd (la plus sombre dès 12 dB en moins). Une tête juste à côté d'un
 caisson, qui perd très peu, reste bien verte ; une note de 100 est en vert franc. Au survol : la note, l'écart, ce que
 la tête entend et ce qu'elle ressent.

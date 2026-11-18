@@ -518,7 +518,7 @@ void MainComponent::buildCards()
         dWorstWeight.setTooltip (tr ("Room Sim and Room Sim Pro: room score = (1 - weight) x mean seat score + weight x score of the worst seats. "
                                  "0 is the plain mean."));
         dWorstShare.setTooltip (tr ("Which seats count as the worst ones: this share of the seats, at least one."));
-        dCoverage.setTooltip (tr ("Room Sim Pro: how much the bass level at each seat against the stage counts (back rows losing the bass, holes, boosts). "
+        dCoverage.setTooltip (tr ("Room Sim Pro: how much the bass level at each seat against the approved mix counts (back rows losing the bass, holes, boosts). "
                                   "0: only the interaction, as Room Sim."));
 
         for (auto* slider : devSliders())

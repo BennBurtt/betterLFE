@@ -299,7 +299,7 @@ void Room3DView::paint (juce::Graphics& g)
             text << ",  " << (changes[(size_t) hovered] >= 0.0 ? "+" : "") << juce::String (changes[(size_t) hovered], 1) << " dB";
 
         if (hovered < (int) levels.size())
-            text << "   " << tr ("bass ") << (levels[(size_t) hovered] >= 0.0 ? "+" : "") << juce::String (levels[(size_t) hovered], 1) << tr (" dB against the stage");
+            text << "   " << tr ("bass ") << (levels[(size_t) hovered] >= 0.0 ? "+" : "") << juce::String (levels[(size_t) hovered], 1) << tr (" dB against the approved mix");
 
         if (hovered < (int) heard.size() && hovered < (int) felt.size())
             text << "   " << tr ("hears ") << (heard[(size_t) hovered] < 20.0 ? tr ("under 20 phon") : juce::String (juce::roundToInt (heard[(size_t) hovered])) + tr (" phon"))
@@ -408,6 +408,23 @@ void Room3DView::mouseDoubleClick (const juce::MouseEvent&)
 
 //==============================================================================
 // Layered view
+namespace
+{
+    // Grey at 0 dB; dips through blue to violet, boosts through yellow to red (full colour at 9 dB)
+    juce::Colour layerColour (double db)
+    {
+        const float t = (float) juce::jlimit (0.0, 1.0, std::abs (db) / 9.0);
+        const juce::Colour grey (0xff8f8f8f);
+        const juce::Colour dip[] = { juce::Colour (0xff62b6ea), juce::Colour (0xff2f68d8), juce::Colour (0xff7a3cd0) };
+        const juce::Colour boost[] = { juce::Colour (0xfff3cf4a), juce::Colour (0xfff07a2c), juce::Colour (0xffd8263a) };
+        const auto& ramp = db < 0.0 ? dip : boost;
+
+        if (t < 1.0f / 3.0f)    return grey.interpolatedWith (ramp[0], t * 3.0f);
+        if (t < 2.0f / 3.0f)    return ramp[0].interpolatedWith (ramp[1], (t - 1.0f / 3.0f) * 3.0f);
+        return ramp[1].interpolatedWith (ramp[2], (t - 2.0f / 3.0f) * 3.0f);
+    }
+}
+
 RoomLayerView::RoomLayerView()
 {
     // Layer spacing: 1 is the first version (layers 30 % of the room height apart), 3 by default
@@ -512,12 +529,6 @@ void RoomLayerView::paint (juce::Graphics& g)
     }
 
     const juce::String names[] = { tr ("Infra, under 20 Hz (not heard, felt)"), tr ("Very low, 20-60 Hz"), tr ("Low, 60-120 Hz") };
-    const auto severity = [] (double db)
-    {
-        // Cream when nothing changes, red from 6 dB of boost or dip
-        const float t = (float) juce::jlimit (0.0, 1.0, std::abs (db) / 6.0);
-        return juce::Colour (0xffe9dfb8).interpolatedWith (juce::Colour (0xffe8303a), t);
-    };
 
     if (! hasData)
     {
@@ -527,16 +538,22 @@ void RoomLayerView::paint (juce::Graphics& g)
         return;
     }
 
-    // Each layer at its height (infra at the bottom), lifted where the bass is boosted, lowered where it dips
+    // Each layer at its height (infra at the bottom), lifted where the bass is boosted,
+    // lowered where it dips; the grid is smoothed by subdividing each cell, and each
+    // small face is coloured by its change: grey at 0 (the 100 of the seats), blue
+    // to violet for a dip, yellow to red for a boost
     const double scale = 0.11 * roomHeight / 12.0 * amplitude.getValue();     // at 1: 12 dB move a layer by 11 % of the room height
+    constexpr int subdivision = 3;
+
+    struct Face { juce::Path path; juce::Colour colour; float depth; };
+    std::vector<Face> faces;
 
     for (int l = 0; l < RoomResult::numLayers; ++l)
     {
         const double base = 0.2 * roomHeight + gap * l;
         const auto& values = layers[(size_t) l];
-        bool any = false;
 
-        const auto pointOf = [&] (int column, int row, juce::Point<float>& at, double& db)
+        const auto valueAt = [&] (int column, int row, double& db)
         {
             if (column < 0 || row < 0 || column >= columns || row >= rows)
                 return false;
@@ -547,35 +564,86 @@ void RoomLayerView::paint (juce::Graphics& g)
                 return false;
 
             db = juce::jlimit (-24.0, 24.0, values[(size_t) k]);
-            at = project (nodes[(size_t) k][0], nodes[(size_t) k][1], base + scale * db);
             return true;
         };
 
-        for (int row = 0; row < rows; ++row)
-            for (int column = 0; column < columns; ++column)
-            {
-                juce::Point<float> a, b;
-                double da = 0.0, db = 0.0;
+        bool any = false;
 
-                if (! pointOf (column, row, a, da))
+        for (int row = 0; row + 1 < rows; ++row)
+            for (int column = 0; column + 1 < columns; ++column)
+            {
+                double v[4];
+
+                if (! (valueAt (column, row, v[0]) && valueAt (column + 1, row, v[1]) && valueAt (column + 1, row + 1, v[2])
+                       && valueAt (column, row + 1, v[3])))
                     continue;
 
                 any = true;
+                const auto& p0 = nodes[(size_t) index[(size_t) (row * columns + column)]];
+                const auto& p2 = nodes[(size_t) index[(size_t) ((row + 1) * columns + column + 1)]];
 
-                for (const auto& [dc, dr] : { std::pair<int, int> { 1, 0 }, { 0, 1 } })
-                    if (pointOf (column + dc, row + dr, b, db))
+                for (int sy = 0; sy < subdivision; ++sy)
+                    for (int sx = 0; sx < subdivision; ++sx)
                     {
-                        g.setColour (severity (0.5 * (da + db)).withAlpha (0.9f));
-                        g.drawLine (juce::Line<float> (a, b), 1.2f);
+                        // Bilinear inside the cell
+                        const auto corner = [&] (int cx, int cy, float* depth)
+                        {
+                            const double u = (sx + cx) / (double) subdivision, w = (sy + cy) / (double) subdivision;
+                            const double db = (1 - u) * (1 - w) * v[0] + u * (1 - w) * v[1] + u * w * v[2] + (1 - u) * w * v[3];
+                            const double x = p0[0] + u * (p2[0] - p0[0]), y = p0[1] + w * (p2[1] - p0[1]);
+                            return std::pair<juce::Point<float>, double> { projectRoomPoint (stage, camera, getWidth(), getHeight(), x, y,
+                                                                                            base + scale * db, depth), db };
+                        };
+
+                        float d0 = 0.0f, d1 = 0.0f, d2 = 0.0f, d3 = 0.0f;
+                        const auto a = corner (0, 0, &d0), b = corner (1, 0, &d1), c = corner (1, 1, &d2), d = corner (0, 1, &d3);
+                        Face f;
+                        f.path.startNewSubPath (a.first);
+                        f.path.lineTo (b.first);
+                        f.path.lineTo (c.first);
+                        f.path.lineTo (d.first);
+                        f.path.closeSubPath();
+                        f.colour = layerColour (0.25 * (a.second + b.second + c.second + d.second));
+                        f.depth = 0.25f * (d0 + d1 + d2 + d3);
+                        faces.push_back (std::move (f));
                     }
             }
 
+        // The neutral plane, a thin grey outline at the layer's own height: where 0 dB (a score of 100) would sit
+        {
+            const auto outline = room.boundaryPoints (room.shape == ProRoom::rectangle ? 4 : 64);
+            juce::Path neutral;
+
+            for (size_t k = 0; k <= outline.size(); ++k)
+            {
+                const auto& p = outline[k % outline.size()];
+                const auto at = project (p[0], p[1], base);
+
+                if (k == 0)     neutral.startNewSubPath (at);
+                else            neutral.lineTo (at);
+            }
+
+            g.setColour (juce::Colour (0xff8c8c8c).withAlpha (0.75f));
+            g.strokePath (neutral, juce::PathStrokeType (1.0f));
+        }
+
         // The layer's name at its left edge
         const auto label = project (0.0, 0.0, base);
-        g.setColour (any ? juce::Colour (0xffe9dfb8) : theme::dimText);
+        g.setColour (any ? juce::Colour (0xffdedede) : theme::dimText);
         g.setFont (uiFont (10.5f, true));
         g.drawText (any ? names[l] : names[l] + "  -  " + tr ("nothing in the mix"),
                     juce::Rectangle<float> (label.x - 4.0f, label.y - 16.0f, 260.0f, 14.0f), juce::Justification::centredLeft);
+    }
+
+    // The faces, the farthest first
+    std::sort (faces.begin(), faces.end(), [] (const Face& x, const Face& y) { return x.depth > y.depth; });
+
+    for (const auto& f : faces)
+    {
+        g.setColour (f.colour.withAlpha (0.78f));
+        g.fillPath (f.path);
+        g.setColour (f.colour.darker (0.5f).withAlpha (0.45f));
+        g.strokePath (f.path, juce::PathStrokeType (0.5f));
     }
 
     // The seat pointed at in the 3D view: a line through the layers and its three values
@@ -597,20 +665,21 @@ void RoomLayerView::paint (juce::Graphics& g)
         g.drawText (text, getLocalBounds().reduced (8, 4).removeFromBottom (32).removeFromTop (16), juce::Justification::centredLeft);
     }
 
-    // Legend
-    auto legend = getLocalBounds().reduced (10, 8).removeFromBottom (16).removeFromRight (240).toFloat();
-    auto bar = legend.removeFromRight (120.0f).withSizeKeepingCentre (120.0f, 8.0f);
+    // Legend: a dip on the left, 0 dB (grey) in the middle, a boost on the right
+    auto legend = getLocalBounds().reduced (10, 8).removeFromBottom (28).removeFromRight (300).toFloat();
+    auto bar = legend.removeFromTop (10.0f);
 
     for (int x = 0; x < (int) bar.getWidth(); ++x)
     {
-        g.setColour (severity (6.0 * x / bar.getWidth()));
+        g.setColour (layerColour (-9.0 + 18.0 * x / bar.getWidth()));
         g.fillRect (bar.getX() + (float) x, bar.getY(), 1.0f, bar.getHeight());
     }
 
     g.setColour (theme::dimText);
     g.setFont (uiFont (10.0f));
-    g.drawText (tr ("dip down, boost up:  0 dB"), legend, juce::Justification::centredRight);
-    g.drawText ("6 dB", bar.translated (bar.getWidth() + 4.0f, -3.0f).withWidth (40.0f), juce::Justification::centredLeft);
+    g.drawText (tr ("dip -9 dB"), legend, juce::Justification::centredLeft);
+    g.drawText ("0", legend, juce::Justification::centred);
+    g.drawText (tr ("+9 dB boost"), legend, juce::Justification::centredRight);
     g.drawText (tr ("Bass layers against the approved mix. Drag to turn, wheel to zoom, double-click to reset."),
                 getLocalBounds().reduced (8, 4).removeFromTop (14), juce::Justification::centredLeft);
 }
