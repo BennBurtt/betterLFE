@@ -1,6 +1,8 @@
 // Accuracy checks of the analysis engine on synthetic signals.
 // Plain executable: exits with 0 when every check passes.
 
+#include "EventLog.h"
+#include "Timecode.h"
 #include "../core/AlertTracker.h"
 #include "../core/AnalysisRunner.h"
 #include "../core/Inertia.h"
@@ -2744,6 +2746,102 @@ static void testSignals()
     check (worst < 1e-12 && energy > 0.0, "each test signal is the same every time it starts", worst);
 }
 
+// Timecode labels, LTC read back at every rate, the event log and its exports
+void testTimecodeAndLog()
+{
+    std::printf ("\nTimecode and event log\n");
+
+    // Drop frame: labels 00 and 01 skipped each minute but every tenth
+    check (Timecode::label (1800, FrameRate::fps2997drop) == "00:01:00;02" && Timecode::label (17982, FrameRate::fps2997drop) == "00:10:00;00"
+             && Timecode::label (1799, FrameRate::fps2997drop) == "00:00:59;29",
+           "drop-frame labels", 0.0);
+    bool roundTrip = true;
+
+    for (long long f : { 0LL, 1799LL, 1800LL, 17981LL, 17982LL, 107892LL, 2589407LL })
+    {
+        int h, m, s, fr;
+        std::sscanf (Timecode::label (f, FrameRate::fps2997drop).c_str(), "%d:%d:%d;%d", &h, &m, &s, &fr);
+        roundTrip = roundTrip && Timecode::framesFromLabel (h, m, s, fr, FrameRate::fps2997drop) == f;
+    }
+
+    double parsed = 0.0;
+    check (roundTrip && Timecode::label (25 * 3600, FrameRate::fps25) == "01:00:00:00"
+             && Timecode::parse ("01:00:00:00", FrameRate::fps25, parsed) && std::abs (parsed - 3600.0) < 1e-9
+             && ! Timecode::parse ("01:00:00:25", FrameRate::fps25, parsed) && ! Timecode::parse ("1:00:00", FrameRate::fps25, parsed),
+           "labels and frame counts agree; typed labels are read and checked", 0.0);
+
+    // LTC written then read, at every rate, under music-like noise 20 dB down
+    for (int r = 0; r < (int) FrameRate::numRates; ++r)
+    {
+        const auto rate = (FrameRate) r;
+        const long long start = Timecode::framesFromLabel (1, 0, 0, 0, rate);
+        LtcWriter writer (sampleRate, rate, start, 0.3f);
+        LtcReader reader (sampleRate);
+        std::mt19937 rng (7);
+        std::normal_distribution<double> hiss (0.0, 0.03);
+        int frames = 0, wrong = 0;
+        long long expected = -1;
+
+        for (int i = 0; i < (int) (4.0 * sampleRate); ++i)
+            if (reader.push ((float) (writer.next() + hiss (rng))))
+            {
+                const auto& f = reader.last();
+                const long long n = Timecode::framesFromLabel (f.h, f.m, f.s, f.f, rate);
+
+                if (expected >= 0 && n != expected)
+                    ++wrong;
+
+                expected = n + 1;
+                ++frames;
+            }
+
+        const double fps = reader.last().framesPerSecond;
+        std::printf ("  LTC %-8s: %d frames read, %d out of sequence, %.3f frames/s, read as %s, last %s\n", Timecode::name (rate), frames, wrong, fps,
+                     Timecode::name (reader.rate()), Timecode::label (expected - 1, rate).c_str());
+        check (frames >= (int) (3.9 * Timecode::real (rate)) - 2 && wrong == 0 && reader.rate() == rate,
+               "LTC read back frame by frame, rate recognised", (double) wrong);
+    }
+
+    // The event log: an alert on C for 3 s, a short blip on L, a run of late LFE attacks
+    EventLog log;
+    const double step = 0.02;
+
+    for (double t = 3600.0; t < 3610.0; t += step)
+    {
+        LogObservation x;
+        x.hasBass = true;
+        x.alert[1] = t >= 3602.0 && t < 3605.0 ? 0.8 : 0.0;
+        x.alertHz[1] = 63.0;
+        x.alertSign[1] = -1.0;
+        x.alert[0] = t >= 3606.0 && t < 3606.1 ? 0.8 : 0.0;
+        x.robustness = 80.0;
+
+        if (std::abs (t - 3607.0) < step / 2 || std::abs (t - 3607.5) < step / 2 || std::abs (t - 3608.0) < step / 2)
+        {
+            TransientEvent e;
+            e.inLfe = true;
+            e.match = 0.9;
+            e.delayMs = std::abs (t - 3607.5) < step / 2 ? 14.0 : 12.0;
+            x.transients.push_back (e);
+        }
+
+        log.observe (t, step, x);
+    }
+
+    log.flush();
+    const auto& ev = log.events();
+    const bool alertOk = ev.size() == 2 && ev[0].kind == EventKind::phaseAlert && ev[0].channel == 1 && std::abs (ev[0].start - 3602.0) < 0.05
+                      && std::abs (ev[0].end - 3605.0) < 0.05;
+    const bool timingOk = ev.size() == 2 && ev[1].kind == EventKind::lfeTiming && ev[1].count == 3 && std::abs (ev[1].peak - 14.0) < 1e-9;
+    const auto csv = log.toCsv (FrameRate::fps25, "Reel 1");
+    const auto edl = log.toEdlMarkers (FrameRate::fps25, "Reel 1");
+    std::printf ("%s%s", csv.c_str(), edl.c_str());
+    check (alertOk && timingOk, "the log keeps the 3 s alert and one event for three late attacks, drops the 0.1 s blip", (double) ev.size());
+    check (csv.find ("01:00:02:00,01:00:05:00") != std::string::npos && edl.find ("001  001      V     C        01:00:02:00 01:00:02:01") != std::string::npos
+             && edl.find ("|D:75") != std::string::npos,
+           "CSV and EDL markers carry the timecode and the length", 0.0);
+}
+
 int main()
 {
     testFilterDesign();
@@ -2761,6 +2859,7 @@ int main()
     testSignals();
     testPlaybackChains();
     testInertiaAndAutoReset();
+    testTimecodeAndLog();
 
     std::printf ("\n%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;

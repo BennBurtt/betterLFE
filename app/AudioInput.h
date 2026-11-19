@@ -2,6 +2,8 @@
 
 #include <juce_audio_devices/juce_audio_devices.h>
 
+#include "../core/Timecode.h"
+
 #include <array>
 #include <atomic>
 #include <cmath>
@@ -35,7 +37,49 @@ public:
         std::copy_n (buffer.data() + (size_t) scope.startIndex2 * frameSize, (size_t) scope.blockSize2 * frameSize,
                      dest + (size_t) scope.blockSize1 * frameSize);
 
+        readCount.fetch_add (scope.blockSize1 + scope.blockSize2);
         return scope.blockSize1 + scope.blockSize2;
+    }
+
+    /** Frames handed to the reader so far (since the device started): where the analysis is now. */
+    long long framesRead() const    { return readCount.load(); }
+
+    /** LTC: the input channel that carries it (-1: none). Read on the audio thread, published here. */
+    void setLtcChannel (int channel)        { ltcChannel.store (channel); }
+    int ltcChannelIndex() const             { return ltcChannel.load(); }
+
+    struct LtcAnchor
+    {
+        bool valid = false;
+        long long labelFrames = 0;      // frame count of the frame that starts at `startSample`
+        long long startSample = 0;      // in the device stream, counted like framesRead()
+        FrameRate rate = FrameRate::fps25;
+        bool reverse = false;
+    };
+
+    /** The latest LTC frame read, any thread. */
+    LtcAnchor ltc() const
+    {
+        LtcAnchor a;
+
+        for (int attempt = 0; attempt < 8; ++attempt)
+        {
+            const auto before = ltcSequence.load();
+
+            if ((before & 1u) != 0)
+                continue;
+
+            a.valid = ltcValid.load();
+            a.labelFrames = ltcFrames.load();
+            a.startSample = ltcStart.load();
+            a.rate = (FrameRate) ltcRate.load();
+            a.reverse = ltcReverse.load();
+
+            if (ltcSequence.load() == before)
+                return a;
+        }
+
+        return {};
     }
 
     bool isRunning() const          { return running.load(); }
@@ -48,6 +92,12 @@ public:
     void audioDeviceAboutToStart (juce::AudioIODevice* device) override
     {
         rate.store (device->getCurrentSampleRate());
+        ltcReader.reset (device->getCurrentSampleRate());
+        ltcBase = 0;
+        ltcReaderChannel = -2;
+        streamCount = 0;
+        readCount.store (0);
+        ltcValid.store (false);
         ++startCount;
         running.store (true);
     }
@@ -74,10 +124,37 @@ public:
             source[i] = (index >= 0 && index < numInputs) ? input[index] : nullptr;
         }
 
+        // LTC: read on its channel, sample by sample, its frames published with their place in the stream
+        const int ltcIndex = ltcChannel.load (std::memory_order_relaxed);
+
+        if (ltcIndex != ltcReaderChannel)
+        {
+            ltcReaderChannel = ltcIndex;
+            ltcReader.reset (rate.load());
+            ltcBase = streamCount;
+            ltcValid.store (false);
+        }
+
+        if (ltcIndex >= 0 && ltcIndex < numInputs && input[ltcIndex] != nullptr)
+            for (int i = 0; i < numSamples; ++i)
+                if (ltcReader.push (input[ltcIndex][i]))
+                {
+                    const auto& f = ltcReader.last();
+                    const auto r = ltcReader.rate();
+                    ltcSequence.fetch_add (1);
+                    ltcFrames.store (Timecode::framesFromLabel (f.h, f.m, f.s, f.f, r) + (f.reverse ? -1 : 1));
+                    ltcStart.store (ltcBase + f.endSample);
+                    ltcRate.store ((int) r);
+                    ltcReverse.store (f.reverse);
+                    ltcValid.store (true);
+                    ltcSequence.fetch_add (1);
+                }
+
+        streamCount += numSamples;
         double energy = 0.0;
 
         for (int c = 0; c < numInputs; ++c)
-            if (input[c] != nullptr)
+            if (input[c] != nullptr && c != ltcIndex)
                 for (int i = 0; i < numSamples; ++i)
                     energy += (double) input[c][i] * input[c][i];
 
@@ -114,6 +191,16 @@ private:
     std::atomic<int> startCount { 0 }, dropped { 0 };
     std::atomic<bool> running { false };
     std::atomic<float> rms { 0.0f };
+    std::atomic<long long> readCount { 0 };
+
+    // LTC, audio thread side, then published under a sequence counter
+    LtcReader ltcReader;
+    long long ltcBase = 0, streamCount = 0;
+    int ltcReaderChannel = -2;
+    std::atomic<int> ltcChannel { -1 }, ltcRate { (int) FrameRate::fps25 };
+    std::atomic<unsigned> ltcSequence { 0 };
+    std::atomic<long long> ltcFrames { 0 }, ltcStart { 0 };
+    std::atomic<bool> ltcValid { false }, ltcReverse { false };
 };
 
 } // namespace subguard

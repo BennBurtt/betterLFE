@@ -33,6 +33,10 @@ public:
 
     std::array<double, 3> speakerLevel { { 0.0, 0.0, 0.0 } };
 
+    // This frame only, without hold or decay (for the event log): the strongest
+    // alert of each channel, where it is and which way it goes (+1 in phase, -1 out)
+    std::array<double, 3> alertNow { { 0.0, 0.0, 0.0 } }, alertHz { { 0.0, 0.0, 0.0 } }, alertSign { { 1.0, 1.0, 1.0 } };
+
     void reset (size_t gridSize)
     {
         for (int c = 0; c < 3; ++c)
@@ -46,6 +50,9 @@ public:
         heatLevel.assign (gridSize, 0.0);
         heatSign.assign (gridSize, 1.0);
         speakerLevel.fill (0.0);
+        alertNow.fill (0.0);
+        alertHz.fill (0.0);
+        alertSign.fill (1.0);
         speakerAge.fill (holdSeconds);
     }
 
@@ -130,8 +137,16 @@ public:
                     heatSign[i] = sign[c][i];
                 }
 
+                if (target > strongest)
+                {
+                    alertHz[c] = a.grid[i];
+                    alertSign[c] = s < 0.0 ? -1.0 : 1.0;
+                }
+
                 strongest = std::max (strongest, target);
             }
+
+            alertNow[c] = strongest;
 
             double& spk = speakerLevel[c];
 

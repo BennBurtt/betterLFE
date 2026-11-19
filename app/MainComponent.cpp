@@ -129,6 +129,24 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
     testView.onUseTestSource = [this] { useTestSource (true); };
     testView.onLoadRooms = [this] { proView.loadRooms (ProRooms::defaults()); };
 
+    // Log: what was seen, stamped with the timeline's timecode
+    addChildComponent (logView);
+    logButton.setClickingTogglesState (true);
+    logButton.setTooltip (tr ("The event log: every alert with its timecode (LTC read on an input, or a session clock), exported as CSV or markers."));
+    logButton.onClick = [this] { showMode (logButton.getToggleState() ? 4 : 0); };
+    addAndMakeVisible (logButton);
+    logView.onTimecodeSource = [this] (int channel)
+    {
+        ltcChannel = channel;
+        input.setLtcChannel (channel);
+        saveState();
+    };
+    logView.onRate = [this] (int rate) { logRateChoice = rate; saveState(); };
+    logView.onStart = [this] (double seconds) { sessionStart = seconds; sessionZero = streamSeconds; saveState(); };
+    logView.onClear = [this] { eventLog.clear(); sessionZero = streamSeconds; };
+    logView.onExportCsv = [this] { exportLog (false); };
+    logView.onExportEdl = [this] { exportLog (true); };
+
     languageFlag.setTooltip (currentLanguage() == Language::french ? tr ("Interface en français. Cliquer : English.")
                                                                    : tr ("Interface in English. Click: français."));
     languageFlag.onClick = [this] { if (onLanguageToggle) onLanguageToggle(); };
@@ -837,6 +855,8 @@ void MainComponent::resized()
     proButton.setBounds (bar.removeFromLeft (120));
     bar.removeFromLeft (6);
     testButton.setBounds (bar.removeFromLeft (70));
+    bar.removeFromLeft (6);
+    logButton.setBounds (bar.removeFromLeft (60));
 
     history.setBounds (area.removeFromBottom (48));
     roomView.setBounds (area);
@@ -845,9 +865,12 @@ void MainComponent::resized()
     proView.setVisible (proMode);
     testView.setBounds (area);
     testView.setVisible (testMode);
-    spectrum.setVisible (! roomMode && ! proMode && ! testMode);
-    transientStrip.setVisible (! roomMode && ! proMode && ! testMode);
-    correlation.setVisible (! roomMode && ! proMode && ! testMode);
+    logView.setBounds (area);
+    logView.setVisible (logMode);
+    const bool analyzer = ! roomMode && ! proMode && ! testMode && ! logMode;
+    spectrum.setVisible (analyzer);
+    transientStrip.setVisible (analyzer);
+    correlation.setVisible (analyzer);
     correlation.setBounds (area.removeFromBottom (juce::jmax (150, area.getHeight() * 2 / 7)));
     transientStrip.setBounds (area.removeFromBottom (68));
     spectrum.setBounds (area);
@@ -949,6 +972,8 @@ void MainComponent::showMode (int mode)
     roomMode = mode == 1;
     proMode = mode == 2;
     testMode = mode == 3;
+    logMode = mode == 4;
+    logButton.setToggleState (logMode, juce::dontSendNotification);
     roomButton.setToggleState (roomMode, juce::dontSendNotification);
     proButton.setToggleState (proMode, juce::dontSendNotification);
     testButton.setToggleState (testMode, juce::dontSendNotification);
@@ -957,6 +982,72 @@ void MainComponent::showMode (int mode)
         proView.grabKeyboardFocus();
 
     resized();
+}
+
+FrameRate MainComponent::logRate() const
+{
+    if (logRateChoice >= 0 && logRateChoice < (int) FrameRate::numRates)
+        return (FrameRate) logRateChoice;
+
+    const auto a = input.ltc();
+    return ltcChannel >= 0 && a.valid ? a.rate : FrameRate::fps25;
+}
+
+bool MainComponent::logClock (double& seconds, juce::String& source) const
+{
+    if (ltcChannel < 0)
+    {
+        seconds = sessionStart + (streamSeconds - sessionZero);
+        source = tr ("session clock, from the start time below");
+        return true;
+    }
+
+    // LTC: the last frame read, moved on by the audio analysed since it ended
+    const auto a = input.ltc();
+
+    if (! input.isRunning() || ! a.valid)
+    {
+        source = tr ("waiting for LTC on input ") + juce::String (ltcChannel + 1);
+        return false;
+    }
+
+    const double since = (double) (input.framesRead() - a.startSample) / juce::jmax (1.0, input.sampleRate());
+
+    if (since > 1.0 || since < -1.0)
+    {
+        source = tr ("LTC stopped on input ") + juce::String (ltcChannel + 1) + tr (": nothing is logged until it runs again");
+        return false;
+    }
+
+    seconds = (double) a.labelFrames / Timecode::real (a.rate) + (a.reverse ? -since : since);
+    source = tr ("LTC on input ") + juce::String (ltcChannel + 1) + ", " + Timecode::name (a.rate) + (a.reverse ? tr (", reverse") : "");
+    return true;
+}
+
+void MainComponent::exportLogCsv()  { exportLog (false); }
+void MainComponent::exportLogEdl()  { exportLog (true); }
+
+void MainComponent::exportLog (bool edl)
+{
+    eventLog.flush();
+    const auto stamp = juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M");
+    const auto name = "SubGUARD log " + stamp + (edl ? ".edl" : ".csv");
+    auto chooser = std::make_shared<juce::FileChooser> (edl ? tr ("Export markers (EDL)") : tr ("Export the event log (CSV)"),
+                                                        juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile (name),
+                                                        edl ? "*.edl" : "*.csv");
+    const auto rate = logRate();
+    const auto title = "SubGUARD " + stamp.toStdString();
+    const auto text = edl ? eventLog.toEdlMarkers (rate, title) : eventLog.toCsv (rate, title);
+
+    chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
+                          [chooser, text] (const juce::FileChooser& fc)
+                          {
+                              const auto file = fc.getResult();
+
+                              if (file != juce::File() && ! file.replaceWithText (juce::String::fromUTF8 (text.c_str())))
+                                  juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Export"),
+                                                                          tr ("Could not write ") + file.getFullPathName());
+                          });
 }
 
 void MainComponent::updateStatus (const juce::String& error)
@@ -1134,6 +1225,25 @@ void MainComponent::timerCallback()
     if (testMode)
         testView.setState (analysis.isTestSource(), analysis.playingTest(), analysis.testSeconds());
 
+    if (logMode)
+    {
+        // The inputs LTC can be read on: the device's active inputs
+        auto* device = deviceManager.getCurrentAudioDevice();
+        const int inputs = device != nullptr ? device->getActiveInputChannels().countNumberOfSetBits() : 0;
+
+        if (inputs != knownInputs)
+        {
+            knownInputs = inputs;
+            logView.setChoices (ltcChannel, logRateChoice, sessionStart, inputs);
+        }
+
+        double now = 0.0;
+        juce::String source;
+        const bool ok = logClock (now, source);
+        const auto rate = logRate();
+        logView.setState (eventLog.events(), rate, ok ? juce::String (Timecode::labelOfSeconds (now, rate)) : juce::String ("--:--:--:--"), source, ok);
+    }
+
     // Settings for the analysis thread: they apply from its next 20 ms step.
     // The spectrum is measured with a fixed 150 ms average; the Inertia
     // slider only smooths what is displayed.
@@ -1147,6 +1257,9 @@ void MainComponent::timerCallback()
     {
         runnerGeneration = analysis.generation();
         haveData = false;
+        eventLog.flush();
+        sessionStart += streamSeconds - sessionZero;     // the session clock carries on from where it was
+        streamSeconds = sessionZero = 0.0;
         alerts.reset (0);
         shownFacade.clear();
         shownLfe.clear();
@@ -1164,6 +1277,7 @@ void MainComponent::timerCallback()
 
     if (fresh)
     {
+        streamSeconds += snapshot.audioSeconds;
         framePeak = snapshot.screenPeak;
         anyFramePeak = juce::jmax (snapshot.lfePeak, snapshot.screenPeak[0], snapshot.screenPeak[1], snapshot.screenPeak[2]);
         bassFramePeak = snapshot.bassPeak;
@@ -1336,6 +1450,31 @@ void MainComponent::timerCallback()
                 displayedScore = juce::roundToInt (t.robustness);
         }
 
+        // Event log: one observation per analysis step, stamped with the timecode
+        if (fresh)
+        {
+            double now = 0.0;
+            juce::String source;
+
+            if (logClock (now, source))
+            {
+                LogObservation x;
+                x.hasBass = t.hasBass;
+                x.alert = alerts.alertNow;
+                x.alertHz = alerts.alertHz;
+                x.alertSign = alerts.alertSign;
+                x.robustness = t.robustness;
+                x.lfeBalanceDb = t.lfeBalanceDb;
+                x.antiphaseDb = t.antiphaseWorstDb;
+                x.antiphaseHz = t.antiphaseWorstHz;
+                x.antiphasePair = t.antiphasePair;
+                x.transients = snapshot.events;
+                eventLog.rules.alertOn = 0.25;
+                eventLog.rules.minMatch = tMatch.value();
+                eventLog.observe (now, snapshot.audioSeconds, x);
+            }
+        }
+
         if (cards[chainsCard].isVisible())
             chainsView.update (info);
 
@@ -1479,6 +1618,11 @@ void MainComponent::loadState()
             proView.setRooms (pro);
     }
     setListeningLevel (settings->getDoubleValue ("listeningLevel", settings->getDoubleValue ("devListening", 85.0)));
+    ltcChannel = juce::jlimit (-1, 255, settings->getIntValue ("ltcChannel", -1));
+    logRateChoice = juce::jlimit (-1, (int) FrameRate::numRates - 1, settings->getIntValue ("logRate", -1));
+    sessionStart = juce::jlimit (0.0, 86399.0, settings->getDoubleValue ("logStart", 3600.0));
+    input.setLtcChannel (ltcChannel);
+    logView.setChoices (ltcChannel, logRateChoice, sessionStart, juce::jmax (0, knownInputs));
     transientToggle.setToggleState (settings->getBoolValue ("transientCheck", false), juce::dontSendNotification);
     tAttack.setValue (settings->getDoubleValue ("transientAttack", 40.0));
     tHoldProfile.setValue (settings->getDoubleValue ("transientHoldProfile", 25.0));
@@ -1536,6 +1680,9 @@ void MainComponent::saveState()
     }
     settings->setValue ("roomPro", juce::String (proView.getRooms().toText()));
     settings->setValue ("listeningLevel", listeningDbC);
+    settings->setValue ("ltcChannel", ltcChannel);
+    settings->setValue ("logRate", logRateChoice);
+    settings->setValue ("logStart", sessionStart);
     settings->setValue ("transientCheck", transientToggle.getToggleState());
     settings->setValue ("transientAttack", tAttack.value());
     settings->setValue ("transientHoldProfile", tHoldProfile.value());

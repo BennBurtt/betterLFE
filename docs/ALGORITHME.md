@@ -1338,6 +1338,57 @@ forte crête visible (zoom de 40 dB au plus).
 Sa ligne « Robustness » est toujours colorée tant qu'il y a du grave : vert
 pour un score de 100, orange à 50, rouge à 0, en dégradé continu.
 
+## 5. Journal horodaté (onglet Log)
+
+**Timecode.** Deux sources :
+
+- **LTC lu sur une entrée** (SMPTE ST 12-1 [49]). C'est l'entrée sur laquelle
+  la station envoie son timecode. Le LTC est lu échantillon par échantillon
+  dans le flux audio. Codage biphase : une transition à chaque bord de bit,
+  une de plus au milieu d'un 1. La période du bit se suit d'elle-même. Les
+  80 bits sont repérés par le mot de synchro (0011 1111 1111 1101), lu à
+  l'endroit comme à l'envers. La cadence se déduit de l'espacement mesuré
+  des trames et du bit de drop frame : 23,976, 24, 25, 29,97 DF ou ND, 30.
+  Chaque observation est datée par la dernière trame lue, avancée de l'audio
+  analysé depuis. Si le LTC s'arrête plus d'une seconde, rien n'est noté.
+- **Horloge de session**, sans LTC. Elle part d'une heure choisie
+  (01:00:00:00 par défaut) quand le journal est vidé, et avance avec l'audio
+  analysé.
+
+Drop frame : les numéros 00 et 01 sont sautés au début de chaque minute,
+sauf toutes les dix minutes (vérifié : 00:00:59;29 puis 00:01:00;02, et la
+trame 17982 = 00:10:00;00).
+
+**Ce qui est noté.** Le direct et l'analyse de fichiers notent la même chose,
+selon les mêmes règles :
+
+| Événement | S'ouvre | Se ferme |
+|---|---|---|
+| Alerte de phase, par voie d'écran | alerte au-dessus de 0,25 (même seuil et même mode que la Phase Alert) | sous la moitié |
+| Calage du LFE | attaque partagée (ressemblance ≥ réglage Transients) en retard ou en avance d'au moins 2 ms, ou inversée | une série d'attaques à moins de 2 s fait un seul événement (pire écart, nombre) |
+| Robustesse basse | score sous 50 | au-dessus de 55 |
+| Le grave repose sur le LFE | LFE plus de 6 dB au-dessus de l'écran | sous 5 dB |
+| Écran en opposition de phase | perte une fois sommé au-delà de 3 dB | sous 2 dB |
+
+Le même état revenu dans la seconde prolonge l'événement. Un état de moins
+de 0,25 s n'est pas noté (les attaques, si). Ces seuils sont des choix
+(hypothèses), alignés sur ceux de l'affichage.
+
+**Datation.** Un événement est daté quand SubGUARD le voit. La Phase Alert
+moyenne sur son temps d'intégration : une alerte peut commencer jusqu'à ce
+temps après sa cause. Les attaques sont datées au pas d'analyse (20 ms).
+
+**Exports.** CSV : début, fin, durée, type, voie, valeur, unité, fréquence,
+nombre d'attaques, détail. Marqueurs : une EDL CMX 3600 dont chaque note est
+un marqueur, au format que DaVinci Resolve importe (Timeline > Import >
+Timeline Markers from EDL), couleur par type. Fichier > Exporter le journal
+fait de même. Vérifié sur un journal synthétique : l'alerte de 3 s sur C est
+gardée (01:00:02:00 à 01:00:05:00), le passage de 0,1 s sur L est écarté,
+trois attaques en retard font un seul événement (pire +14 ms, 3 attaques) ;
+l'EDL porte la durée en trames (75 à 25 i/s). LTC écrit puis relu à chaque
+cadence, sous un bruit 20 dB plus bas : aucune trame hors séquence, cadence
+reconnue (29,97 mesuré 29,969).
+
 ## Ce qui est vérifié
 
 `tests/EngineTests.cpp` contrôle sur signaux synthétiques : niveaux, repliement,
@@ -1524,6 +1575,8 @@ du son) : bruit blanc ou rose, aucune ; grondement grave (sous 90 Hz), 1 à 3.
     environments », *JAES* 55(7/8), 2007.
 48. R. H. Small, « Closed-box loudspeaker systems, Part I: Analysis », *JAES*
     20(10), 798–808 (1972).
+49. SMPTE ST 12-1, *Time and Control Code* (code temporel longitudinal :
+    80 bits, codage biphase, mot de synchro, drop frame).
 
 
 ## Niveau du LFE et réglages

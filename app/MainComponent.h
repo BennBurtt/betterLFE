@@ -9,6 +9,8 @@
 #include "Widgets.h"
 #include "RoomProView.h"
 #include "TestView.h"
+#include "LogView.h"
+#include "../core/EventLog.h"
 #include "../core/Inertia.h"
 
 namespace subguard
@@ -89,6 +91,10 @@ public:
     /** Room Sim Pro, for the File and Edit menus of the window. */
     RoomProView& roomPro()                      { return proView; }
 
+    /** The event log, for the File menu. */
+    void exportLogCsv();
+    void exportLogEdl();
+
 private:
     LanguageFlag languageFlag;
     enum CardId { sourceCard, spectrumCard, alertCard, transientsCard, chainsCard, devCard, numCards };
@@ -150,7 +156,22 @@ private:
     TestView testView;
     juce::TextButton testButton { tr ("Test") };
     bool testMode = false;
-    void showMode (int mode);       // 0 the analyzer, 1 Room Sim, 2 Room Sim Pro, 3 Test
+    LogView logView;
+    juce::TextButton logButton { tr ("Log") };
+    bool logMode = false;
+    void showMode (int mode);       // 0 the analyzer, 1 Room Sim, 2 Room Sim Pro, 3 Test, 4 Log
+
+    // Event log: stamped with LTC read on an input, or with a session clock
+    EventLog eventLog;
+    double streamSeconds = 0.0;         // audio analysed since the analysis started
+    double sessionZero = 0.0;           // streamSeconds when the session clock started
+    double sessionStart = 3600.0;       // its timecode then, in seconds (01:00:00:00)
+    int ltcChannel = -1;                // input carrying LTC, -1: the session clock
+    int logRateChoice = -1;             // FrameRate, -1: as read from the LTC (25 for the session clock)
+    int knownInputs = -1;
+    FrameRate logRate() const;
+    bool logClock (double& seconds, juce::String& source) const;
+    void exportLog (bool edl);
 
     // Rooms that count in the score: ticked in Playback chains or in Room Sim
     std::vector<bool> roomSelected = RoomSimulator::defaultSelection();

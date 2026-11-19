@@ -85,7 +85,7 @@ public:
        #endif
     }
 
-    // File: save and load the Room Sim Pro rooms. Edit: undo and redo their changes.
+    // File: save and load the Room Sim Pro rooms, export the event log. Edit: undo and redo the rooms' changes.
     juce::StringArray getMenuBarNames() override       { return { tr ("File"), tr ("Edit") }; }
 
     juce::PopupMenu getMenuForIndex (int index, const juce::String&) override
@@ -106,6 +106,9 @@ public:
         {
             item (1, tr ("Save the rooms..."), command + "S");
             item (2, tr ("Load rooms..."), command + "O");
+            menu.addSeparator();
+            item (5, tr ("Export the event log (CSV)..."), {});
+            item (6, tr ("Export markers (EDL)..."), {});
         }
         else
         {
@@ -131,6 +134,8 @@ public:
             case 2:     pro.importConfig(); break;
             case 3:     pro.undo(); break;
             case 4:     pro.redo(); break;
+            case 5:     content->exportLogCsv(); break;
+            case 6:     content->exportLogEdl(); break;
             default:    break;
         }
     }
