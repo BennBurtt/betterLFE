@@ -24,6 +24,7 @@ struct ReelSource
     juce::Array<juce::File> files;
     std::array<int, 4> file { { -1, -1, -1, -1 } };       // L, C, R, LFE: which file
     std::array<int, 4> channel { { -1, -1, -1, -1 } };    // and which channel in it
+    std::vector<std::pair<int, int>> surround;              // file, channel of each surround or height: summed into S
     juce::String channels;                                  // how they were found, for the report
 
     /** The chosen files as reels. Mono files named ..._L, ..._C, ..._R, ..._LFE (or . - space) are put together. */
@@ -49,6 +50,12 @@ struct ReelSource
                 for (const char* n : names[c])
                     if (*n != 0 && token == n)
                         return c;
+
+            // Surrounds and heights: 4, summed into S
+            for (const char* n : { "LS", "RS", "LSS", "RSS", "LSR", "RSR", "LRS", "RRS", "LB", "RB", "LW", "RW", "CS", "BS",
+                                   "LTF", "RTF", "LTM", "RTM", "LTR", "RTR", "LTB", "RTB", "LTS", "RTS", "TS", "VOG" })
+                if (token == n)
+                    return 4;
 
             return -1;
         };
@@ -85,8 +92,17 @@ struct ReelSource
                 }
 
                 auto& r = reels[(size_t) index];
-                r.file[(size_t) label] = r.files.size();
-                r.channel[(size_t) label] = 0;
+
+                if (label == 4)
+                {
+                    r.surround.push_back ({ r.files.size(), 0 });
+                }
+                else
+                {
+                    r.file[(size_t) label] = r.files.size();
+                    r.channel[(size_t) label] = 0;
+                }
+
                 r.files.add (f);
                 continue;
             }
@@ -101,6 +117,10 @@ struct ReelSource
             if (n == (int) format.channels.size())
             {
                 map = format.analysisIndices();
+
+                for (int s : format.surroundIndices())
+                    r.surround.push_back ({ 0, s });
+
                 r.channels = tr ("channels as in ") + format.name;
             }
             else if (n == 1)
@@ -116,6 +136,10 @@ struct ReelSource
             else
             {
                 map = { { 0, 2, 1, 3 } };
+
+                for (int s = 4; s < n; ++s)
+                    r.surround.push_back ({ 0, s });
+
                 r.channels = juce::String (n) + tr (" channels, WAV order (L, R, C, LFE, ...)");
             }
 
@@ -138,6 +162,9 @@ struct ReelSource
                 for (int c = 0; c < 4; ++c)
                     if (r.file[(size_t) c] >= 0)
                         found.add (names[c]);
+
+                if (! r.surround.empty())
+                    found.add (juce::String ((int) r.surround.size()) + tr (" surrounds and heights"));
 
                 r.channels = tr ("one file per channel: ") + found.joinIntoString (", ");
             }
@@ -252,8 +279,21 @@ private:
                 const float* from = f >= 0 && ch >= 0 && ch < (int) readers[(size_t) f]->numChannels ? channels[(size_t) f].data() + (size_t) ch * (size_t) n : nullptr;
 
                 for (int i = 0; i < n; ++i)
-                    out[i * 4 + c] = from != nullptr ? from[i] : 0.0f;
+                    out[i * numChannels + c] = from != nullptr ? from[i] : 0.0f;
             }
+
+            // S: the surrounds and heights, summed
+            for (int i = 0; i < n; ++i)
+                out[i * numChannels + chS] = 0.0f;
+
+            for (const auto& [f, ch] : src.surround)
+                if (f >= 0 && f < (int) readers.size() && ch < (int) readers[(size_t) f]->numChannels)
+                {
+                    const float* from = channels[(size_t) f].data() + (size_t) ch * (size_t) n;
+
+                    for (int i = 0; i < n; ++i)
+                        out[i * numChannels + chS] += from[i];
+                }
 
             position += n;
             return n;

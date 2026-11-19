@@ -128,17 +128,17 @@ namespace
 
     struct Scene
     {
-        Signal l, c, r, lfe;
+        Signal l, c, r, lfe, s;      // s: surrounds and heights, summed
 
         size_t length() const
         {
-            return std::max (std::max (l.size(), c.size()), std::max (r.size(), lfe.size()));
+            return std::max ({ l.size(), c.size(), r.size(), lfe.size(), s.size() });
         }
 
         std::vector<float> interleaved() const
         {
             std::vector<float> d (length() * numChannels, 0.0f);
-            const Signal* src[numChannels] = { &l, &c, &r, &lfe };
+            const Signal* src[numChannels] = { &l, &c, &r, &lfe, &s };
 
             for (int ch = 0; ch < numChannels; ++ch)
                 for (size_t i = 0; i < src[ch]->size(); ++i)
@@ -1744,8 +1744,8 @@ static void testRunner()
     // Peaks accumulate between reads
     {
         AnalysisRunner runner (sampleRate, 1.0);
-        std::vector<float> click (4 * 2000, 0.0f);
-        click[(size_t) 1000 * 4 + chC] = 0.5f;
+        std::vector<float> click (numChannels * 2000, 0.0f);
+        click[(size_t) 1000 * numChannels + chC] = 0.5f;
         runner.feed (click.data(), 2000);
         Snapshot snap;
         check (runner.take (snap) && std::abs (snap.screenPeak[1] - 0.5) < 1e-9, "a peak between two reads is kept", snap.screenPeak[1]);
@@ -1896,7 +1896,7 @@ static void testRooms()
 
         const auto inPhase = mixOf (1.0), opposed = mixOf (-1.0);
         const auto tIn = sim.compute (inPhase), tOpp = sim.compute (opposed);
-        const char* pairs[] = { "L / R", "L / C", "C / R" };
+        const char* pairs[] = { "L / R", "L / C", "C / R", "screen / surrounds" };
         std::printf ("  bass of L and R in opposition: %.1f dB at %.0f Hz (%s); in phase: %.1f dB. Stereo PA with subwoofers on L + R: "
                      "%+.1f dB (%.0f) against %+.1f dB (%.0f)\n",
                      tOpp.antiphaseWorstDb, tOpp.antiphaseWorstHz, tOpp.antiphasePair >= 0 ? pairs[tOpp.antiphasePair] : "-", tIn.antiphaseWorstDb,
@@ -2886,10 +2886,11 @@ void testOfflineReel()
 
         for (int i = 0; i < n; ++i, ++position)
         {
-            out[i * 4 + 0] = l[position];
-            out[i * 4 + 1] = c[position];
-            out[i * 4 + 2] = l[position];
-            out[i * 4 + 3] = lfe[position];
+            out[i * numChannels + 0] = l[position];
+            out[i * numChannels + 1] = c[position];
+            out[i * numChannels + 2] = l[position];
+            out[i * numChannels + 3] = lfe[position];
+            out[i * numChannels + 4] = 0.0f;
         }
 
         return n;
@@ -2925,6 +2926,56 @@ void testOfflineReel()
            "the report has the reel, its timeline and its timecode", (double) html.size());
 }
 
+// Surrounds and heights: their own speakers in a cinema, summed with the screen once bass managed
+void testSurrounds()
+{
+    std::printf ("\nSurrounds and heights\n");
+
+    const auto mixOf = [] (double surroundSign)
+    {
+        Signal c, cq;
+        quadraturePair (8.0, 41, c, cq);
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        Scene s;
+        s.c = c;
+        s.s = scaled (c, surroundSign);
+        run (e, s);
+        return e.result();
+    };
+
+    PlaybackSimulator sim;
+    const auto none = sim.compute (mixOf (0.0)), opposed = sim.compute (mixOf (-1.0)), same = sim.compute (mixOf (1.0));
+    const auto cinemaOnTime = [] (const Translation& t)
+    {
+        for (const auto& c : t.chains)
+            if (c.kind == ChainResult::Kind::cinema && std::abs (c.delayMs) < 1e-9 && ! c.inverted)
+                return c.changeDb;
+
+        return 99.0;
+    };
+    const auto managed80 = [] (const Translation& t)
+    {
+        for (const auto& c : t.chains)
+            if (c.kind == ChainResult::Kind::bassManaged && std::abs (c.crossoverHz - 80.0) < 1e-9 && ! c.encoderFilter)
+                return c.changeDb;
+
+        return 99.0;
+    };
+
+    std::printf ("  C alone: cinema %+.1f dB, bass managed %+.1f dB. With S = -C: cinema %+.1f, bass managed %+.1f, antiphase %.1f dB (pair %d), "
+                 "surrounds %+.1f dB against the screen. With S = C: bass managed %+.1f\n",
+                 cinemaOnTime (none), managed80 (none), cinemaOnTime (opposed), managed80 (opposed), opposed.antiphaseWorstDb, opposed.antiphasePair,
+                 opposed.surroundBalanceDb, managed80 (same));
+    check (! none.hasSurround && opposed.hasSurround && std::abs (opposed.surroundBalanceDb) < 0.5,
+           "the surrounds' bass is measured against the screen", opposed.surroundBalanceDb);
+    check (std::abs (cinemaOnTime (opposed)) < 0.3 && managed80 (opposed) < -10.0 && managed80 (same) > 2.5,
+           "cinema: surrounds on their own speakers; bass managed: summed with the screen in the subwoofer", managed80 (opposed));
+    check (opposed.antiphasePair == 3 && opposed.antiphaseWorstDb < -10.0,
+           "the screen against the surrounds in opposition is named in the antiphase corner", opposed.antiphaseWorstDb);
+    check (opposed.others[PlaybackSimulator::stereoPaNoLfe].changeDb < -3.0 && std::abs (none.others[PlaybackSimulator::stereoPaNoLfe].changeDb - 3.0) < 0.5,
+           "a PA fold-down sums the surrounds with the screen too (C alone: +3 dB, C at -3 dB on both sides)", opposed.others[0].changeDb);
+}
+
 int main()
 {
     testFilterDesign();
@@ -2944,6 +2995,7 @@ int main()
     testInertiaAndAutoReset();
     testTimecodeAndLog();
     testOfflineReel();
+    testSurrounds();
 
     std::printf ("\n%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;

@@ -1164,10 +1164,18 @@ void ChainsView::paint (juce::Graphics& g)
 
     line (tr ("  from LFE dependence (audible)"), t.hasBass ? juce::String (juce::roundToInt (100.0 * (1.0 - t.dependence)))
                                                  + tr (" / 100     LFE ") + (t.lfeBalanceDb >= 0.0 ? "+" : "") + juce::String (t.lfeBalanceDb, 1)
-                                                 + tr (" dB against the screen, carries ") + juce::String (juce::roundToInt (100.0 * t.lfeShare))
+                                                 + tr (" dB against the other channels, carries ") + juce::String (juce::roundToInt (100.0 * t.lfeShare))
                                                  + tr (" % of the bass")
                                              : none,
           t.hasBass && t.lfeBalanceDb > PlaybackSimulator::balanceWarningDb);
+
+    // Surrounds and heights: their own speakers in a cinema, in the subwoofer once bass managed
+    line (tr ("  surrounds and heights"), t.hasBass ? (t.hasSurround ? (t.surroundBalanceDb >= 0.0 ? "+" : "") + juce::String (t.surroundBalanceDb, 1)
+                                                                    + tr (" dB against the screen, ") + juce::String (juce::roundToInt (100.0 * t.surroundShare))
+                                                                    + tr (" % of the bass; summed with the screen in bass managed systems")
+                                                               : tr ("no bass worth speaking of"))
+                                                : none,
+          false);
 
     // Level dependence: one box, the stronger its colour the more a subwoofer
     // set off its level would move the bass beyond what is expected
@@ -1235,13 +1243,13 @@ void ChainsView::paint (juce::Graphics& g)
         auto titleRow = block.removeFromTop (18.0f);
         g.setColour (warn ? juce::Colour (0xffffb347) : theme::text);
         g.setFont (uiFont (12.5f, true));
-        const char* pairs[] = { "L / R", "L / C", "C / R" };
+        const char* pairs[] = { "L / R", "L / C", "C / R", "screen / surrounds" };
         juce::String value = juce::String::fromUTF8 ("\xe2\x80\x94");
 
         if (t.hasBass)
             value = worstDb > -0.05 ? tr ("none")
                                     : juce::String (worstDb, 1) + tr (" dB at ") + juce::String (juce::roundToInt (t.antiphaseWorstHz)) + " Hz ("
-                                        + juce::String (t.antiphasePair >= 0 ? pairs[t.antiphasePair] : "") + ")";
+                                        + (t.antiphasePair >= 0 ? tr (pairs[t.antiphasePair]) : juce::String()) + ")";
 
         g.drawText (tr ("Screen channels in opposition of phase, summed: ") + value, titleRow.removeFromLeft (titleRow.getWidth() - 4.0f * 52.0f),
                     juce::Justification::centredLeft);

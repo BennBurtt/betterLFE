@@ -26,6 +26,19 @@ struct ChannelFormat
     {
         return { { indexOf ("L"), indexOf ("C"), indexOf ("R"), indexOf ("LFE") } };
     }
+
+    /** Positions of every other channel (surrounds and heights): summed into S for the analysis. */
+    std::vector<int> surroundIndices() const
+    {
+        std::vector<int> out;
+
+        for (size_t i = 0; i < channels.size(); ++i)
+            if (std::strcmp (channels[i], "L") != 0 && std::strcmp (channels[i], "C") != 0 && std::strcmp (channels[i], "R") != 0
+                && std::strcmp (channels[i], "LFE") != 0)
+                out.push_back ((int) i);
+
+        return out;
+    }
 };
 
 inline const std::vector<ChannelFormat>& channelFormats()

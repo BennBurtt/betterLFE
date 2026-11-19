@@ -74,7 +74,7 @@ struct ReelReport
 class OfflineAnalyzer
 {
 public:
-    /** Pulls interleaved L, C, R, LFE frames; returns how many it gave, 0 at the end. */
+    /** Pulls interleaved L, C, R, LFE, S frames (numChannels values each); returns how many it gave, 0 at the end. */
     using Pull = std::function<int (float* interleaved, int maxFrames)>;
 
     /** Runs a reel. `progress` gets 0..1 and returns false to stop. */

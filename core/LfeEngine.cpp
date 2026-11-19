@@ -22,7 +22,7 @@ namespace
 
     // Layout of one row of the statistics: power of L, C, R, F, LFE, then the
     // real and imaginary parts of X.conj(LFE) for X = L, C, R, F.
-    constexpr int statCount = 19;
+    constexpr int statCount = 28;
     constexpr int statPower = 0, statRe = 5, statIm = 9;
 
     // ...then, for the stereo downmix, the real parts of L.conj(C) and R.conj(C).
@@ -30,6 +30,9 @@ namespace
 
     // ...and, for Room Sim Pro, the imaginary parts of L.conj(C) and R.conj(C), then L.conj(R).
     constexpr int statLCi = 15, statRCi = 16, statLR = 17, statLRi = 18;
+
+    // ...and for the surrounds and heights (S): its power, then S.conj(X) for X = L, C, R, LFE (real, imaginary)
+    constexpr int statS = 19, statSL = 20, statSC = 22, statSR = 24, statSLfe = 26;
 
     constexpr double globalLoHz = 20.0, globalHiHz = 120.0;
 
@@ -286,8 +289,10 @@ void LfeEngine::configure (double windowSeconds)
 
         m.cFLfe.assign (gridPoints, {});
 
-        for (auto* v : { &m.cLC, &m.cLR, &m.cCR, &m.cLLfe, &m.cCLfe, &m.cRLfe })
+        for (auto* v : { &m.cLC, &m.cLR, &m.cCR, &m.cLLfe, &m.cCLfe, &m.cRLfe, &m.cSL, &m.cSC, &m.cSR, &m.cSLfe })
             v->assign (gridPoints, {});
+
+        m.pS.assign (gridPoints, 0.0);
     }
 
     out.windowSeconds = windowSec;
@@ -426,7 +431,7 @@ bool LfeEngine::analyze (const Settings& settings)
         std::fill (workIm.begin(), workIm.end(), 0.0);
         fft();
 
-        const bool muted = (c != chLFE) && settings.mute[(size_t) c];
+        const bool muted = c < 3 && settings.mute[(size_t) c];
         const double gain = muted ? 0.0 : (c == chLFE ? lfeGain : facadeGain);
 
         for (size_t i = 0; i < nb; ++i)
@@ -525,6 +530,17 @@ bool LfeEngine::analyze (const Settings& settings)
         row[statLR] = lr.real();
         row[statLRi] = lr.imag();
 
+        const auto s = spectrum[chS][i];
+        row[statS] = std::norm (s);
+        const std::complex<double> withS[4] = { s * std::conj (x[0]), s * std::conj (x[1]), s * std::conj (x[2]), s * std::conj (lfe) };
+        const int at[4] = { statSL, statSC, statSR, statSLfe };
+
+        for (int k = 0; k < 4; ++k)
+        {
+            row[at[k]] = withS[k].real();
+            row[at[k] + 1] = withS[k].imag();
+        }
+
         // Whole-session polarity: no forgetting, weighted by energy and time
         if (i >= globalBinLo && i < globalBinHi)
         {
@@ -600,6 +616,11 @@ bool LfeEngine::analyze (const Settings& settings)
             m.cLLfe[g] = std::complex<double> (fast[statRe], fast[statIm]) / (facadeGain * gl);
             m.cCLfe[g] = std::complex<double> (fast[statRe + 1], fast[statIm + 1]) / (facadeGain * gl);
             m.cRLfe[g] = std::complex<double> (fast[statRe + 2], fast[statIm + 2]) / (facadeGain * gl);
+            m.pS[g] = fast[statS] / gf2;
+            m.cSL[g] = std::complex<double> (fast[statSL], fast[statSL + 1]) / gf2;
+            m.cSC[g] = std::complex<double> (fast[statSC], fast[statSC + 1]) / gf2;
+            m.cSR[g] = std::complex<double> (fast[statSR], fast[statSR + 1]) / gf2;
+            m.cSLfe[g] = std::complex<double> (fast[statSLfe], fast[statSLfe + 1]) / (facadeGain * gl);
 
             const double q = std::sqrt (smNow[pairFacade] * smNow[4]);
             double& a1 = m1Fast[g];

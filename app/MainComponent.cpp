@@ -521,7 +521,7 @@ void MainComponent::buildCards()
     roomView.onToggle = [this] (int room) { setRoomSelected (room, ! roomSelected[(size_t) room]); };
     roomView.setSelection (roomSelected);
 
-    populate (chainsCard, 600, 640, { &chainsView, &roomTicksLabel },
+    populate (chainsCard, 600, 664, { &chainsView, &roomTicksLabel },
               [this] (juce::Rectangle<int> r)
               {
                   auto ticks = r.removeFromBottom (4 * 24);
@@ -890,6 +890,7 @@ void MainComponent::resized()
 void MainComponent::applyFormat()
 {
     input.setChannelIndices (format().analysisIndices());
+    input.setSurroundIndices (format().surroundIndices());
 }
 
 void MainComponent::openDevices()

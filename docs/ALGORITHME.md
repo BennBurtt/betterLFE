@@ -386,6 +386,31 @@ quand la moyenne atteint 3 dB. Un cas à ±6 dB compte pour 0,3 dans la moyenne.
 Les niveaux négatifs sont gardés : avec un LFE plus fort que la façade et en
 opposition, *baisser* le sub rapproche les deux de l'annulation.
 
+### 3.4 bis Surrounds et hauteurs
+
+Toutes les voies du format autres que L, C, R et le LFE (surrounds, arrières,
+larges, hauteurs) sont **sommées en une voie S** avant l'analyse. Le moteur
+mesure la puissance de S et ses spectres croisés avec L, C, R et le LFE, avec
+le même seuil de hasard que l'écran.
+
+| Où | Ce que devient S |
+|---|---|
+| Mix validé, systèmes cinéma | S sort de ses propres enceintes : ajoutée **en puissance**. Un mix sans grave dans les surrounds ne change pas |
+| Bass management (60, 80, 100 Hz) | S part dans le caisson **avec l'écran** : somme cohérente F + S. Une basse de surround en opposition avec l'écran s'y annule, une basse identique y gagne 3 dB |
+| Repli stéréo sans LFE (dépendance) | ajoutée en puissance, comme dans le mix validé : seul le LFE est retiré |
+| Other systems (façade, petites enceintes) | repliée à 0,707 dans chaque côté (UIT-R BS.775 [12]), puis sommée dans les caissons |
+| Coin antiphase | un quatrième couple, **écran / surrounds** |
+| Dépendance au LFE | la part du LFE se compte face à toutes les autres voies, surrounds compris |
+
+Vérifié : C seul, puis S = −C, puis S = C (même niveau). Au cinéma, 0 dB dans
+les trois cas. En bass management à 80 Hz : 0 dB, −24 dB, puis +3,0 dB. Le
+coin antiphase désigne le couple écran / surrounds (−24 dB). Aucun autre
+résultat de la suite de tests ne change.
+
+**Limite.** S étant une somme, l'opposition de phase **entre** deux
+surrounds (Ls contre Rs) est déjà faite avant l'analyse : elle n'est pas vue
+comme telle, seulement son résultat.
+
 ### 3.5 Note d'un système
 
 Pour chaque système et chaque bande (20–30, 30–60, 60–90, 90–120 Hz) :

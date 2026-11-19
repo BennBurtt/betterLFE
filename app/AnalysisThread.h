@@ -20,6 +20,8 @@
 namespace subguard
 {
 
+static_assert (AudioInput::frameSize == numChannels, "the audio input hands over the frames the engine reads");
+
 class AnalysisThread : private juce::Thread
 {
 public:
@@ -236,6 +238,7 @@ private:
             out[chC] = (float) other;
             out[chR] = (float) (1.4 * flipped);
             out[chLFE] = (float) lfe;
+            out[chS] = 0.0f;
         }
 
         demoTime += numFrames / rate;

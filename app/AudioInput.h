@@ -20,7 +20,19 @@ class AudioInput : public juce::AudioIODeviceCallback
 public:
     AudioInput()  { setChannelIndices ({ { 0, 2, 1, 3 } }); }
 
-    static constexpr int frameSize = 4;      // L, C, R, LFE
+    static constexpr int frameSize = 5;      // L, C, R, LFE, S (surrounds and heights summed)
+    static constexpr int maxSurrounds = 16;
+
+    /** The inputs summed into S. */
+    void setSurroundIndices (const std::vector<int>& indices)
+    {
+        const int n = juce::jmin ((int) indices.size(), maxSurrounds);
+
+        for (int i = 0; i < n; ++i)
+            surroundIndex[(size_t) i].store (indices[(size_t) i]);
+
+        surroundCount.store (n);
+    }
 
     void setChannelIndices (const std::array<int, 4>& indices)
     {
@@ -124,6 +136,17 @@ public:
             source[i] = (index >= 0 && index < numInputs) ? input[index] : nullptr;
         }
 
+        const float* surrounds[maxSurrounds];
+        int numSurrounds = 0;
+
+        for (int i = 0; i < surroundCount.load (std::memory_order_relaxed); ++i)
+        {
+            const int index = surroundIndex[(size_t) i].load (std::memory_order_relaxed);
+
+            if (index >= 0 && index < numInputs && input[index] != nullptr)
+                surrounds[numSurrounds++] = input[index];
+        }
+
         // LTC: read on its channel, sample by sample, its frames published with their place in the stream
         const int ltcIndex = ltcChannel.load (std::memory_order_relaxed);
 
@@ -175,8 +198,17 @@ public:
             float* dest = buffer.data() + (size_t) block.first * frameSize;
 
             for (int i = 0; i < block.second; ++i, ++pos, dest += frameSize)
+            {
                 for (size_t c = 0; c < 4; ++c)
                     dest[c] = source[c] != nullptr ? source[c][pos] : 0.0f;
+
+                float s = 0.0f;
+
+                for (int k = 0; k < numSurrounds; ++k)
+                    s += surrounds[k][pos];
+
+                dest[4] = s;
+            }
         }
     }
 
@@ -187,6 +219,8 @@ private:
     std::vector<float> buffer = std::vector<float> ((size_t) capacity * frameSize);
 
     std::array<std::atomic<int>, 4> channelIndex;
+    std::array<std::atomic<int>, maxSurrounds> surroundIndex;
+    std::atomic<int> surroundCount { 0 };
     std::atomic<double> rate { 48000.0 };
     std::atomic<int> startCount { 0 }, dropped { 0 };
     std::atomic<bool> running { false };

@@ -144,9 +144,13 @@ struct Translation
     double levelDeviationDb = 0.0;      // the largest one, signed: negative when the bass falls short
     int levelScenarios = 0;             // how many system x subwoofer-level cases were rated
 
-    // LFE as heard (+10 dB) against the screen channels, 20-120 Hz
+    // LFE as heard (+10 dB) against the other channels (screen, surrounds and heights), 20-120 Hz
     double lfeBalanceDb = 0.0;          // positive: the LFE is the louder of the two
     double lfeShare = 0.0;              // 0..1, part of the bass energy carried by the LFE
+
+    // Surrounds and heights (summed): their bass against the screen, and their share of all the bass
+    bool hasSurround = false;           // they carry bass worth speaking of (over 1 % of the screen's)
+    double surroundBalanceDb = -60.0, surroundShare = 0.0;
     double downmixChangeDb = 0.0;       // bass left in the stereo downmix, against the reference
 
     // LFE (as heard) and screen sum both active in the same band
@@ -162,7 +166,7 @@ struct Translation
     // them loses (subwoofers fed by L + R, mono, a phone), against the same
     // channels with their cancellations left out (in-phase sums kept). Per
     // band, dB (0 or less); the worst band, its centre frequency, and the
-    // pair behind it (0: L / R, 1: L / C, 2: C / R).
+    // pair behind it (0: L / R, 1: L / C, 2: C / R, 3: screen / surrounds and heights).
     std::array<double, ChainResult::numBands> antiphaseDb {};
     double antiphaseWorstDb = 0.0, antiphaseWorstHz = 0.0;
     int antiphasePair = -1;
