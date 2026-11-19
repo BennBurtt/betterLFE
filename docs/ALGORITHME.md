@@ -386,41 +386,19 @@ quand la moyenne atteint 3 dB. Un cas à ±6 dB compte pour 0,3 dans la moyenne.
 Les niveaux négatifs sont gardés : avec un LFE plus fort que la façade et en
 opposition, *baisser* le sub rapproche les deux de l'annulation.
 
-### 3.4 bis Surrounds et hauteurs
+### 3.4 bis Seulement L, C, R et le LFE
 
-Toutes les voies du format autres que L, C, R et le LFE (surrounds, arrières,
-larges, hauteurs) sont **sommées en une voie S** avant l'analyse. Le moteur
-mesure la puissance de S et ses spectres croisés avec L, C, R et le LFE, avec
-le même seuil de hasard que l'écran.
+Seules ces quatre voies sont analysées. Les surrounds, arrières, larges et
+hauteurs ne le sont pas : en pratique ils n'ont rien sous 60 à 80 Hz, et le
+grave d'un mix cinéma est dans L, C, R et le LFE. Une version précédente les
+sommait en une voie S ; elle a été retirée, car un grave corrélé de S faisait
+bouger le score en bass management alors que le mix ne posait aucun problème
+(par exemple un upmix compatible avec le repli). Les fichiers de surrounds
+restent lus pour les contrôles du livrable (§ 6 bis).
 
-| Où | Ce que devient S |
-|---|---|
-| Mix validé, systèmes cinéma | S sort de ses propres enceintes : ajoutée **en puissance**. Un mix sans grave dans les surrounds ne change pas |
-| Bass management (60, 80, 100 Hz) | S part dans le caisson **avec l'écran** : somme cohérente F + S. Une basse de surround en opposition avec l'écran s'y annule, une basse identique y gagne 3 dB |
-| Repli stéréo sans LFE (dépendance) | ajoutée en puissance, comme dans le mix validé : seul le LFE est retiré |
-| Other systems (façade, petites enceintes) | repliée à 0,707 dans chaque côté (UIT-R BS.775 [12]), puis sommée dans les caissons |
-| Coin antiphase | un quatrième couple, **écran / surrounds** |
-| Dépendance au LFE | la part du LFE se compte face à toutes les autres voies, surrounds compris |
-
-Vérifié : C seul, puis S = −C, puis S = C (même niveau). Au cinéma, 0 dB dans
-les trois cas. En bass management à 80 Hz : 0 dB, −24 dB, puis +3,0 dB. Le
-coin antiphase désigne le couple écran / surrounds (−24 dB). Aucun autre
-résultat de la suite de tests ne change.
-
-**Limite.** S étant une somme, l'opposition de phase **entre** deux
-surrounds (Ls contre Rs) est déjà faite avant l'analyse : elle n'est pas vue
-comme telle, seulement son résultat.
-
-**Le bandeau des enceintes.** Six groupes : LR, CENTER, WIDE, SIDE, REAR et
-TOP. Les paires sont liées : un clic les met en solo ensemble, un Option-clic
-les coupe ensemble. Couper LR coupe L et R dans l'analyse ; couper un groupe
-de surrounds le retire de la somme S. Un groupe absent du format est grisé.
-
-La lampe de LR est la plus forte des lampes de L et de R. Les quatre groupes
-de surrounds partagent une même lampe, celle de S face au LFE de 20 à
-120 Hz : corrélation, ou interaction pondérée par le niveau, au même seuil
-que la Phase Alert, avec le même seuil de hasard. S étant une somme, mettre un
-groupe en solo donne sa propre interaction. Sur une attaque fautive du LFE,
+**Le bandeau des enceintes.** Deux groupes : LR et CENTER. L et R sont liés :
+un clic les met en solo ensemble, un Option-clic les coupe ensemble (dans
+l'analyse). La lampe de LR est la plus forte des lampes de L et de R. Sur une attaque fautive du LFE,
 seules les enceintes qui portent l'attaque (à moins de 20 dB de la plus
 forte) s'allument.
 
@@ -429,15 +407,7 @@ au score :
 
 - la dépendance au LFE, avec la part du grave qu'il porte et ce qu'un repli
   sans LFE perd ;
-- l'interaction, avec le pire système. Elle a deux causes possibles, et la
-  ligne nomme la bonne. En bass management, le même système est recalculé avec
-  S ajoutée en puissance (comme sur ses propres enceintes) : si plus de la
-  moitié de l'écart, bande par bande (pondéré par la part de chaque bande dans
-  la référence), disparaît, l'écart vient des surrounds et hauteurs sommés avec
-  l'écran dans le caisson, et la ligne le dit (« Surrounds et écran
-  s'additionnent dans le sub en bass management »). Sinon c'est « Le LFE et
-  l'écran interfèrent ». Sans LFE, l'écart est toujours attribué aux surrounds.
-  Le seuil de 50 % est une **hypothèse** (la cause majoritaire) ;
+- l'interaction LFE / écran, avec le pire système ;
 - la dépendance au niveau du sub ;
 - ce que retirent les salles ou other systems cochés.
 
@@ -724,25 +694,23 @@ délai par l'installateur).
 
 ### Other systems : ce qui n'est pas du cinéma
 
-Sous les quinze salles, sept lignes en violet : des **systèmes qui ne sont
+Sous les quinze salles, six lignes en violet : des **systèmes qui ne sont
 pas du cinéma** (défilé, boutique, événement, télé, casque, ordinateur). Ce
 sont des modèles électriques : pas de salle, pas de places, quatre bandes
 (25, 40, 70, 100 Hz) à la place des places.
 
-Chaque système est un ensemble de **branches** : les gains de L, C, R, du LFE
-et de S (surrounds et hauteurs sommés). Les branches sommées s'ajoutent dans
+Chaque système est un ensemble de **branches** : les gains de L, C, R et du
+LFE. Les branches sommées s'ajoutent dans
 l'air (caissons, haut-parleurs proches). Les branches séparées s'entendent à
 part (les deux oreilles au casque). Un passe-haut de Butterworth tient lieu de
-ce que les haut-parleurs gardent du grave. Lo = L + 0,707 C + 0,707 Ls ;
-Ro = R + 0,707 C + 0,707 Rs. S étant la somme des surrounds, la moitié en
-part de chaque côté. Le LFE est omis par tout repli à deux voies.
+ce que les haut-parleurs gardent du grave. Lo = L + 0,707 C ;
+Ro = R + 0,707 C. Le LFE est omis par tout repli à deux voies.
 
 | Système | Branches | Filtre | Statut |
 |---|---|---|---|
 | Façade stéréo, subs sur L + R, sans LFE | Lo + Ro, sommés | aucun | repli : sourcé, UIT-R BS.775 [12] ; subs sur Lo + Ro : hypothèse (pratique courante) |
 | 5.1 sur une façade, subs + LFE | Lo + Ro + LFE (+10 dB), sommés | aucun | +10 dB : sourcé [9] ; câblage : hypothèse |
 | Petites enceintes, sans sub | Lo + Ro, sommés | 2ᵉ ordre, 60 Hz | 2ᵉ ordre : sourcé, l'enceinte close [48] ; 60 Hz : hypothèse |
-| Repli Lt / Rt en mono (télé, enceinte mono) | Lt = L + 0,707 C − j 0,707 S, Rt = R + 0,707 C + j 0,707 S, sommés : S s'annule | aucun | principe du matriçage (surround à ±90°, perdu en mono) : établi ; coefficients exacts : hypothèse |
 | Casque | Lo et Ro, chaque oreille à part | aucun | rien de L contre R ne s'annule ; sans LFE : hypothèse (selon le repli) |
 | Haut-parleurs de télé | Lo + Ro, sommés | 2ᵉ ordre, 100 Hz | hypothèse |
 | Ordinateur portable, tablette | Lo + Ro, sommés | 4ᵉ ordre, 150 Hz | hypothèse |
@@ -756,8 +724,7 @@ d'annulé**. Chaque couple (branche, voie) est un contributeur à son gain. Les
 termes croisés ne sont gardés que là où ils s'ajoutent, pour les sorties qui
 s'additionnent. Le niveau propre du repli n'est donc pas une faute : un C
 replié à −3 dB des deux côtés et sommé revient à 0 dB. Ce qui compte, c'est
-ce qui s'annule (L contre R, l'écran contre les surrounds, les surrounds en
-mono Lt / Rt) et ce que les haut-parleurs ne jouent pas : le passe-haut n'est
+ce qui s'annule (L contre R, L ou R contre C) et ce que les haut-parleurs ne jouent pas : le passe-haut n'est
 pas dans la référence. Le LFE n'entre dans la référence que pour le système
 qui le joue. Sa perte est déjà comptée par la dépendance au LFE (§ 3.6), elle
 n'est pas recomptée ici.
@@ -766,8 +733,7 @@ Vérifié. Un son à 35 Hz puis à 105 Hz dans L et R, en phase : petites
 enceintes −9,5 dB puis −0,5 dB (note 0 puis 100) ; télé −17,9 puis −2,6 dB
 (0 puis 73) ; portable −24 puis −12,1 dB (0 et 0). Le grave profond part le
 premier, et d'autant plus que le système est petit. L contre R : −24 dB sur
-la façade, 0,0 dB au casque. Grave seulement dans les surrounds, en Lt / Rt
-mono : −24 dB ; seulement dans C : 0,0 dB.
+la façade, 0,0 dB au casque.
 
 **Note.** Comme un système de lecture (§ 3.5) : tolérance, doublement de sonie
 ISO 226, chaque bande pesée par sa part du grave entendu. Note du système =
@@ -1670,7 +1636,7 @@ du son) : bruit blanc ou rose, aucune ; grondement grave (sous 90 Hz), 1 à 3.
   subsiste. Elles ne donnent un verdict que si le LFE ressemble au mix.
 - Tout en bas (5–15 Hz), la résolution est limitée par la durée de la fenêtre :
   utiliser le mode « Ultra (2 s) » pour cette zone.
-- Les surrounds et hauteurs ne forment qu'une voie, S : un écart entre eux (Ls contre Rs) n'est pas vu (voir 3.4 bis).
+- Les surrounds et hauteurs ne sont pas analysés (§ 3.4 bis).
 - Les systèmes de lecture sont des modèles électriques ; l'acoustique d'une
   salle n'est pas simulée. Voir 3.8 pour ce qui est établi et ce qui est supposé.
 

@@ -99,9 +99,6 @@ struct ChainResult
     std::array<double, numBands> bandChangeDb {};   // same per band (20-30, 30-60, 60-90, 90-120 Hz)
     double penalty = 0.0;                           // 0..1, perceptual, see the header comment
     double weight = 0.0;                            // relevance, 0..1: how much this system counts
-    // Bass managed: the part of the change that comes from the surrounds and heights
-    // summed with the screen in the subwoofer, not from the LFE (0..1, see the .cpp)
-    double surroundPart = 0.0;
 };
 
 struct Translation
@@ -147,13 +144,9 @@ struct Translation
     double levelDeviationDb = 0.0;      // the largest one, signed: negative when the bass falls short
     int levelScenarios = 0;             // how many system x subwoofer-level cases were rated
 
-    // LFE as heard (+10 dB) against the other channels (screen, surrounds and heights), 20-120 Hz
+    // LFE as heard (+10 dB) against the screen channels, 20-120 Hz
     double lfeBalanceDb = 0.0;          // positive: the LFE is the louder of the two
     double lfeShare = 0.0;              // 0..1, part of the bass energy carried by the LFE
-
-    // Surrounds and heights (summed): their bass against the screen, and their share of all the bass
-    bool hasSurround = false;           // they carry bass worth speaking of (over 1 % of the screen's)
-    double surroundBalanceDb = -60.0, surroundShare = 0.0;
     double downmixChangeDb = 0.0;       // bass left in the stereo downmix, against the reference
 
     // LFE (as heard) and screen sum both active in the same band
@@ -169,7 +162,7 @@ struct Translation
     // them loses (subwoofers fed by L + R, mono, a phone), against the same
     // channels with their cancellations left out (in-phase sums kept). Per
     // band, dB (0 or less); the worst band, its centre frequency, and the
-    // pair behind it (0: L / R, 1: L / C, 2: C / R, 3: screen / surrounds and heights).
+    // pair behind it (0: L / R, 1: L / C, 2: C / R).
     std::array<double, ChainResult::numBands> antiphaseDb {};
     double antiphaseWorstDb = 0.0, antiphaseWorstHz = 0.0;
     int antiphasePair = -1;
@@ -314,7 +307,7 @@ public:
     Translation compute (const Analysis&, Level level = Level::strong, double lfeGainDb = lfeInBandGainDb) const;
 
     /** Other systems: how venues often play a mix (electrical, no room). */
-    enum OtherSystem { stereoPaNoLfe, surroundPaWithLfe, smallSpeakers, monoLtRt, headphones, tvSpeakers, laptop, numOtherSystems };
+    enum OtherSystem { stereoPaNoLfe, surroundPaWithLfe, smallSpeakers, headphones, tvSpeakers, laptop, numOtherSystems };
     static const char* otherSystemName (int);           // English, "Other system: ..."
     static const char* otherSystemDescription (int);
     static const char* otherSystemShortName (int);      // for a tick box

@@ -172,16 +172,16 @@ double Translation::audibleAt (int band, double shiftDb, double spreadDb, bool e
 
 namespace
 {
-    // The other systems. Each is a set of legs (gains of L, C, R, the LFE and S); summed legs add in the air
+    // The other systems. Each is a set of legs (gains of L, C, R and the LFE); summed legs add in the air
     // (subwoofers, speakers close together), separate legs are heard apart (the two ears on headphones).
     // A high-pass of the given order and corner then stands for what the speakers keep of the bass.
-    constexpr double minus3 = 0.70710678118654752;      // 1 / sqrt 2: C into each side (ITU-R BS.775), surrounds into their side
-    constexpr double sHalf = 0.5 * minus3;              // S is all the surrounds summed: half of it to each side
+    constexpr double minus3 = 0.70710678118654752;      // 1 / sqrt 2: C into each side (ITU-R BS.775)
+    constexpr int nc = 4;                               // L, C, R, LFE
 
     struct OtherSpec
     {
         const char *name, *shortName, *description;
-        std::vector<std::array<cd, 5>> legs;
+        std::vector<std::array<cd, nc>> legs;
         bool separate;          // legs heard apart (headphones) rather than summed
         double highPassHz;      // 0: none
         int highPassOrder;
@@ -189,14 +189,11 @@ namespace
 
     const std::vector<OtherSpec>& otherSpecs()
     {
-        const cd j (0.0, 1.0);
-        const std::array<cd, 5> lo { { 1.0, minus3, 0.0, 0.0, sHalf } }, ro { { 0.0, minus3, 1.0, 0.0, sHalf } },
-                                lfe { { 0.0, 0.0, 0.0, 1.0, 0.0 } },
-                                lt { { 1.0, minus3, 0.0, 0.0, -j * minus3 } }, rt { { 0.0, minus3, 1.0, 0.0, j * minus3 } };
+        const std::array<cd, nc> lo { { 1.0, minus3, 0.0, 0.0 } }, ro { { 0.0, minus3, 1.0, 0.0 } }, lfe { { 0.0, 0.0, 0.0, 1.0 } };
 
         static const std::vector<OtherSpec> specs = {
             { "Other system: stereo PA, subwoofers on L + R, no LFE", "Stereo PA",
-              "A stereo fold-down (Lo = L + 0.71 C + 0.71 Ls, Ro alike, the LFE left out) on a PA whose subwoofers play Lo + Ro, as at a show or in a shop",
+              "A stereo fold-down (Lo = L + 0.71 C, Ro alike, the LFE left out) on a PA whose subwoofers play Lo + Ro, as at a show or in a shop",
               { lo, ro }, false, 0.0, 0 },
             { "Other system: 5.1 on a PA, subwoofers on L + R + LFE", "5.1 PA + LFE",
               "The mix on a PA whose processor feeds the subwoofers the fold-down and the LFE (+10 dB), as at an event",
@@ -204,9 +201,6 @@ namespace
             { "Other system: small speakers, no subwoofer", "Small speakers",
               "The stereo fold-down on small speakers that roll off under 60 Hz (12 dB per octave), no subwoofer, no LFE",
               { lo, ro }, false, 60.0, 2 },
-            { "Other system: Lt / Rt fold-down heard in mono", "Mono (Lt / Rt)",
-              "A matrix fold-down (surrounds at -3 dB, -90 degrees in Lt and +90 in Rt) summed to mono, as on a mono TV or speaker: the surrounds cancel",
-              { lt, rt }, false, 0.0, 0 },
             { "Other system: headphones, stereo fold-down", "Headphones",
               "The stereo fold-down on headphones: each ear on its own, so nothing of L against R cancels; no LFE",
               { lo, ro }, true, 0.0, 0 },
@@ -260,34 +254,27 @@ void PlaybackSimulator::computeOthers (const Analysis& a, Translation& t, Level 
 
     // Per band: the screen as summed (cancellations in), the same without its
     // cancellations, and each pair's cancellation
-    // Channels: L, C, R, the LFE (as heard), S (surrounds and heights, summed)
-    constexpr int nc = 5;
-    const bool withS = m.pS.size() == n && m.cSL.size() == n && m.cSLfe.size() == n;
-    double summed[numBands] = {}, uncancelled[numBands] = {}, pairLoss[numBands][4] = {};
-    std::vector<std::array<cd, nc * nc>> spectra (n);   // S_ab = a.conj(b)
+    double summed[numBands] = {}, uncancelled[numBands] = {}, pairLoss[numBands][3] = {};
+    std::vector<std::array<cd, 16>> spectra (n);        // L, C, R, LFE as heard: S_ab
 
     for (size_t g = 0; g < n; ++g)
     {
-        const double ps = withS ? m.pS[g] : 0.0;
-        const double p[nc] = { m.pL[g], m.pC[g], m.pR[g], lfeGain * lfeGain * m.pLfe[g], ps };
+        const double p[4] = { m.pL[g], m.pC[g], m.pR[g], lfeGain * lfeGain * m.pLfe[g] };
         auto& S = spectra[g];
 
-        for (int i = 0; i < nc; ++i)
-            S[(size_t) (i * nc + i)] = p[i];
+        for (int i = 0; i < 4; ++i)
+            S[(size_t) (i * 4 + i)] = p[i];
 
         const cd lc = shrunk (m.cLC[g], p[0], p[1], g, true), lr = shrunk (m.cLR[g], p[0], p[2], g, true), cr = shrunk (m.cCR[g], p[1], p[2], g, true);
         const cd le = lfeGain * shrunk (m.cLLfe[g], p[0], m.pLfe[g], g, false), ce = lfeGain * shrunk (m.cCLfe[g], p[1], m.pLfe[g], g, false),
                  re = lfeGain * shrunk (m.cRLfe[g], p[2], m.pLfe[g], g, false);
-        const cd sl = withS ? shrunk (m.cSL[g], ps, p[0], g, true) : cd(), sc = withS ? shrunk (m.cSC[g], ps, p[1], g, true) : cd(),
-                 sr = withS ? shrunk (m.cSR[g], ps, p[2], g, true) : cd(), se = withS ? lfeGain * shrunk (m.cSLfe[g], ps, m.pLfe[g], g, false) : cd();
         struct Cross { cd value; int i, j; };
-        const Cross crosses[10] = { { lc, 0, 1 }, { lr, 0, 2 }, { cr, 1, 2 }, { le, 0, 3 }, { ce, 1, 3 }, { re, 2, 3 },
-                                    { sl, 4, 0 }, { sc, 4, 1 }, { sr, 4, 2 }, { se, 4, 3 } };
+        const Cross crosses[6] = { { lc, 0, 1 }, { lr, 0, 2 }, { cr, 1, 2 }, { le, 0, 3 }, { ce, 1, 3 }, { re, 2, 3 } };
 
         for (const auto& x : crosses)
         {
-            S[(size_t) (x.i * nc + x.j)] = x.value;
-            S[(size_t) (x.j * nc + x.i)] = std::conj (x.value);
+            S[(size_t) (x.i * 4 + x.j)] = x.value;
+            S[(size_t) (x.j * 4 + x.i)] = std::conj (x.value);
         }
 
         const double hz = a.grid[g];
@@ -296,18 +283,13 @@ void PlaybackSimulator::computeOthers (const Analysis& a, Translation& t, Level 
         if (b < 0)
             continue;
 
-        // L / R, L / C, C / R, then the screen against the surrounds and heights
-        const double diag = p[0] + p[1] + p[2] + ps;
-        const double pairs[4] = { 2.0 * lr.real(), 2.0 * lc.real(), 2.0 * cr.real(), 2.0 * (sl + sc + sr).real() };
-        const double sPairs[3] = { 2.0 * sl.real(), 2.0 * sc.real(), 2.0 * sr.real() };
-        summed[b] += hz * std::max (0.0, diag + pairs[0] + pairs[1] + pairs[2] + pairs[3]);
-        uncancelled[b] += hz * (diag + std::max (0.0, pairs[0]) + std::max (0.0, pairs[1]) + std::max (0.0, pairs[2])
-                                + std::max (0.0, sPairs[0]) + std::max (0.0, sPairs[1]) + std::max (0.0, sPairs[2]));
+        const double screenDiag = p[0] + p[1] + p[2];
+        const double pairs[3] = { 2.0 * lr.real(), 2.0 * lc.real(), 2.0 * cr.real() };     // L/R, L/C, C/R
+        summed[b] += hz * std::max (0.0, screenDiag + pairs[0] + pairs[1] + pairs[2]);
+        uncancelled[b] += hz * (screenDiag + std::max (0.0, pairs[0]) + std::max (0.0, pairs[1]) + std::max (0.0, pairs[2]));
 
         for (int k = 0; k < 3; ++k)
             pairLoss[b][k] += hz * std::min (0.0, pairs[k]);
-
-        pairLoss[b][3] += hz * (std::min (0.0, sPairs[0]) + std::min (0.0, sPairs[1]) + std::min (0.0, sPairs[2]));
     }
 
     // The opposition of phase, band by band, and where it is worst
@@ -322,7 +304,7 @@ void PlaybackSimulator::computeOthers (const Analysis& a, Translation& t, Level 
         {
             t.antiphaseWorstDb = t.antiphaseDb[(size_t) b];
             t.antiphaseWorstHz = bandCentreHz[b];
-            t.antiphasePair = (int) (std::min_element (pairLoss[b], pairLoss[b] + 4) - pairLoss[b]);
+            t.antiphasePair = (int) (std::min_element (pairLoss[b], pairLoss[b] + 3) - pairLoss[b]);
         }
     }
 
@@ -520,32 +502,8 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
     double screenTotal = 0.0, lfeTotal = 0.0, screenChannels = 0.0;
     std::vector<double> referencePower (n, 0.0);
 
-    // Surrounds and heights (S): from their own speakers in a cinema, so added in power to the
-    // reference and to every cinema chain; summed with the screen into the subwoofer once bass managed
-    const bool withS = m.pS.size() == n && m.cSL.size() == n && m.cSLfe.size() == n;
-    std::vector<double> pS (n, 0.0);
-    std::vector<cd> cSF (n), cSFL (n);      // S.conj(F) and S.conj(LFE), chance taken out
-
-    if (withS)
-        for (size_t g = 0; g < n; ++g)
-        {
-            pS[g] = m.pS[g];
-            const double sigmaS = m.sigmaScreen.size() == n ? m.sigmaScreen[g] : m.sigma[g];
-            const cd sf = m.cSL[g] + m.cSC[g] + m.cSR[g];
-            const auto shrink = [] (cd c, double pa, double pb, double sigma)
-            {
-                const double coherence = std::abs (c) / (std::sqrt (pa * pb) + 1e-60);
-                const double full = std::max (std::min (3.0 * sigma, 0.95), 2.0 * sigma + 1e-9);
-                return c * std::clamp ((coherence - 2.0 * sigma) / (full - 2.0 * sigma), 0.0, 1.0);
-            };
-            cSF[g] = shrink (sf, pS[g], m.pF[g], sigmaS);
-            cSFL[g] = shrink (m.cSLfe[g], pS[g], m.pLfe[g], m.sigma[g]);
-        }
-
     for (size_t g = 0; g < n; ++g)
-        referencePower[g] = std::max (0.0, m.pF[g] + lfeGain2 * m.pLfe[g] + 2.0 * lfeGain * cFL[g].real()) + pS[g];
-
-    double surroundTotal = 0.0;
+        referencePower[g] = std::max (0.0, m.pF[g] + lfeGain2 * m.pLfe[g] + 2.0 * lfeGain * cFL[g].real());
 
     for (size_t g = 0; g < n; ++g)
     {
@@ -564,22 +522,18 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
         weightTotal += hz;
         screenTotal += hz * m.pF[g];
         screenChannels += hz * (m.pL[g] + m.pC[g] + m.pR[g]);
-        surroundTotal += hz * pS[g];
         lfeTotal += hz * lfe;
     }
 
     // Bass is there if any channel carries it: a screen whose channels cancel in their sum
     // (L and R in opposition) still has bass, which any other summing will lose
-    t.hasBass = weightTotal > 0.0 && (std::max (screenTotal, screenChannels) + surroundTotal + lfeTotal) / weightTotal > silencePower;
+    t.hasBass = weightTotal > 0.0 && (std::max (screenTotal, screenChannels) + lfeTotal) / weightTotal > silencePower;
 
     if (! t.hasBass)
         return t;
 
-    t.lfeShare = lfeTotal / (lfeTotal + screenTotal + surroundTotal + 1e-60);
-    t.lfeBalanceDb = std::clamp (10.0 * std::log10 ((lfeTotal + 1e-60) / (screenTotal + surroundTotal + 1e-60)), -60.0, 60.0);
-    t.hasSurround = surroundTotal > 0.01 * (screenTotal + 1e-60);
-    t.surroundBalanceDb = std::clamp (10.0 * std::log10 ((surroundTotal + 1e-60) / (screenTotal + 1e-60)), -60.0, 60.0);
-    t.surroundShare = surroundTotal / (lfeTotal + screenTotal + surroundTotal + 1e-60);
+    t.lfeShare = lfeTotal / (lfeTotal + screenTotal + 1e-60);
+    t.lfeBalanceDb = std::clamp (10.0 * std::log10 ((lfeTotal + 1e-60) / (screenTotal + 1e-60)), -60.0, 60.0);
 
     // From level to loudness. The reference bass of each band has an RMS
     // level in dBFS; the listening level says what sound pressure that is
@@ -671,10 +625,6 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
         // its level, as they are and as an unrelated LFE would give them
         double screenPart[numBands] = {}, lfePart[numBands] = {}, crossPart[numBands] = {};
 
-        // Bass managed: the same system with the surrounds and heights added in
-        // power, as from their own speakers, to tell their part from the LFE's
-        double bandNoS[numBands] = {};
-
         for (size_t g = 0; g < n; ++g)
         {
             const double hz = a.grid[g];
@@ -691,28 +641,14 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
                 // Only the LFE is taken away: the screen channels are summed as
                 // in the reference, so that how L, C and R fold together (which
                 // is not the LFE's doing) does not count as a loss.
-                power = m.pF[g] + pS[g];
+                power = m.pF[g];
             }
             else
             {
                 const auto gain = gainsFor (chain, hz, lfeGain);
-                const bool managed = chain.kind == ChainResult::Kind::bassManaged;
-
-                // Bass managed: the surrounds and heights join the screen in the subwoofer (coherent sum);
-                // in a cinema they stay on their own speakers (power sum)
-                const double pX = managed ? std::max (0.0, m.pF[g] + pS[g] + 2.0 * cSF[g].real()) : m.pF[g];
-                const cd cXL = managed ? cFL[g] + cSFL[g] : cFL[g];
-                const double screen = std::norm (gain.screen) * pX + (managed ? 0.0 : pS[g]), lfe = std::norm (gain.lfe) * m.pLfe[g];
-                const double cross = 2.0 * (gain.screen * std::conj (gain.lfe) * cXL).real();
+                const double screen = std::norm (gain.screen) * m.pF[g], lfe = std::norm (gain.lfe) * m.pLfe[g];
+                const double cross = 2.0 * (gain.screen * std::conj (gain.lfe) * cFL[g]).real();
                 power = screen + lfe + cross;
-
-                if (managed)
-                {
-                    const double alone = std::norm (gain.screen) * m.pF[g] + pS[g] + lfe
-                                         + 2.0 * (gain.screen * std::conj (gain.lfe) * cFL[g]).real();
-                    bandNoS[b] += hz * std::max (alone, 0.0);
-                }
-
                 screenPart[b] += hz * screen;
                 lfePart[b] += hz * lfe;
                 crossPart[b] += hz * cross;
@@ -762,27 +698,6 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
 
         // Scaled by how many listeners hear the bass at all
         chain.penalty = std::min (chain.penalty, 1.0) * heardAtAll;
-
-        // Whose doing the change is, bass managed: the change band by band with the
-        // surrounds and heights as summed in the subwoofer, against the same with them
-        // added in power. What disappears is theirs (weighted by each band's share of
-        // the reference). No LFE: all of it is theirs.
-        if (chain.kind == ChainResult::Kind::bassManaged)
-        {
-            double full = 0.0, withoutS = 0.0;
-
-            for (int b = 0; b < numBands; ++b)
-            {
-                if (reference[b] <= 1e-6 * referenceTotal)
-                    continue;
-
-                const double share = reference[b] / (referenceTotal + 1e-60);
-                full += share * std::abs (chain.bandChangeDb[(size_t) b]);
-                withoutS += share * std::abs (limited ((bandNoS[b] + 1e-60) / (reference[b] + 1e-60)));
-            }
-
-            chain.surroundPart = full > 1e-9 ? std::clamp ((full - withoutS) / full, 0.0, 1.0) : 0.0;
-        }
 
         if (isStereo)
         {

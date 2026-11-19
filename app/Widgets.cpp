@@ -278,7 +278,7 @@ void HeaderBar::setAnimationEnabled (bool shouldAnimate)
 
     // One switch for everything that moves: the background and the speakers.
     // The alert lamps are not part of it.
-    for (auto* speaker : { &lr, &centre, &wide, &side, &rear, &top })
+    for (auto* speaker : { &lr, &centre })
         speaker->setMoving (animated);
 
     repaint();
@@ -302,12 +302,12 @@ void HeaderBar::advance (double seconds)
 void HeaderBar::resized()
 {
     auto area = getLocalBounds().reduced (20);
-    // The logo on the left, then the six speaker groups
+    // The logo on the left, then the two speaker groups, each as wide as a sixth of what is left
     area.removeFromLeft (juce::jmin (area.getWidth() / 4, juce::roundToInt ((float) area.getHeight() * 2.6f)));
-    const int cell = area.getWidth() / numGroups;
+    const int cell = area.getWidth() / 6;
 
     for (int g = 0; g < numGroups; ++g)
-        group (g).setBounds (g == numGroups - 1 ? area : area.removeFromLeft (cell));
+        group (g).setBounds (area.removeFromLeft (cell));
 }
 
 void HeaderBar::paint (juce::Graphics& g)
@@ -1278,7 +1278,7 @@ float ChainsView::render (juce::Graphics& g, float totalWidth) const
     }
 
     // Read-outs: a label column, the value wrapped as needed
-    const juce::String readLabels[] = { tr ("Robustness"), tr ("  from interaction"), tr ("  from LFE dependence (audible)"), tr ("  surrounds and heights"),
+    const juce::String readLabels[] = { tr ("Robustness"), tr ("  from interaction"), tr ("  from LFE dependence (audible)"),
                                         tr ("LFE level dependence") };
     float readWidth = 0.0f;
 
@@ -1317,18 +1317,10 @@ float ChainsView::render (juce::Graphics& g, float totalWidth) const
           t.hasBass && t.interaction > 0.5);
     line (readLabels[2], t.hasBass ? juce::String (juce::roundToInt (100.0 * (1.0 - t.dependence)))
                                        + tr (" / 100; LFE ") + (t.lfeBalanceDb >= 0.0 ? "+" : "") + juce::String (t.lfeBalanceDb, 1)
-                                       + tr (" dB against the other channels, carries ") + juce::String (juce::roundToInt (100.0 * t.lfeShare))
+                                       + tr (" dB against the screen, carries ") + juce::String (juce::roundToInt (100.0 * t.lfeShare))
                                        + tr (" % of the bass")
                                    : none,
           t.hasBass && t.lfeBalanceDb > PlaybackSimulator::balanceWarningDb);
-
-    // Surrounds and heights: their own speakers in a cinema, in the subwoofer once bass managed
-    line (readLabels[3], t.hasBass ? (t.hasSurround ? (t.surroundBalanceDb >= 0.0 ? "+" : "") + juce::String (t.surroundBalanceDb, 1)
-                                                          + tr (" dB against the screen, ") + juce::String (juce::roundToInt (100.0 * t.surroundShare))
-                                                          + tr (" % of the bass; summed with the screen in bass managed systems")
-                                                      : tr ("no bass worth speaking of"))
-                                   : none,
-          false);
 
     // Level dependence: one box, the stronger its colour the more a subwoofer
     // set off its level would move the bass beyond what is expected
@@ -1336,7 +1328,7 @@ float ChainsView::render (juce::Graphics& g, float totalWidth) const
         auto row = area.removeFromTop (26.0f);
         g.setColour (theme::dimText);
         g.setFont (uiFont (12.5f));
-        g.drawFittedText (readLabels[4], row.removeFromLeft (readWidth).toNearestInt(), juce::Justification::centredLeft, 1, 0.8f);
+        g.drawFittedText (readLabels[3], row.removeFromLeft (readWidth).toNearestInt(), juce::Justification::centredLeft, 1, 0.8f);
 
         const double severity = t.hasBass ? juce::jlimit (0.0, 1.0, t.levelDependence) : 0.0;
         const auto quiet = juce::Colour (0xff2a2a2a), lightOrange = juce::Colour (0xffffb347), orange = juce::Colour (0xffff8a00),
@@ -1389,13 +1381,13 @@ float ChainsView::render (juce::Graphics& g, float totalWidth) const
         const bool counted = info.otherSystemTicked;
         const double worstDb = t.hasBass ? t.antiphaseWorstDb : 0.0;
         const bool warn = t.hasBass && worstDb < -PlaybackSimulator::antiphaseWarningDb;
-        const char* pairs[] = { "L / R", "L / C", "C / R", "screen / surrounds" };
+        const char* pairs[] = { "L / R", "L / C", "C / R" };
         juce::String value = none;
 
         if (t.hasBass)
             value = worstDb > -0.05 ? tr ("none")
                                     : juce::String (worstDb, 1) + tr (" dB at ") + juce::String (juce::roundToInt (t.antiphaseWorstHz)) + " Hz ("
-                                        + (t.antiphasePair >= 0 ? tr (pairs[t.antiphasePair]) : juce::String()) + ")";
+                                        + juce::String (t.antiphasePair >= 0 ? pairs[t.antiphasePair] : "") + ")";
 
         inside.removeFromTop (paragraph (tr ("Screen channels in opposition of phase, summed: ") + value, uiFont (12.5f, true),
                                          warn ? juce::Colour (0xffffb347) : theme::text, inside.getWidth(), juce::Justification::topLeft, inside));

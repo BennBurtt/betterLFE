@@ -171,8 +171,8 @@ void EventLog::observe (double time, double stepSeconds, const LogObservation& x
 
     // Screen channels in opposition of phase
     {
-        const char* pairs[] = { "L / R", "L / C", "C / R", rules.french ? "écran / surrounds" : "screen / surrounds" };
-        const std::string pair = x.antiphasePair >= 0 && x.antiphasePair < 4 ? pairs[x.antiphasePair] : "";
+        const char* pairs[] = { "L / R", "L / C", "C / R" };
+        const std::string pair = x.antiphasePair >= 0 && x.antiphasePair < 3 ? pairs[x.antiphasePair] : "";
         condition (antiphase, x.hasBass && x.antiphaseDb < rules.antiphaseUnderDb, x.hasBass && x.antiphaseDb < rules.antiphaseUnderDb + 1.0,
                    time, stepSeconds, x.antiphaseDb, x.antiphaseHz, EventKind::screenAntiphase, -1, "dB",
                    rules.french ? pair + " perdent " + number (-x.antiphaseDb, 1) + " dB vers " + number (x.antiphaseHz, 0) + " Hz une fois sommés"

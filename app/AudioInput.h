@@ -20,30 +20,7 @@ class AudioInput : public juce::AudioIODeviceCallback
 public:
     AudioInput()  { setChannelIndices ({ { 0, 2, 1, 3 } }); }
 
-    static constexpr int frameSize = 5;      // L, C, R, LFE, S (surrounds and heights summed)
-    static constexpr int maxSurrounds = 16;
-
-    static constexpr int numSurroundGroups = 4;     // wide, side, rear, top
-
-    /** The inputs summed into S, each with its group (ChannelFormat::surroundGroupOf). */
-    void setSurroundIndices (const std::vector<std::pair<int, int>>& indices)
-    {
-        const int n = juce::jmin ((int) indices.size(), maxSurrounds);
-
-        for (int i = 0; i < n; ++i)
-        {
-            surroundIndex[(size_t) i].store (indices[(size_t) i].first);
-            surroundGroup[(size_t) i].store (juce::jlimit (0, numSurroundGroups - 1, indices[(size_t) i].second));
-        }
-
-        surroundCount.store (n);
-    }
-
-    /** Groups left out of S (muted, or another group soloed): bit g for group g. */
-    void setSurroundMute (unsigned mask)        { surroundMute.store (mask); }
-
-    /** The loudest sample of a surround group since the last call (it is reset). */
-    float takeGroupPeak (int group)             { return group >= 0 && group < numSurroundGroups ? groupPeak[(size_t) group].exchange (0.0f) : 0.0f; }
+    static constexpr int frameSize = 4;      // L, C, R, LFE
 
     void setChannelIndices (const std::array<int, 4>& indices)
     {
@@ -197,31 +174,6 @@ public:
             source[i] = (index >= 0 && index < numInputs) ? input[index] : nullptr;
         }
 
-        const float* surrounds[maxSurrounds];
-        int numSurrounds = 0;
-        const unsigned muteMask = surroundMute.load (std::memory_order_relaxed);
-        float peaks[numSurroundGroups] = {};
-
-        for (int i = 0; i < surroundCount.load (std::memory_order_relaxed); ++i)
-        {
-            const int index = surroundIndex[(size_t) i].load (std::memory_order_relaxed);
-            const int group = surroundGroup[(size_t) i].load (std::memory_order_relaxed);
-
-            if (index < 0 || index >= numInputs || input[index] == nullptr)
-                continue;
-
-            // Every group's level for its speaker in the header, muted or not
-            for (int k = 0; k < numSamples; ++k)
-                peaks[group] = juce::jmax (peaks[group], std::abs (input[index][k]));
-
-            if ((muteMask & (1u << group)) == 0)
-                surrounds[numSurrounds++] = input[index];
-        }
-
-        for (int k = 0; k < numSurroundGroups; ++k)
-            if (peaks[k] > groupPeak[(size_t) k].load (std::memory_order_relaxed))
-                groupPeak[(size_t) k].store (peaks[k], std::memory_order_relaxed);
-
         // LTC: read on its channel, sample by sample, its frames published with their place in the stream
         const int ltcIndex = ltcChannel.load (std::memory_order_relaxed);
 
@@ -273,17 +225,8 @@ public:
             float* dest = buffer.data() + (size_t) block.first * frameSize;
 
             for (int i = 0; i < block.second; ++i, ++pos, dest += frameSize)
-            {
                 for (size_t c = 0; c < 4; ++c)
                     dest[c] = source[c] != nullptr ? source[c][pos] : 0.0f;
-
-                float s = 0.0f;
-
-                for (int k = 0; k < numSurrounds; ++k)
-                    s += surrounds[k][pos];
-
-                dest[4] = s;
-            }
         }
     }
 
@@ -294,10 +237,6 @@ private:
     std::vector<float> buffer = std::vector<float> ((size_t) capacity * frameSize);
 
     std::array<std::atomic<int>, 4> channelIndex;
-    std::array<std::atomic<int>, maxSurrounds> surroundIndex, surroundGroup;
-    std::atomic<int> surroundCount { 0 };
-    std::atomic<unsigned> surroundMute { 0 };
-    std::array<std::atomic<float>, numSurroundGroups> groupPeak {};
     std::atomic<double> rate { 48000.0 };
     std::atomic<int> startCount { 0 }, dropped { 0 };
     std::atomic<bool> running { false };

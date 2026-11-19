@@ -97,12 +97,12 @@ public:
     void advance (double seconds);
     void setLogo (const juce::Image& image)   { logo = image; }
 
-    // The speaker groups: L and R, the centre, then the surrounds by group (pairs soloed and muted together)
-    enum Group { groupLR, groupCentre, groupWide, groupSide, groupRear, groupTop, numGroups };
-    SpeakerIndicator lr { "LR", true }, centre { "CENTER" }, wide { "WIDE", true }, side { "SIDE", true }, rear { "REAR", true }, top { "TOP", true };
+    // The speaker groups: L and R (soloed and muted together), the centre. Only L, C, R and the LFE are analysed.
+    enum Group { groupLR, groupCentre, numGroups };
+    SpeakerIndicator lr { "LR", true }, centre { "CENTER" };
     SpeakerIndicator& group (int g)
     {
-        SpeakerIndicator* all[] = { &lr, &centre, &wide, &side, &rear, &top };
+        SpeakerIndicator* all[] = { &lr, &centre };
         return *all[juce::jlimit (0, numGroups - 1, g)];
     }
 

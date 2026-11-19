@@ -175,9 +175,7 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
     {
         auto& speaker = header.group (g);
         speaker.onToggle = [this] { updateSpeakers(); };
-        speaker.setTooltip (g <= HeaderBar::groupCentre
-                                ? tr ("Click: solo. Option-click: mute.")
-                                : tr ("Click: solo. Option-click: mute. The surrounds and heights are analysed summed: solo a group to see its own interaction with the LFE."));
+        speaker.setTooltip (tr ("Click: solo. Option-click: mute."));
     }
 
     loadState();
@@ -974,8 +972,7 @@ void MainComponent::resized()
 void MainComponent::applyFormat()
 {
     input.setChannelIndices (format().analysisIndices());
-    input.setSurroundIndices (format().surroundGroups());
-    updateSpeakers();       // which groups this format has
+    updateSpeakers();
 }
 
 void MainComponent::openDevices()
@@ -1075,41 +1072,6 @@ void MainComponent::showMode (int mode)
         proView.grabKeyboardFocus();
 
     resized();
-}
-
-double MainComponent::surroundAlert (const Analysis& a, const AlertTracker::Options& o) const
-{
-    // Surrounds and heights (summed) against the LFE over 20-120 Hz, as the Phase Alert judges a
-    // screen channel: the correlation (or the level-weighted interaction), what chance could give left out
-    const auto& m = a.matrix;
-    const auto n = a.grid.size();
-
-    if (m.pS.size() != n || m.cSLfe.size() != n)
-        return 0.0;
-
-    const double gain2 = std::pow (10.0, engineSettings.lfeGainDb / 10.0);
-    double cross = 0.0, ps = 0.0, pl = 0.0, sigma = 0.0, weight = 0.0;
-
-    for (size_t g = 0; g < n; ++g)
-        if (a.grid[g] >= 20.0 && a.grid[g] <= 120.0)
-        {
-            cross += a.grid[g] * m.cSLfe[g].real() * std::sqrt (gain2);
-            ps += a.grid[g] * m.pS[g];
-            pl += a.grid[g] * m.pLfe[g] * gain2;
-            sigma += a.grid[g] * m.sigma[g];
-            weight += a.grid[g];
-        }
-
-    if (weight <= 0.0 || ps <= 1e-30 || pl <= 1e-30)
-        return 0.0;
-
-    const double s = o.levelWeighted ? 2.0 * cross / (ps + pl) : cross / std::sqrt (ps * pl);
-
-    if (o.outOfPhaseOnly && s > 0.0)
-        return 0.0;
-
-    const double thr = juce::jlimit (0.0, 0.99, juce::jmax (o.threshold, AlertTracker::alertSigmas * sigma / weight));
-    return juce::jlimit (0.0, 1.0, AlertTracker::alertGain * (std::abs (s) - thr) / (1.0 - thr));
 }
 
 void MainComponent::layoutRoomView()
@@ -1600,13 +1562,8 @@ void MainComponent::setRoomSelected (int room, bool on)
 
 void MainComponent::updateSpeakers()
 {
-    // The groups this format has; a soloed group leaves the others out, a muted one is out whatever happens.
-    // Pairs go together: muting LR mutes L and R.
-    const auto& f = format();
-
-    for (int g = HeaderBar::groupWide; g < HeaderBar::numGroups; ++g)
-        header.group (g).setAvailable (f.hasSurroundGroup (g - HeaderBar::groupWide));
-
+    // A soloed group leaves the other out, a muted one is out whatever happens.
+    // L and R go together: muting LR mutes L and R.
     bool anySolo = false;
 
     for (int g = 0; g < HeaderBar::numGroups; ++g)
@@ -1623,13 +1580,6 @@ void MainComponent::updateSpeakers()
 
     engineSettings.mute[0] = engineSettings.mute[2] = out[HeaderBar::groupLR];
     engineSettings.mute[1] = out[HeaderBar::groupCentre];
-    unsigned mask = 0;
-
-    for (int k = 0; k < AudioInput::numSurroundGroups; ++k)
-        if (out[(size_t) (HeaderBar::groupWide + k)])
-            mask |= 1u << k;
-
-    input.setSurroundMute (mask);
 }
 
 void MainComponent::timerCallback()
@@ -1756,13 +1706,10 @@ void MainComponent::timerCallback()
     header.advance (dt);
 
     {
-        // How hard each group plays: L and R together, the centre, each surround group (live input only)
+        // How hard each group plays: L and R together, the centre
         std::array<double, HeaderBar::numGroups> peak {};
         peak[HeaderBar::groupLR] = juce::jmax (framePeak[0], framePeak[2]);
         peak[HeaderBar::groupCentre] = framePeak[1];
-
-        for (int k = 0; k < AudioInput::numSurroundGroups; ++k)
-            peak[(size_t) (HeaderBar::groupWide + k)] = input.takeGroupPeak (k);
 
         for (int g = 0; g < HeaderBar::numGroups; ++g)
         {
@@ -1790,21 +1737,6 @@ void MainComponent::timerCallback()
             snapshot.autoReset = false;
 
         alerts.update (measured, alerting, dt);
-
-        // The surrounds' lamp: risen at once, held, then decaying like the others
-        {
-            const double target = surroundAlert (measured, alerting);
-
-            if (target >= surroundLamp * 0.999 && target > 0.0)
-            {
-                surroundLamp += 0.7 * (target - surroundLamp);
-                surroundLampAge = 0.0;
-            }
-            else if ((surroundLampAge += dt) > AlertTracker::holdSeconds)
-            {
-                surroundLamp += juce::jmin (1.0, dt / AlertTracker::speakerDecaySeconds) * (target - surroundLamp);
-            }
-        }
 
         // Spectrum as displayed: the measured one, smoothed by the Inertia slider (10 to 600 ms)
         {
@@ -1966,10 +1898,6 @@ void MainComponent::timerCallback()
                                                            + juce::String (juce::jmax (0.0, -t.downmixChangeDb), 1) + " dB" });
 
                     juce::String worst;
-                    // Bass managed with the surrounds or heights summing with the screen in the
-                    // subwoofer: the change is theirs, not the LFE's (none may even be playing)
-                    const bool fromSurrounds = t.worstRoom.empty() && t.worstChain >= 0 && (size_t) t.worstChain < t.chains.size()
-                                               && t.chains[(size_t) t.worstChain].surroundPart > 0.5;
 
                     if (! t.worstRoom.empty())
                         worst = tr ("room ") + tr (juce::String (t.worstRoom));
@@ -1977,8 +1905,7 @@ void MainComponent::timerCallback()
                         worst = tr (juce::String (t.chains[(size_t) t.worstChain].name)) + " ("
                                 + (t.chains[(size_t) t.worstChain].changeDb >= 0.0 ? "+" : "") + juce::String (t.chains[(size_t) t.worstChain].changeDb, 1) + " dB)";
 
-                    factors.push_back ({ t.interaction, (fromSurrounds ? tr ("Surrounds and screen add up in the bass-managed subwoofer")
-                                                                                 : tr ("LFE and screen interfere")) + (worst.isNotEmpty() ? tr (": worst on ") + worst : juce::String()) });
+                    factors.push_back ({ t.interaction, tr ("LFE and screen interfere") + (worst.isNotEmpty() ? tr (": worst on ") + worst : juce::String()) });
                     factors.push_back ({ simulator.tuning.levelDependenceWeight * t.levelDependence,
                                          tr ("A subwoofer set off its level moves the bass (mean ") + juce::String (t.levelMeanDb, 1) + " dB)" });
 
@@ -2069,10 +1996,9 @@ void MainComponent::timerCallback()
     }
     snapshot.events.clear();        // each event is shown once
     transientStrip.advance (dt);
-    // The lamps: L and R share one (the stronger), the surround groups share the surrounds' (they are analysed summed)
+    // The lamps: L and R share one (the stronger)
     {
-        const double lamps[HeaderBar::numGroups] = { juce::jmax (alerts.speakerLevel[0], alerts.speakerLevel[2]), alerts.speakerLevel[1],
-                                                     surroundLamp, surroundLamp, surroundLamp, surroundLamp };
+        const double lamps[HeaderBar::numGroups] = { juce::jmax (alerts.speakerLevel[0], alerts.speakerLevel[2]), alerts.speakerLevel[1] };
 
         for (int g = 0; g < HeaderBar::numGroups; ++g)
         {

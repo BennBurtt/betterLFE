@@ -32,10 +32,7 @@
 namespace subguard
 {
 
-// The analysed stream: L, C, R, the LFE, then S, the sum of every other channel
-// (surrounds and heights). S plays from its own speakers in a cinema; it meets
-// the screen and the LFE wherever bass is summed (bass management, fold-downs).
-enum Channel { chL = 0, chC, chR, chLFE, chS, numChannels };
+enum Channel { chL = 0, chC, chR, chLFE, numChannels };
 
 // Index of the L+C+R sum in the per-pair results (after L, C, R).
 constexpr int pairFacade = 3;
@@ -102,10 +99,6 @@ struct Analysis
         // The full cross-spectral matrix of L, C, R and the LFE (Room Sim Pro
         // plays each channel from its own speakers): X.conj(Y), same gains.
         std::vector<std::complex<double>> cLC, cLR, cCR, cLLfe, cCLfe, cRLfe;
-        // Surrounds and heights, summed (S): its power and S.conj(X) for X = L, C, R, LFE
-        std::vector<double> pS;
-        std::vector<std::complex<double>> cSL, cSC, cSR, cSLfe;
-
         std::vector<double> sigma;      // chance level of the F / LFE coherence at this averaging
         std::vector<double> sigmaScreen;    // the same for the coherences between L, C and R (their own averaging)
     } matrix;
@@ -128,7 +121,7 @@ public:
     /** Clears all audio and statistics. */
     void reset();
 
-    /** Feeds interleaved audio frames ordered L, C, R, LFE, S (S: surrounds and heights summed, 0 if none). */
+    /** Feeds interleaved audio frames ordered L, C, R, LFE. */
     void push (const float* interleaved, int numFrames);
 
     /** Updates the averages with the audio pushed since the last call.

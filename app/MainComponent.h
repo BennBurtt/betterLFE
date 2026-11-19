@@ -278,8 +278,6 @@ private:
     HistoryStrip::Sample historySample;
     // Per speaker group of the header (LR, centre, wide, side, rear, top)
     std::array<double, HeaderBar::numGroups> groupFlash {}, groupRecent {}, groupDrive {};
-    double surroundLamp = 0.0, surroundLampAge = 0.0;       // the surrounds' (S) interaction with the LFE, for their lamps
-    double surroundAlert (const Analysis&, const AlertTracker::Options&) const;
 
     // How hard each screen channel plays, for the cones: this frame's peak
     // against the loudest of the last few seconds, so that it shows at any level
