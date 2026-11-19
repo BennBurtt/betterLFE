@@ -1485,6 +1485,31 @@ pendant les 2 premières secondes ; analyse environ 25 fois plus rapide que le
 temps réel (une bobine de 20 minutes en moins d'une minute, selon la
 machine).
 
+## 6 bis. Contrôles du livrable
+
+Faits pendant l'analyse de fichiers, sur **chaque voie du fichier telle
+qu'elle est** (pas sur les sommes de l'analyse), à la fréquence
+d'échantillonnage du fichier. Chaque défaut va dans le rapport (« Contrôles du
+livrable ») et dans le journal de la bobine, à l'endroit du pire moment.
+
+| Contrôle | Mesure | Limite | Statut |
+|---|---|---|---|
+| True peak | suréchantillonnage 4×, comme UIT-R BS.1770-4 annexe 2 [50] (filtre : sinus cardinal fenêtré de 48 coefficients, pas la table de la norme) | −1 dBTP | limite sourcée, EBU R 128 [51] ; certaines plateformes demandent −2 dBTP |
+| Crête du LFE | la même, sur le LFE seul | −1 dBTP | idem |
+| Écrêtage | 3 échantillons de suite ou plus à pleine échelle | aucun | hypothèse (pratique courante) |
+| Composante continue | moyenne de chaque voie sur le fichier | 0,1 % de la pleine échelle | hypothèse |
+| LFE au-dessus de 120 Hz | Butterworth d'ordre 4 à 120 Hz (passe-haut contre passe-bas), pire seconde où le LFE dépasse −60 dBFS | −30 dB | bande du LFE : sourcée, 120 Hz (UIT-R BS.775 [12]) ; −30 dB : hypothèse. Au-delà, le filtre de l'encodeur retire ce contenu : il est perdu à la diffusion |
+| Infra sous 20 Hz | de 5 Hz (ordre 2, pour ne pas prendre le DC pour de l'infra) à 20 Hz (ordre 4), RMS sur chaque seconde | −40 dBFS | hypothèse. Inaudible, mais l'infra mange la réserve des subs de façade et leur course |
+
+Filtres : sections de Butterworth du *Audio EQ Cookbook* (R. Bristow-Johnson).
+
+Vérifié sur 10 s de signaux de synthèse. Un fichier propre passe tout. Le même
+fichier avec ses défauts les fait tous ressortir (true peak, crête du LFE,
+écrêtage placé à la bonne seconde, DC de 0,5 % sur C, 200 Hz dans le LFE,
+10 Hz dans le LFE). Un sinus au quart de la fréquence d'échantillonnage,
+décalé de 45° et de crête 0,95 (−0,45 dB), a ses échantillons à 0,71 de sa
+crête : la crête échantillon lit −3,46 dBFS, le true peak −0,51 dBTP.
+
 ## Ce qui est vérifié
 
 `tests/EngineTests.cpp` contrôle sur signaux synthétiques : niveaux, repliement,
@@ -1673,6 +1698,10 @@ du son) : bruit blanc ou rose, aucune ; grondement grave (sous 90 Hz), 1 à 3.
     20(10), 798–808 (1972).
 49. SMPTE ST 12-1, *Time and Control Code* (code temporel longitudinal :
     80 bits, codage biphase, mot de synchro, drop frame).
+50. UIT-R BS.1770-4, *Algorithms to measure audio programme loudness and
+    true-peak audio level*, annexe 2 (true peak par suréchantillonnage 4×).
+51. EBU R 128, *Loudness normalisation and permitted maximum level of audio
+    signals* (crête vraie maximale −1 dBTP).
 
 
 ## Niveau du LFE et réglages

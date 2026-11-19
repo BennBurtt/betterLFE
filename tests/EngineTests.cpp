@@ -1,6 +1,7 @@
 // Accuracy checks of the analysis engine on synthetic signals.
 // Plain executable: exits with 0 when every check passes.
 
+#include "DeliverableChecks.h"
 #include "EventLog.h"
 #include "OfflineAnalysis.h"
 #include "Timecode.h"
@@ -3040,6 +3041,72 @@ void testSmallSystems()
     }
 }
 
+// Checks of the delivered file: true peak, clipping, DC, LFE above 120 Hz, infra
+void testDeliverables()
+{
+    std::printf ("\nDeliverable checks\n");
+    const int n = (int) (10.0 * sampleRate);
+    const std::vector<std::string> labels { "L", "C", "R", "LFE", "Ls" };
+
+    const auto run = [&] (bool faulty)
+    {
+        std::vector<std::vector<float>> ch (5, std::vector<float> ((size_t) n, 0.0f));
+
+        for (int i = 0; i < n; ++i)
+        {
+            const double t = (double) i / sampleRate;
+            ch[0][(size_t) i] = (float) (0.1 * std::sin (2.0 * pi * 50.0 * t));
+            ch[1][(size_t) i] = (float) (0.1 * std::sin (2.0 * pi * 70.0 * t) + (faulty ? 0.005 : 0.0));
+            // A quarter of the sample rate, 45 degrees off: samples at 0.71 of the true peak
+            ch[2][(size_t) i] = (float) ((faulty ? 0.95 : 0.5) * std::sin (2.0 * pi * 0.25 * i + pi / 4.0));
+            ch[3][(size_t) i] = (float) (faulty ? 0.45 * std::sin (2.0 * pi * 40.0 * t) + 0.25 * std::sin (2.0 * pi * 200.0 * t) + 0.25 * std::sin (2.0 * pi * 10.0 * t)
+                                                : 0.1 * std::sin (2.0 * pi * 40.0 * t));
+            ch[4][(size_t) i] = (float) (0.05 * std::sin (2.0 * pi * 80.0 * t));
+        }
+
+        if (faulty)
+            for (int i = 0; i < 5; ++i)
+                ch[0][(size_t) (2 * (int) sampleRate + i)] = 1.0f;
+
+        DeliverableChecks checks (sampleRate, labels, 3600.0, false);
+        std::vector<const float*> ptr;
+
+        for (auto& c : ch)
+            ptr.push_back (c.data());
+
+        for (int pos = 0; pos < n; pos += 4096)
+        {
+            std::vector<const float*> at;
+
+            for (auto* p : ptr)
+                at.push_back (p + pos);
+
+            checks.push (at.data(), std::min (4096, n - pos));
+        }
+
+        std::vector<LogEvent> events;
+        const double rTrue = checks.truePeakDb (2), rSample = checks.samplePeakDb (2);
+        auto findings = checks.finish (&events);
+        return std::make_tuple (findings, events, rTrue, rSample);
+    };
+
+    const auto [clean, cleanEvents, cleanTrue, cleanSample] = run (false);
+    const auto [bad, badEvents, badTrue, badSample] = run (true);
+
+    for (const auto& f : bad)
+        std::printf ("  %-50s %-4s %s%s\n", f.name.c_str(), f.pass ? "ok" : "FAIL", f.result.c_str(),
+                     f.at >= 0.0 ? (" at " + Timecode::labelOfSeconds (f.at, FrameRate::fps25)).c_str() : "");
+
+    std::printf ("  a sine at a quarter of the rate: sample peak %.2f dBFS, true peak %.2f dBTP (expected %.2f)\n", badSample, badTrue, 20.0 * std::log10 (0.95));
+    check (std::all_of (clean.begin(), clean.end(), [] (const DeliverableFinding& f) { return f.pass; }) && cleanEvents.empty(),
+           "a clean file passes every check", (double) cleanEvents.size());
+    check (std::none_of (bad.begin(), bad.end(), [] (const DeliverableFinding& f) { return f.pass; }) && badEvents.size() == bad.size(),
+           "each fault is caught (true peak, LFE peak, clipping, DC, LFE above 120 Hz, infra) and logged", (double) badEvents.size());
+    check (std::abs (badTrue - 20.0 * std::log10 (0.95)) < 0.3 && badSample < badTrue - 2.5,
+           "true peak read between the samples (4x oversampling)", badTrue);
+    check (std::abs (bad[2].at - 3602.0) < 0.01, "the clipping is placed in time", bad[2].at - 3600.0);
+}
+
 int main()
 {
     testFilterDesign();
@@ -3061,6 +3128,7 @@ int main()
     testOfflineReel();
     testSurrounds();
     testSmallSystems();
+    testDeliverables();
 
     std::printf ("\n%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;

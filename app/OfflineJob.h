@@ -9,6 +9,7 @@
 
 #include "ChannelFormats.h"
 #include "Lang.h"
+#include "../core/DeliverableChecks.h"
 #include "../core/OfflineAnalysis.h"
 
 #include <atomic>
@@ -25,6 +26,7 @@ struct ReelSource
     std::array<int, 4> file { { -1, -1, -1, -1 } };       // L, C, R, LFE: which file
     std::array<int, 4> channel { { -1, -1, -1, -1 } };    // and which channel in it
     std::vector<std::pair<int, int>> surround;              // file, channel of each surround or height: summed into S
+    std::vector<std::vector<std::string>> labels;           // each file's channels by name, for the deliverable checks
     juce::String channels;                                  // how they were found, for the report
 
     /** The chosen files as reels. Mono files named ..._L, ..._C, ..._R, ..._LFE (or . - space) are put together. */
@@ -35,7 +37,8 @@ struct ReelSource
         formats.registerBasicFormats();
 
         // The channel a mono file is named after, if any
-        const auto labelOf = [] (const juce::String& stem, juce::String& prefix) -> int
+        juce::String lastToken;
+        const auto labelOf = [&lastToken] (const juce::String& stem, juce::String& prefix) -> int
         {
             const int cut = juce::jmax (stem.lastIndexOfChar ('_'), stem.lastIndexOfChar ('.'), stem.lastIndexOfChar ('-'), stem.lastIndexOfChar (' '));
 
@@ -44,6 +47,7 @@ struct ReelSource
 
             const auto token = stem.substring (cut + 1).trim().toUpperCase();
             prefix = stem.substring (0, cut).trim();
+            lastToken = token;
             const char* names[4][3] = { { "L", "LEFT", "" }, { "C", "CENTER", "CENTRE" }, { "R", "RIGHT", "" }, { "LFE", "SW", "SUB" } };
 
             for (int c = 0; c < 4; ++c)
@@ -93,6 +97,9 @@ struct ReelSource
 
                 auto& r = reels[(size_t) index];
 
+                const char* standard[] = { "L", "C", "R", "LFE" };
+                r.labels.push_back ({ label < 4 ? std::string (standard[label]) : lastToken.toStdString() });
+
                 if (label == 4)
                 {
                     r.surround.push_back ({ r.files.size(), 0 });
@@ -113,6 +120,26 @@ struct ReelSource
             r.files.add (f);
             const int n = (int) reader->numChannels;
             std::array<int, 4> map { { -1, -1, -1, -1 } };
+
+            // The channels' names: the chosen format's, else the WAV order
+            {
+                const char* wavOrder[] = { "L", "R", "C", "LFE", "Ls", "Rs", "Lb", "Rb", "Lw", "Rw", "Ltf", "Rtf", "Ltr", "Rtr", "Ltm", "Rtm" };
+                std::vector<std::string> names;
+
+                for (int ch = 0; ch < n; ++ch)
+                {
+                    if (n == (int) format.channels.size())
+                        names.push_back (format.channels[(size_t) ch]);
+                    else if (n == 1)
+                        names.push_back ("C");
+                    else if (n <= 3)
+                        names.push_back (ch == 0 ? "L" : ch == 1 ? "R" : "C");
+                    else
+                        names.push_back (ch < 16 ? wavOrder[ch] : "ch " + std::to_string (ch + 1));
+                }
+
+                r.labels.push_back (names);
+            }
 
             if (n == (int) format.channels.size())
             {
@@ -250,8 +277,22 @@ private:
             }
         }
 
-        juce::AudioBuffer<float> block ((int) readers.size() * 8, 8192);
         long long position = 0;
+
+        // Deliverable checks, on every channel of every file as it is
+        std::vector<std::string> allLabels;
+        std::vector<std::pair<size_t, int>> allChannels;
+
+        for (size_t k = 0; k < readers.size(); ++k)
+            for (int ch = 0; ch < (int) readers[k]->numChannels; ++ch)
+            {
+                const auto& names = k < src.labels.size() ? src.labels[k] : std::vector<std::string>();
+                allLabels.push_back (ch < (int) names.size() ? names[(size_t) ch] : "ch " + std::to_string (allLabels.size() + 1));
+                allChannels.push_back ({ k, ch });
+            }
+
+        DeliverableChecks checks (rate, allLabels, start, settings.rules.french);
+        std::vector<const float*> planar (allChannels.size());
 
         const OfflineAnalyzer::Pull pull = [&] (float* out, int maxFrames) -> int
         {
@@ -295,12 +336,18 @@ private:
                         out[i * numChannels + chS] += from[i];
                 }
 
+            for (size_t a = 0; a < allChannels.size(); ++a)
+                planar[a] = channels[allChannels[a].first].data() + (size_t) allChannels[a].second * (size_t) n;
+
+            checks.push (planar.data(), n);
             position += n;
             return n;
         };
 
         auto report = OfflineAnalyzer::analyse (src.name.toStdString(), rate, start, length, pull, settings,
                                                 [this] (double f) { fraction.store (f); return ! threadShouldExit(); });
+        report.deliverables = checks.finish (&report.events);
+        std::stable_sort (report.events.begin(), report.events.end(), [] (const LogEvent& a, const LogEvent& b) { return a.start < b.start; });
         report.timecodeSource = tcSource.toStdString();
         report.channels = src.channels.toStdString();
         return report;
