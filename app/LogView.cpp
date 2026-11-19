@@ -95,8 +95,17 @@ LogView::LogView()
     edlButton.setTooltip (tr ("An edit decision list whose notes are markers, as DaVinci Resolve imports them (Timeline > Import > Timeline Markers from EDL)."));
     edlButton.onClick = [this] { if (onExportEdl) onExportEdl(); };
 
-    for (auto* b : { &clearButton, &csvButton, &edlButton })
+    filesButton.setButtonText (tr ("Analyse files..."));
+    filesButton.setTooltip (tr ("Reels or any mix, as WAV, BWF or AIFF: one multichannel file, or one mono file per channel (..._L, ..._C, ..._R, "
+                                "..._LFE). Analysed as the live input is, faster than real time, with a report per reel."));
+    filesButton.onClick = [this] { if (onAnalyseFiles) onAnalyseFiles(); };
+    cancelButton.setButtonText (tr ("Stop"));
+    cancelButton.onClick = [this] { if (onCancelAnalysis) onCancelAnalysis(); };
+
+    for (auto* b : { &clearButton, &csvButton, &edlButton, &filesButton })
         addAndMakeVisible (b);
+
+    addChildComponent (cancelButton);
 
     fillSources (0);
 }
@@ -121,6 +130,20 @@ void LogView::setChoices (int ltcChannel, int rate, double startSeconds, int num
     rateBox.setSelectedId (rate >= 0 ? rate + 2 : 1, juce::dontSendNotification);
     startEditor.setEnabled (ltcChannel < 0);
     startEditor.setText (Timecode::labelOfSeconds (startSeconds, rate >= 0 ? (FrameRate) rate : FrameRate::fps25), false);
+}
+
+void LogView::setProgress (bool running, const juce::String& text, double fraction)
+{
+    if (running != analysing)
+    {
+        analysing = running;
+        cancelButton.setVisible (running);
+        filesButton.setEnabled (! running);
+    }
+
+    progressText = text;
+    progressFraction = fraction;
+    repaint();
 }
 
 void LogView::setState (const std::vector<LogEvent>& events, FrameRate rate, const juce::String& clock, const juce::String& source, bool clockOk)
@@ -163,6 +186,9 @@ void LogView::resized()
     csvButton.setBounds (buttons.removeFromRight (120));
     buttons.removeFromRight (8);
     clearButton.setBounds (buttons.removeFromRight (90));
+    filesButton.setBounds (buttons.removeFromLeft (160));
+    buttons.removeFromLeft (8);
+    cancelButton.setBounds (buttons.removeFromLeft (70));
     viewport.setBounds (area);
     list.setSize (area.getWidth() - viewport.getScrollBarThickness(), juce::jmax (area.getHeight(), list.preferredHeight()));
 }
@@ -181,6 +207,19 @@ void LogView::paint (juce::Graphics& g)
     g.setFont (uiFont (11.5f));
     g.setColour (clockGood ? theme::dimText : juce::Colour (0xffffb347));
     g.drawText (sourceText, title, juce::Justification::centredLeft);
+    if (analysing)
+    {
+        // The offline analysis, over the row of buttons
+        auto bar = getLocalBounds().reduced (16, 10).withTrimmedTop (topHeight - 26).withHeight (26).withTrimmedLeft (246).withTrimmedRight (420);
+        g.setColour (juce::Colour (0xff2a2a2a));
+        g.fillRoundedRectangle (bar.toFloat(), 4.0f);
+        g.setColour (juce::Colour (0xff3a9be0).withAlpha (0.6f));
+        g.fillRoundedRectangle (bar.toFloat().withWidth ((float) bar.getWidth() * (float) juce::jlimit (0.0, 1.0, progressFraction)), 4.0f);
+        g.setColour (theme::text);
+        g.setFont (uiFont (12.0f));
+        g.drawText (progressText, bar.reduced (8, 0), juce::Justification::centredLeft);
+    }
+
     g.setColour (theme::dimText);
     g.drawFittedText (tr ("Stamped when SubGUARD sees it: the Phase Alert averages over its Integration time, so an alert can start up to that "
                           "long after its cause. Attacks of the LFE are stamped to the analysis step (20 ms)."),

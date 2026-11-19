@@ -1389,6 +1389,51 @@ l'EDL porte la durée en trames (75 à 25 i/s). LTC écrit puis relu à chaque
 cadence, sous un bruit 20 dB plus bas : aucune trame hors séquence, cadence
 reconnue (29,97 mesuré 29,969).
 
+## 6. Analyse de fichiers et rapport par bobine
+
+**Ce qui est analysé.** Onglet Log > « Analyser des fichiers... » (ou
+Fichier). Formats acceptés : WAV, BWF ou AIFF. Une bobine peut être :
+
+- un fichier multicanal : les voies sont prises selon le format choisi dans
+  Source s'il a le même nombre de voies, sinon dans l'ordre WAV (L, R, C,
+  LFE...). Deux voies sont prises comme L et R, une comme C ;
+- un fichier mono par voie, nommé ..._L, ..._C, ..._R, ..._LFE (ou SW, SUB,
+  séparateur . - ou espace). Les fichiers d'un même préfixe forment une
+  bobine.
+
+**Timecode.** Celui du premier échantillon vient de la référence temporelle
+BWF (TimeReference, en échantillons depuis minuit). Sans elle, la bobine N
+est placée à N:00:00:00, N étant lu dans le nom (« Reel 2 », « R3 ») ou pris
+dans l'ordre des fichiers. Le rapport dit lequel.
+
+**Le même calcul que le direct.** Chaque bobine passe par le même moteur, la
+même Phase Alert, la même simulation des systèmes de lecture (salles cochées
+comprises) et le même journal, avec les réglages de l'app au moment du
+lancement. Seule différence : le score est calculé toutes les 0,1 s (Room
+Sim toutes les secondes) au lieu de chaque image, sans lissage d'affichage.
+Les premières secondes, le temps que les moyennes se remplissent (le temps
+d'intégration), ne sont ni notées ni comptées.
+
+**Le rapport** (une page HTML, plus un CSV et une EDL de marqueurs par
+bobine à côté) :
+
+- un tableau de toutes les bobines : début, durée, temps de grave,
+  robustesse moyenne, des 10 % pires instants et minimale, temps sous 50,
+  part du grave dans le LFE, temps d'alerte de phase sur L, C et R,
+  événements de calage du LFE, pire antiphase de l'écran, contrôles du
+  livrable ;
+- pour chaque bobine : la robustesse seconde par seconde (la plus basse de
+  chaque seconde), les cinq pires moments (à au moins 10 s d'écart, sous
+  90), les contrôles du livrable et tous les événements.
+
+Vérifié sur une bobine synthétique de 60 s (graves indépendants de 15 à
+150 Hz sur L, C, R, LFE sans rapport, puis copie inversée de C de 20 à
+40 s) : une alerte sur C est notée de 01:00:20 à 01:00:43, soit le passage
+plus la moyenne ; le pire moment tombe dans ce passage ; rien n'est noté
+pendant les 2 premières secondes ; analyse environ 25 fois plus rapide que le
+temps réel (une bobine de 20 minutes en moins d'une minute, selon la
+machine).
+
 ## Ce qui est vérifié
 
 `tests/EngineTests.cpp` contrôle sur signaux synthétiques : niveaux, repliement,

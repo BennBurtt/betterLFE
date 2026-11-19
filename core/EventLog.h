@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "AlertTracker.h"
+#include "PlaybackSim.h"
 #include "Timecode.h"
 #include "TransientDetector.h"
 
@@ -67,7 +69,14 @@ public:
         double minMatch = 0.3;              // only attacks the LFE really shares
         double mergeSeconds = 1.0;          // the same thing again within this time continues the event
         double minSeconds = 0.25;           // shorter conditions are not logged (attacks are)
+        bool french = false;                // language of the details
     };
+
+    /** What the log needs from one step: the alerts of this step, the score, the attacks found. */
+    static LogObservation observation (const AlertTracker&, const Translation&, const std::vector<TransientEvent>&);
+
+    /** A kind's name in the log's language. */
+    static const char* kindName (EventKind, bool french);
 
     Rules rules;
 

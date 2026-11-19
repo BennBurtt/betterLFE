@@ -62,6 +62,39 @@ const char* LogEvent::channelName (int c)
     }
 }
 
+const char* EventLog::kindName (EventKind k, bool french)
+{
+    if (! french)
+        return LogEvent::kindName (k);
+
+    switch (k)
+    {
+        case EventKind::phaseAlert:         return "Alerte de phase";
+        case EventKind::lfeTiming:          return "Calage du LFE";
+        case EventKind::lowRobustness:      return "Robustesse basse";
+        case EventKind::lfeCarriesBass:     return "Le grave repose sur le LFE";
+        case EventKind::screenAntiphase:    return "Écran en opposition de phase";
+        case EventKind::deliverable:        return "Contrôle du livrable";
+        default:                            return "";
+    }
+}
+
+LogObservation EventLog::observation (const AlertTracker& alerts, const Translation& t, const std::vector<TransientEvent>& events)
+{
+    LogObservation x;
+    x.hasBass = t.hasBass;
+    x.alert = alerts.alertNow;
+    x.alertHz = alerts.alertHz;
+    x.alertSign = alerts.alertSign;
+    x.robustness = t.robustness;
+    x.lfeBalanceDb = t.lfeBalanceDb;
+    x.antiphaseDb = t.antiphaseWorstDb;
+    x.antiphaseHz = t.antiphaseWorstHz;
+    x.antiphasePair = t.antiphasePair;
+    x.transients = events;
+    return x;
+}
+
 //==============================================================================
 void EventLog::condition (Open& o, bool on, bool stillOn, double time, double stepSeconds, double value, double hz,
                           EventKind kind, int channel, const char* unit, const std::string& detail, bool worseIsLower)
@@ -119,8 +152,9 @@ void EventLog::observe (double time, double stepSeconds, const LogObservation& x
     {
         const double a = x.hasBass ? x.alert[(size_t) c] : 0.0;
         const bool inPhase = x.alertSign[(size_t) c] > 0.0;
-        const std::string detail = std::string ("LFE ") + (inPhase ? "in phase with " : "against ") + LogEvent::channelName (c) + " near "
-                                 + number (x.alertHz[(size_t) c], 0) + " Hz";
+        const std::string where = number (x.alertHz[(size_t) c], 0) + " Hz";
+        const std::string detail = rules.french ? std::string ("LFE ") + (inPhase ? "en phase avec " : "contre ") + LogEvent::channelName (c) + " vers " + where
+                                                : std::string ("LFE ") + (inPhase ? "in phase with " : "against ") + LogEvent::channelName (c) + " near " + where;
         condition (alerts[(size_t) c], a >= rules.alertOn, a >= 0.5 * rules.alertOn, time, stepSeconds, a, x.alertHz[(size_t) c],
                    EventKind::phaseAlert, c, "0-1", detail, false);
     }
@@ -128,12 +162,12 @@ void EventLog::observe (double time, double stepSeconds, const LogObservation& x
     // Robustness under its threshold
     condition (robustness, x.hasBass && x.robustness < rules.robustnessUnder, x.hasBass && x.robustness < rules.robustnessUnder + 5.0,
                time, stepSeconds, x.robustness, 0.0, EventKind::lowRobustness, -1, "/100",
-               "bass robustness " + number (x.robustness, 0) + " / 100", true);
+               (rules.french ? "robustesse du grave " : "bass robustness ") + number (x.robustness, 0) + " / 100", true);
 
     // The bass resting on the LFE
     condition (lfeBass, x.hasBass && x.lfeBalanceDb > rules.lfeOverScreenDb, x.hasBass && x.lfeBalanceDb > rules.lfeOverScreenDb - 1.0,
                time, stepSeconds, x.lfeBalanceDb, 0.0, EventKind::lfeCarriesBass, 3, "dB",
-               "LFE " + number (x.lfeBalanceDb, 1, true) + " dB against the screen", false);
+               "LFE " + number (x.lfeBalanceDb, 1, true) + (rules.french ? " dB face à l'écran" : " dB against the screen"), false);
 
     // Screen channels in opposition of phase
     {
@@ -141,7 +175,8 @@ void EventLog::observe (double time, double stepSeconds, const LogObservation& x
         const std::string pair = x.antiphasePair >= 0 && x.antiphasePair < 3 ? pairs[x.antiphasePair] : "";
         condition (antiphase, x.hasBass && x.antiphaseDb < rules.antiphaseUnderDb, x.hasBass && x.antiphaseDb < rules.antiphaseUnderDb + 1.0,
                    time, stepSeconds, x.antiphaseDb, x.antiphaseHz, EventKind::screenAntiphase, -1, "dB",
-                   pair + " lose " + number (-x.antiphaseDb, 1) + " dB near " + number (x.antiphaseHz, 0) + " Hz when summed", true);
+                   rules.french ? pair + " perdent " + number (-x.antiphaseDb, 1) + " dB vers " + number (x.antiphaseHz, 0) + " Hz une fois sommés"
+                                : pair + " lose " + number (-x.antiphaseDb, 1) + " dB near " + number (x.antiphaseHz, 0) + " Hz when summed", true);
     }
 
     // Attacks of the LFE off time or inverted: one event for a run of them
@@ -156,8 +191,9 @@ void EventLog::observe (double time, double stepSeconds, const LogObservation& x
         if (! inverted && ! off)
             continue;
 
-        const std::string what = inverted ? (off ? "inverted, " + number (e.delayMs, 1, true) + " ms" : std::string ("inverted"))
-                                          : (e.delayMs > 0.0 ? "late " : "early ") + number (e.delayMs, 1, true) + " ms";
+        const bool fr = rules.french;
+        const std::string what = inverted ? (off ? (fr ? "inversées, " : "inverted, ") + number (e.delayMs, 1, true) + " ms" : std::string (fr ? "inversées" : "inverted"))
+                                          : (e.delayMs > 0.0 ? (fr ? "en retard " : "late ") : (fr ? "en avance " : "early ")) + number (e.delayMs, 1, true) + " ms";
 
         if (timing.active && time - timing.lastSeen <= 2.0 * rules.mergeSeconds)
         {
@@ -166,8 +202,10 @@ void EventLog::observe (double time, double stepSeconds, const LogObservation& x
             if (std::abs (e.delayMs) > std::abs (timing.event.peak))
                 timing.event.peak = e.delayMs;
 
-            timing.event.detail = "LFE attacks " + what + " (worst " + number (timing.event.peak, 1, true) + " ms, "
-                                + std::to_string (timing.event.count) + " attacks)";
+            timing.event.detail = fr ? "attaques du LFE " + what + " (pire " + number (timing.event.peak, 1, true) + " ms, "
+                                         + std::to_string (timing.event.count) + " attaques)"
+                                     : "LFE attacks " + what + " (worst " + number (timing.event.peak, 1, true) + " ms, "
+                                         + std::to_string (timing.event.count) + " attacks)";
             timing.event.end = time;
             timing.lastSeen = time;
         }
@@ -181,7 +219,7 @@ void EventLog::observe (double time, double stepSeconds, const LogObservation& x
             timing.event.start = timing.event.end = time;
             timing.event.peak = e.delayMs;
             timing.event.unit = "ms";
-            timing.event.detail = "LFE attack " + what;
+            timing.event.detail = (fr ? "attaque du LFE " : "LFE attack ") + what;
             timing.lastSeen = time;
         }
     }
@@ -233,7 +271,7 @@ std::string EventLog::toCsv (FrameRate rate, const std::string& title) const
     for (const auto& e : done)
     {
         out += Timecode::labelOfSeconds (e.start, rate) + "," + Timecode::labelOfSeconds (e.end, rate) + ","
-             + number (e.end - e.start, 2) + "," + csvField (LogEvent::kindName (e.kind)) + "," + LogEvent::channelName (e.channel) + ","
+             + number (e.end - e.start, 2) + "," + csvField (kindName (e.kind, rules.french)) + "," + LogEvent::channelName (e.channel) + ","
              + number (e.peak, e.unit == "0-1" ? 2 : 1) + "," + csvField (e.unit) + "," + (e.hz > 0.0 ? number (e.hz, 0) : std::string()) + ","
              + std::to_string (e.count) + "," + csvField (e.detail) + "\n";
     }
@@ -258,7 +296,7 @@ std::string EventLog::toEdlMarkers (FrameRate rate, const std::string& title) co
                            : e.kind == EventKind::deliverable ? "ResolveColorCyan" : "ResolveColorBlue";
         char head[128];
         std::snprintf (head, sizeof (head), "%03d  001      V     C        %s %s %s %s  \n", index++, a.c_str(), b.c_str(), a.c_str(), b.c_str());
-        std::string name = std::string (LogEvent::kindName (e.kind)) + (e.channel >= 0 ? std::string (" ") + LogEvent::channelName (e.channel) : "")
+        std::string name = std::string (kindName (e.kind, rules.french)) + (e.channel >= 0 ? std::string (" ") + LogEvent::channelName (e.channel) : "")
                          + ": " + e.detail;
         std::replace (name.begin(), name.end(), '|', '/');
         out += head;

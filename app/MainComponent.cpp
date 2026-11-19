@@ -146,6 +146,8 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
     logView.onClear = [this] { eventLog.clear(); sessionZero = streamSeconds; };
     logView.onExportCsv = [this] { exportLog (false); };
     logView.onExportEdl = [this] { exportLog (true); };
+    logView.onAnalyseFiles = [this] { analyseFiles(); };
+    logView.onCancelAnalysis = [this] { if (offlineJob != nullptr) offlineJob->signalThreadShouldExit(); };
 
     languageFlag.setTooltip (currentLanguage() == Language::french ? tr ("Interface en français. Cliquer : English.")
                                                                    : tr ("Interface in English. Click: français."));
@@ -1024,6 +1026,109 @@ bool MainComponent::logClock (double& seconds, juce::String& source) const
     return true;
 }
 
+void MainComponent::analyseFiles()
+{
+    if (offlineJob != nullptr)
+        return;
+
+    auto chooser = std::make_shared<juce::FileChooser> (tr ("Files to analyse (reels, mixes)"),
+                                                        juce::File::getSpecialLocation (juce::File::userDocumentsDirectory), "*.wav;*.bwf;*.aif;*.aiff");
+    juce::Component::SafePointer<MainComponent> safe (this);
+
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::canSelectMultipleItems,
+                          [safe, chooser] (const juce::FileChooser& fc)
+                          {
+                              if (safe == nullptr || fc.getResults().isEmpty())
+                                  return;
+
+                              auto& self = *safe;
+                              const auto& formats = channelFormats();
+                              const auto& format = formats[(size_t) juce::jlimit (0, (int) formats.size() - 1, self.formatBox.getSelectedId() - 1)];
+                              auto reels = ReelSource::fromFiles (fc.getResults(), format);
+
+                              if (reels.empty())
+                              {
+                                  juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Analyse files"),
+                                                                          tr ("None of these files could be read as audio."));
+                                  return;
+                              }
+
+                              // The same settings as the live analysis
+                              ReelSettings rs;
+                              rs.engine = self.engineSettings;
+                              rs.engine.tauCorrelation = self.integration.value();
+                              rs.transients = self.currentTransientSettings();
+                              rs.alert = self.alertOptions();
+                              rs.tuning = self.simulator.tuning;
+                              rs.level = self.currentLevel();
+                              rs.lfeGainDb = self.lfeGainToggle.getToggleState() ? lfeInBandGainDb : 0.0;
+                              rs.windowSeconds = self.windowSeconds();
+                              rs.roomSelection = self.roomSelected;
+                              rs.rules = self.eventLog.rules;
+                              rs.rules.minMatch = self.tMatch.value();
+                              rs.rules.french = currentLanguage() == Language::french;
+
+                              self.offlineJob = std::make_unique<OfflineJob> (std::move (reels), rs);
+                              self.offlineJob->startThread();
+                              self.showMode (4);
+                          });
+}
+
+void MainComponent::finishOfflineAnalysis()
+{
+    auto job = std::move (offlineJob);
+    job->stopThread (2000);
+    auto reports = job->reports;
+    logView.setProgress (false, {}, 0.0);
+
+    if (reports.empty())
+        return;
+
+    const bool french = currentLanguage() == Language::french;
+    const auto rate = logRate();
+    const auto stamp = juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M");
+    const auto title = (french ? "SubGUARD - rapport par bobine, " : "SubGUARD - report per reel, ") + stamp;
+    const auto html = OfflineAnalyzer::htmlReport (reports, rate, title.toStdString(), french);
+    const auto rules = eventLog.rules;
+
+    auto chooser = std::make_shared<juce::FileChooser> (tr ("Save the report"),
+                                                        juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                                                            .getChildFile ("SubGUARD report " + stamp + ".html"),
+                                                        "*.html");
+
+    chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
+                          [chooser, html, reports, rate, rules, french] (const juce::FileChooser& fc)
+                          {
+                              const auto file = fc.getResult();
+
+                              if (file == juce::File())
+                                  return;
+
+                              bool ok = file.replaceWithText (juce::String::fromUTF8 (html.c_str()));
+
+                              // Next to it, each reel's events as CSV and as markers
+                              for (const auto& r : reports)
+                              {
+                                  EventLog reelLog;
+                                  reelLog.rules = rules;
+
+                                  for (const auto& e : r.events)
+                                      reelLog.add (e);
+
+                                  const auto base = file.getFileNameWithoutExtension() + " - " + juce::File::createLegalFileName (juce::String::fromUTF8 (r.name.c_str()));
+                                  ok = file.getSiblingFile (base + ".csv").replaceWithText (juce::String::fromUTF8 (reelLog.toCsv (rate, r.name).c_str())) && ok;
+                                  ok = file.getSiblingFile (base + ".edl").replaceWithText (juce::String::fromUTF8 (reelLog.toEdlMarkers (rate, r.name).c_str())) && ok;
+                              }
+
+                              if (! ok)
+                                  juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Export"),
+                                                                          tr ("Could not write ") + file.getFullPathName());
+                              else
+                                  file.startAsProcess();       // opens in the browser
+                              (void) french;
+                          });
+}
+
 void MainComponent::exportLogCsv()  { exportLog (false); }
 void MainComponent::exportLogEdl()  { exportLog (true); }
 
@@ -1111,7 +1216,7 @@ AlertTracker::Options MainComponent::alertOptions() const
     return o;
 }
 
-void MainComponent::applyTransientSettings()
+TransientSettings MainComponent::currentTransientSettings() const
 {
     TransientSettings t;
     t.enabled = transientToggle.getToggleState();
@@ -1121,7 +1226,12 @@ void MainComponent::applyTransientSettings()
     t.sensitivity = tSensitivity.value();
     t.searchMs = tSearch.value();
     t.minMatch = tMatch.value();
+    return t;
+}
 
+void MainComponent::applyTransientSettings()
+{
+    const auto t = currentTransientSettings();
     analysis.setTransientSettings (t);
 
     transientStrip.setActive (t.enabled);
@@ -1224,6 +1334,22 @@ void MainComponent::timerCallback()
 
     if (testMode)
         testView.setState (analysis.isTestSource(), analysis.playingTest(), analysis.testSeconds());
+
+    // Offline analysis: progress, then the report
+    if (offlineJob != nullptr)
+    {
+        if (offlineJob->finished.load())
+        {
+            finishOfflineAnalysis();
+        }
+        else
+        {
+            const int reel = offlineJob->reel.load();
+            logView.setProgress (true, tr ("Reel ") + juce::String (reel + 1) + " / " + juce::String (offlineJob->numReels()) + ": "
+                                           + offlineJob->reelName (reel) + "  " + juce::String (juce::roundToInt (100.0 * offlineJob->fraction.load())) + " %",
+                                 offlineJob->fraction.load());
+        }
+    }
 
     if (logMode)
     {
@@ -1458,19 +1584,9 @@ void MainComponent::timerCallback()
 
             if (logClock (now, source))
             {
-                LogObservation x;
-                x.hasBass = t.hasBass;
-                x.alert = alerts.alertNow;
-                x.alertHz = alerts.alertHz;
-                x.alertSign = alerts.alertSign;
-                x.robustness = t.robustness;
-                x.lfeBalanceDb = t.lfeBalanceDb;
-                x.antiphaseDb = t.antiphaseWorstDb;
-                x.antiphaseHz = t.antiphaseWorstHz;
-                x.antiphasePair = t.antiphasePair;
-                x.transients = snapshot.events;
-                eventLog.rules.alertOn = 0.25;
+                const auto x = EventLog::observation (alerts, t, snapshot.events);
                 eventLog.rules.minMatch = tMatch.value();
+                eventLog.rules.french = currentLanguage() == Language::french;
                 eventLog.observe (now, snapshot.audioSeconds, x);
             }
         }

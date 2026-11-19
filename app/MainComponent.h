@@ -10,6 +10,7 @@
 #include "RoomProView.h"
 #include "TestView.h"
 #include "LogView.h"
+#include "OfflineJob.h"
 #include "../core/EventLog.h"
 #include "../core/Inertia.h"
 
@@ -94,6 +95,7 @@ public:
     /** The event log, for the File menu. */
     void exportLogCsv();
     void exportLogEdl();
+    void analyseFiles();
 
 private:
     LanguageFlag languageFlag;
@@ -172,6 +174,11 @@ private:
     FrameRate logRate() const;
     bool logClock (double& seconds, juce::String& source) const;
     void exportLog (bool edl);
+
+    // Offline file analysis
+    std::unique_ptr<OfflineJob> offlineJob;
+    void finishOfflineAnalysis();
+    TransientSettings currentTransientSettings() const;
 
     // Rooms that count in the score: ticked in Playback chains or in Room Sim
     std::vector<bool> roomSelected = RoomSimulator::defaultSelection();

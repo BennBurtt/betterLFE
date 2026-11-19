@@ -109,6 +109,8 @@ public:
             menu.addSeparator();
             item (5, tr ("Export the event log (CSV)..."), {});
             item (6, tr ("Export markers (EDL)..."), {});
+            menu.addSeparator();
+            item (7, tr ("Analyse files..."), {});
         }
         else
         {
@@ -136,6 +138,7 @@ public:
             case 4:     pro.redo(); break;
             case 5:     content->exportLogCsv(); break;
             case 6:     content->exportLogEdl(); break;
+            case 7:     content->analyseFiles(); break;
             default:    break;
         }
     }

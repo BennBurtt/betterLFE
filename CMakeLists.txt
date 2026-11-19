@@ -14,7 +14,7 @@ endif()
 
 # ----------------------------------------------------------------- engine
 # Portable analysis engine, no dependencies.
-add_library(subguard_core STATIC core/LfeEngine.cpp core/TransientDetector.cpp core/PlaybackSim.cpp core/AnalysisRunner.cpp core/RoomSim.cpp core/RoomPro.cpp core/TestSignals.cpp core/Timecode.cpp core/EventLog.cpp)
+add_library(subguard_core STATIC core/LfeEngine.cpp core/TransientDetector.cpp core/PlaybackSim.cpp core/AnalysisRunner.cpp core/RoomSim.cpp core/RoomPro.cpp core/TestSignals.cpp core/Timecode.cpp core/EventLog.cpp core/OfflineAnalysis.cpp)
 target_include_directories(subguard_core PUBLIC core)
 find_package(Threads REQUIRED)
 target_link_libraries(subguard_core PUBLIC Threads::Threads)
@@ -79,6 +79,7 @@ if(SUBGUARD_BUILD_APP)
         PRIVATE
             subguard_core
             juce::juce_audio_devices
+            juce::juce_audio_formats
             juce::juce_gui_basics
         PUBLIC
             juce::juce_recommended_config_flags

@@ -25,6 +25,10 @@ public:
     std::function<void (int rate)> onRate;                  // -1: as read from the LTC
     std::function<void (double seconds)> onStart;           // session clock: timecode of its start
     std::function<void()> onClear, onExportCsv, onExportEdl;
+    std::function<void()> onAnalyseFiles, onCancelAnalysis;
+
+    /** Offline analysis under way: what it is doing, 0..1; `running` false hides it. */
+    void setProgress (bool running, const juce::String& text, double fraction);
 
     /** The choices as saved, without calling back. */
     void setChoices (int ltcChannel, int rate, double startSeconds, int numInputs);
@@ -54,7 +58,10 @@ private:
     juce::Label sourceLabel, rateLabel, startLabel;
     juce::ComboBox sourceBox, rateBox;
     juce::TextEditor startEditor;
-    juce::TextButton clearButton, csvButton, edlButton;
+    juce::TextButton clearButton, csvButton, edlButton, filesButton, cancelButton;
+    bool analysing = false;
+    juce::String progressText;
+    double progressFraction = 0.0;
     std::vector<LogEvent> shown;
     FrameRate shownRate = FrameRate::fps25;
     juce::String clockText, sourceText;

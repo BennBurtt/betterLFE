@@ -2,6 +2,7 @@
 // Plain executable: exits with 0 when every check passes.
 
 #include "EventLog.h"
+#include "OfflineAnalysis.h"
 #include "Timecode.h"
 #include "../core/AlertTracker.h"
 #include "../core/AnalysisRunner.h"
@@ -2842,6 +2843,88 @@ void testTimecodeAndLog()
            "CSV and EDL markers carry the timecode and the length", 0.0);
 }
 
+// A reel analysed offline: the same engine as live, faster than real time
+void testOfflineReel()
+{
+    std::printf ("\nOffline reel\n");
+
+    // 60 s: screen bass throughout, the LFE an inverted copy of C from 20 to 40 s, unrelated otherwise
+    const double seconds = 60.0;
+
+    // Independent bass noises (15 to 150 Hz): multisines on one frequency grid would stay coherent
+    const auto bassNoise = [] (unsigned seed)
+    {
+        auto s = noise (60.0, seed);
+        const double lo = 1.0 - std::exp (-2.0 * pi * 150.0 / sampleRate), hi = 1.0 - std::exp (-2.0 * pi * 15.0 / sampleRate);
+        double a = 0, b = 0, c = 0, d = 0, slow = 0;
+
+        for (auto& v : s)
+        {
+            a += lo * (v - a); b += lo * (a - b); c += lo * (b - c); d += lo * (c - d);
+            slow += hi * (d - slow);
+            v = (float) (4.0 * (d - slow));
+        }
+
+        return s;
+    };
+
+    const auto l = bassNoise (31), c = bassNoise (32), lfeOwn = bassNoise (33);
+    Signal lfe (lfeOwn.size());
+
+    for (size_t i = 0; i < lfe.size(); ++i)
+    {
+        const double t = (double) i / sampleRate;
+        lfe[i] = t >= 20.0 && t < 40.0 ? -c[i] : 0.5f * lfeOwn[i];
+    }
+
+    ReelSettings settings;
+    settings.lfeGainDb = 0.0;
+    size_t position = 0;
+    const auto pull = [&] (float* out, int maxFrames)
+    {
+        const int n = (int) std::min ((size_t) maxFrames, l.size() - position);
+
+        for (int i = 0; i < n; ++i, ++position)
+        {
+            out[i * 4 + 0] = l[position];
+            out[i * 4 + 1] = c[position];
+            out[i * 4 + 2] = l[position];
+            out[i * 4 + 3] = lfe[position];
+        }
+
+        return n;
+    };
+
+    const auto started = std::chrono::steady_clock::now();
+    const auto r = OfflineAnalyzer::analyse ("Reel 1", sampleRate, 3600.0, (long long) l.size(), pull, settings);
+    const double took = std::chrono::duration<double> (std::chrono::steady_clock::now() - started).count();
+    std::printf ("  60 s analysed in %.1f s (%.0f x real time): robustness mean %.0f, 10 %% %.0f, min %.0f, %.0f s under 50; alerts L/C/R %.0f/%.0f/%.0f s; %zu events\n",
+                 took, seconds / took, r.robustnessMean, r.robustnessP10, r.robustnessMin, r.secondsUnder50, r.alertSeconds[0], r.alertSeconds[1],
+                 r.alertSeconds[2], r.events.size());
+    const LogEvent* onC = nullptr;
+
+    for (const auto& e : r.events)
+    {
+        std::printf ("    %s - %s  %s %s: %s\n", Timecode::labelOfSeconds (e.start, FrameRate::fps25).c_str(), Timecode::labelOfSeconds (e.end, FrameRate::fps25).c_str(),
+                     LogEvent::kindName (e.kind), LogEvent::channelName (e.channel), e.detail.c_str());
+
+        if (e.kind == EventKind::phaseAlert && e.channel == 1 && (onC == nullptr || e.end - e.start > onC->end - onC->start))
+            onC = &e;
+    }
+
+    check (onC != nullptr && onC->start > 3619.0 && onC->start < 3624.0 && onC->end > 3638.0 && onC->end < 3645.0,
+           "the inverted LFE is logged on C, from about 01:00:20 to about 01:00:40 (plus the averaging)", onC != nullptr ? onC->start - 3600.0 : -1.0);
+    check (std::none_of (r.events.begin(), r.events.end(), [] (const LogEvent& e) { return e.start < 3602.0; }),
+           "nothing logged while the averages fill (the first 2 s)", r.events.empty() ? 0.0 : r.events[0].start - 3600.0);
+    check (r.timeline.size() >= 59 && r.timeline[30] < r.timeline[10] - 10.0 && r.worst.size() >= 1 && r.worst[0].at > 3619.0 && r.worst[0].at < 3642.0,
+           "the score dips while the LFE works against C; the worst moment is there", r.timeline.size() > 30 ? r.timeline[30] : -1.0);
+    check (seconds / took > 5.0, "faster than real time", seconds / took);
+
+    const auto html = OfflineAnalyzer::htmlReport ({ r }, FrameRate::fps25, "Test", true);
+    check (html.find ("Reel 1") != std::string::npos && html.find ("<svg") != std::string::npos && html.find ("01:00:00:00") != std::string::npos,
+           "the report has the reel, its timeline and its timecode", (double) html.size());
+}
+
 int main()
 {
     testFilterDesign();
@@ -2860,6 +2943,7 @@ int main()
     testPlaybackChains();
     testInertiaAndAutoReset();
     testTimecodeAndLog();
+    testOfflineReel();
 
     std::printf ("\n%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;
