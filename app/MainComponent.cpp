@@ -39,6 +39,21 @@ LabelledSlider::LabelledSlider (const juce::String& text, double min, double max
     addAndMakeVisible (slider);
 }
 
+void LabelledSlider::setEvidence (bool sourced, const juce::String& why)
+{
+    // Green: the default comes from a published source; amber: it is a choice, still to be confirmed
+    const auto colour = sourced ? juce::Colour (0xff4caf50) : juce::Colour (0xffffb347);
+    evidence.setText (sourced ? tr ("sourced") : tr ("hypothesis"), juce::dontSendNotification);
+    evidence.setFont (uiFont (10.5f, true));
+    evidence.setJustificationType (juce::Justification::centred);
+    evidence.setColour (juce::Label::textColourId, colour);
+    evidence.setColour (juce::Label::outlineColourId, colour.withAlpha (0.6f));
+    evidence.setTooltip (why);
+    addAndMakeVisible (evidence);
+    setTooltip (getTooltip().isEmpty() ? why : getTooltip() + "\n" + why);
+    resized();
+}
+
 void LabelledSlider::refresh()
 {
     valueLabel.setText (format ? format (slider.getValue()) : juce::String (slider.getValue()), juce::dontSendNotification);
@@ -62,6 +77,10 @@ void LabelledSlider::resized()
     auto area = getLocalBounds();
     auto top = area.removeFromTop (20);
     valueLabel.setBounds (top.removeFromRight (84));
+
+    if (evidence.isVisible())
+        evidence.setBounds (top.removeFromRight (72).reduced (2, 2));
+
     caption.setBounds (top);
     slider.setBounds (area);
 }
@@ -529,6 +548,33 @@ void MainComponent::buildCards()
         dDips.setTooltip (tr ("Room Sim and Room Sim Pro: a dip is heard less than a peak of the same size. 1: dips get the published "
                               "difference (Bharitkar, Robinson & Poulain 2016; Toole & Olive), about 2.6 dB more below 63 Hz, "
                               "2.2 dB at 125 Hz; 0: dips count as peaks."));
+
+        // Where each default comes from: sourced only when the value itself is published
+        {
+            const auto tolerance = tr ("Hypothesis: the mixer's choice for the content (Soft / Medium / Strong). For scale: about 1 dB is the smallest "
+                                       "change of level heard on a steady tone at moderate levels (Zwicker & Fastl, Psychoacoustics).");
+            dTolSoft.setEvidence (false, tolerance);
+            dTolMedium.setEvidence (false, tolerance);
+            dTolStrong.setEvidence (false, tolerance);
+            const auto place = tr ("Hypothesis: how likely a cinema subwoofer off its place is, against on time. No published survey of installed rooms found.");
+            dLate.setEvidence (false, place);
+            dEarly.setEvidence (false, place);
+            dCeiling.setEvidence (false, tr ("Hypothesis for the amount. The principle is sourced: the LFE is optional at reception and must not carry "
+                                             "the programme's bass (ITU-R BS.775)."));
+            const auto level = tr ("Hypothesis: how much a subwoofer set off its level counts. Red at 3 dB: half or twice the power.");
+            dLevelWeight.setEvidence (false, level);
+            dLevelRed.setEvidence (false, level);
+            const auto infra = tr ("Hypothesis: what bass under 25 to 40 Hz is worth when it lives only in the LFE (many systems stop above it).");
+            dInfraWeight.setEvidence (false, infra);
+            dInfraLo.setEvidence (false, infra);
+            dInfraHi.setEvidence (false, infra);
+            const auto worst = tr ("Hypothesis: how much the worst seats pull a room's score down.");
+            dWorstWeight.setEvidence (false, worst);
+            dWorstShare.setEvidence (false, worst);
+            dCoverage.setEvidence (false, tr ("Hypothesis: how much the bass level at each seat counts next to the interaction."));
+            dDips.setEvidence (true, tr ("Sourced: a dip is detected at a larger size than a peak (Bharitkar, Robinson & Poulain 2016; "
+                                         "Toole & Olive 1988; Olive et al. 1997)."));
+        }
 
         for (auto* slider : devSliders())
         {

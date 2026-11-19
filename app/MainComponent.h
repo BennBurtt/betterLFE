@@ -30,12 +30,15 @@ public:
     /** Marks a stretch of the track in a lighter shade (the values in common use). */
     void setHighlight (double from, double to)  { highlightFrom = from; highlightTo = to; repaint(); }
 
+    /** Where the default value comes from: a published source, or a hypothesis (shown as a tag by the caption). */
+    void setEvidence (bool sourced, const juce::String& why);
+
     void refresh();
     void resized() override;
     void paint (juce::Graphics&) override;
 
 private:
-    juce::Label caption, valueLabel;
+    juce::Label caption, valueLabel, evidence;
     juce::Slider slider;
     double highlightFrom = 0.0, highlightTo = 0.0;
 };

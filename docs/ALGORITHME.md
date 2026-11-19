@@ -510,6 +510,30 @@ grave de près de 6 dB entre un sub en polarité et un sub inversé.
 | ISO 226 pour des bandes de bruit et de la musique | **Approximation** : ISO 226 décrit des sons purs continus. Un modèle de sonie pour sons complexes (ISO 532-3, Moore-Glasberg-Schlittenlacher) serait plus juste, au prix d'un calcul bien plus lourd |
 | Le score sur 100 | **Indice de risque propre à SubGUARD**, construit à partir de mesures et de normes mais avec des pondérations choisies ; ce n'est pas une mesure normalisée de la qualité d'un mix |
 
+### 3.8 ter Réglages Dev : sourcé ou hypothèse
+
+Chaque réglage de l'onglet Dev porte une étiquette : **sourcé** (vert) quand
+sa valeur par défaut vient d'une publication, **hypothèse** (orange) quand
+c'est un choix. Survoler l'étiquette donne la raison. Une valeur seulement
+voisine d'un chiffre publié reste une hypothèse.
+
+| Réglage | Défaut | Statut | Appui |
+|---|---|---|---|
+| Tolérances Soft, Medium, Strong | 3 ; 2 ; 1 dB | hypothèse | choix du mixeur selon le contenu ; 1 dB ≈ plus petit écart de niveau audible [16] |
+| Poids en retard, en avance | 0,5 ; 0,5 | hypothèse | aucune enquête publiée sur les caissons des salles installées |
+| Plafond de dépendance au LFE | 1,00 | hypothèse | le principe est sourcé (le LFE ne porte pas le grave du programme [12]), la quantité non |
+| Dépendance au niveau : poids, rouge à | 0,20 ; 3 dB | hypothèse | 3 dB = la moitié ou le double de la puissance |
+| Infra-grave : poids, jusqu'à, plein poids dès | 0,30 ; 25 Hz ; 40 Hz | hypothèse | beaucoup de systèmes s'arrêtent au-dessus de 40 Hz |
+| Pires places : poids, part | 0,25 ; 10 % | hypothèse | — |
+| Couverture (Pro) : poids | 0,5 | hypothèse | — |
+| Creux contre pics : marge | 1,0 | **sourcé** | un creux n'est détecté qu'à une taille plus grande qu'un pic [44][45] |
+
+Sources cherchées sans pouvoir être lues depuis la session de développement
+(accès réseau bloqué) : SMPTE ST 202:2010 (tolérances de la courbe X en salle),
+et l'étude de L-Acoustics sur l'audibilité d'un décalage façade / caissons
+(AES, 2024). Elles pourraient remplacer les tolérances et les poids en retard
+ou en avance.
+
 ### 3.8 bis Dépendance au LFE : ce que dit la littérature
 
 | Source | Ce qu'elle établit |
