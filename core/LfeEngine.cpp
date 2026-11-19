@@ -319,6 +319,9 @@ void LfeEngine::configure (double windowSeconds)
     m1Fast.assign (gridPoints, 0.0);
     m2Fast.assign (gridPoints, 0.0);
     out.matrix.sigma.assign (gridPoints, 1.0);
+    m1Screen.assign (gridPoints, 0.0);
+    m2Screen.assign (gridPoints, 0.0);
+    out.matrix.sigmaScreen.assign (gridPoints, 1.0);
     now.assign (nb * statCount, 0.0);
     m1.assign (gridPoints * numPairs, 0.0);
     m2.assign (gridPoints * numPairs, 0.0);
@@ -605,6 +608,16 @@ bool LfeEngine::analyze (const Settings& settings)
             a2 = a2 * m2FastDecay + q * q * dt / (tauFast * tauFast);
             const double dof = bandwidth[g] * (a1 * a1 / (a2 + tiny) + frameSeconds[pairFacade]);
             m.sigma[g] = std::min (1.0, 1.0 / std::sqrt (2.0 * std::max (dof, 0.5)));
+
+            // The screen's channels among themselves: the same estimate of the averaging, on the screen's
+            // own power (without it, a mix with no LFE would have no usable coherence between L, C and R)
+            const double qs = smNow[0] + smNow[1] + smNow[2];
+            double& s1 = m1Screen[g];
+            double& s2 = m2Screen[g];
+            s1 += aFast * (qs - s1);
+            s2 = s2 * m2FastDecay + qs * qs * dt / (tauFast * tauFast);
+            const double dofScreen = bandwidth[g] * (s1 * s1 / (s2 + tiny) + frameSeconds[pairFacade]);
+            m.sigmaScreen[g] = std::min (1.0, 1.0 / std::sqrt (2.0 * std::max (dofScreen, 0.5)));
         }
 
         for (int p = 0; p < numPairs; ++p)
@@ -660,6 +673,8 @@ void LfeEngine::resetCorrelation()
     std::fill (m2.begin(), m2.end(), 0.0);
     std::fill (m1Fast.begin(), m1Fast.end(), 0.0);
     std::fill (m2Fast.begin(), m2Fast.end(), 0.0);
+    std::fill (m1Screen.begin(), m1Screen.end(), 0.0);
+    std::fill (m2Screen.begin(), m2Screen.end(), 0.0);
     correlationCleared = true;
 }
 

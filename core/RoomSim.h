@@ -65,7 +65,9 @@ struct RoomResult
     static constexpr int numSeats = 20;         // seats of the fifteen standard rooms
 
     RoomSpec spec;
-    std::vector<double> seatChangeDb;           // per seat, 20-120 Hz, interaction against the approved one
+    bool otherSystem = false;                   // not a room: a venue system (PlaybackSimulator::OtherSystem), electrical
+    std::string description;                    // other systems: what it is
+    std::vector<double> seatChangeDb;           // per seat, 20-120 Hz, interaction against the approved one (other systems: per band)
     std::vector<double> seatPenalty;            // per seat, 0..1
     double worstDb = 0.0, medianDb = 0.0, bestDb = 0.0;   // seats sorted by change
     double roomScore = 100.0;                             // 0..100: seat scores, the worst seats weighed more (see rate)
@@ -228,8 +230,10 @@ public:
     static std::complex<double> response (const RoomSpec&, const std::array<double, 3>& source,
                                           const std::array<double, 3>& receiver, double hz);
 
-    /** The rooms ticked by default: five of the middle of the range, neither the worst nor the best. */
+    /** The rooms ticked by default: five of the middle of the range, neither the worst nor the best; then the
+        other systems (venues), not ticked. One entry per row of RoomSimResult::rooms. */
     static std::vector<bool> defaultSelection();
+    static constexpr int numRows()      { return 15 + PlaybackSimulator::numOtherSystems; }
 
     /** Folds the ticked rooms into the score, as further playback systems: a room
         counts with the penalty of its average seat (1 - room score / 100), and

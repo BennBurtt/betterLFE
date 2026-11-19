@@ -107,7 +107,7 @@ std::vector<RoomSpec> RoomSimulator::defaultRooms()
 std::vector<bool> RoomSimulator::defaultSelection()
 {
     // Multiplex 150, 200 and 300 seats, large 400 seats, premium large format
-    std::vector<bool> on (defaultRooms().size(), false);
+    std::vector<bool> on (defaultRooms().size() + PlaybackSimulator::numOtherSystems, false);
 
     for (size_t i : { 5u, 6u, 7u, 8u, 11u })
         on[i] = true;
@@ -279,6 +279,28 @@ RoomSimResult RoomSimulator::compute (const Analysis& a, const Translation& t, c
 
     for (const auto& room : prepared)
         out.rooms.push_back (rate (room, a, t, tuning, level, lfeGainDb));
+
+    // The other systems (venues), rated electrically by the playback simulation: one row each,
+    // their four bands in place of seats
+    for (const auto& other : t.others)
+    {
+        RoomResult r;
+        r.otherSystem = true;
+        r.spec.name = r.spec.shortName = other.name;
+        r.description = other.other >= 0 ? PlaybackSimulator::otherSystemDescription (other.other) : "";
+        r.roomScore = 100.0 * (1.0 - std::clamp (other.penalty, 0.0, 1.0));
+        r.combinedScore = t.robustness * r.roomScore / 100.0;
+        r.medianDb = other.changeDb;
+        r.worstDb = std::abs (other.minChangeDb) > std::abs (other.maxChangeDb) ? other.minChangeDb : other.maxChangeDb;
+
+        for (size_t b = 0; b < other.bandChangeDb.size(); ++b)
+        {
+            r.seatChangeDb.push_back (other.bandChangeDb[b]);
+            r.seatPenalty.push_back (other.bandRated[b]);
+        }
+
+        out.rooms.push_back (r);
+    }
 
     return out;
 }

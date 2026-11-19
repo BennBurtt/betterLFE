@@ -170,6 +170,211 @@ double Translation::audibleAt (int band, double shiftDb, double spreadDb, bool e
     return heard / total;
 }
 
+const char* PlaybackSimulator::otherSystemName (int which)
+{
+    switch (which)
+    {
+        case stereoPaNoLfe:     return "Other system: stereo PA, subwoofers on L + R, no LFE";
+        case surroundPaWithLfe: return "Other system: 5.1 on a PA, subwoofers on L + R + LFE";
+        case smallSpeakers:     return "Other system: small speakers, no subwoofer";
+        default:                return "";
+    }
+}
+
+const char* PlaybackSimulator::otherSystemShortName (int which)
+{
+    switch (which)
+    {
+        case stereoPaNoLfe:     return "Stereo PA";
+        case surroundPaWithLfe: return "5.1 PA + LFE";
+        case smallSpeakers:     return "Small speakers";
+        default:                return "";
+    }
+}
+
+const char* PlaybackSimulator::otherSystemDescription (int which)
+{
+    switch (which)
+    {
+        case stereoPaNoLfe:     return "A stereo fold-down (L + 0.71 C, R + 0.71 C, the LFE left out) on a PA whose subwoofers play L + R, as at a show or in a shop";
+        case surroundPaWithLfe: return "The 5.1 on a PA whose processor feeds the subwoofers L + R + C and the LFE (+10 dB), as at an event";
+        case smallSpeakers:     return "A stereo fold-down on small speakers that roll off under 60 Hz (12 dB per octave), no subwoofer, no LFE";
+        default:                return "";
+    }
+}
+
+void PlaybackSimulator::computeOthers (const Analysis& a, Translation& t, Level level, double lfeGain,
+                                       const double* approved, double approvedTotal, const double* doubling) const
+{
+    const auto& m = a.matrix;
+    const auto n = a.grid.size();
+
+    if (m.cLC.size() != n || m.cLLfe.size() != n)
+        return;
+
+    const double tolerance = tuning.toleranceDb[(size_t) level];
+
+    // A cross-spectrum with what chance could produce taken out (as for the LFE)
+    const bool ownScreenLevel = m.sigmaScreen.size() == n;
+    const auto shrunk = [&] (cd c, double pa, double pb, size_t g, bool screenPair)
+    {
+        const double sigma = screenPair && ownScreenLevel ? m.sigmaScreen[g] : m.sigma[g];
+        const double coherence = std::abs (c) / (std::sqrt (pa * pb) + 1e-60);
+        const double full = std::max (std::min (3.0 * sigma, 0.95), 2.0 * sigma + 1e-9);
+        return c * std::clamp ((coherence - 2.0 * sigma) / (full - 2.0 * sigma), 0.0, 1.0);
+    };
+
+    // Per band: the screen as summed (cancellations in), the same without its
+    // cancellations, and each pair's cancellation
+    double summed[numBands] = {}, uncancelled[numBands] = {}, pairLoss[numBands][3] = {};
+    std::vector<std::array<cd, 16>> spectra (n);        // L, C, R, LFE as heard: S_ab
+
+    for (size_t g = 0; g < n; ++g)
+    {
+        const double p[4] = { m.pL[g], m.pC[g], m.pR[g], lfeGain * lfeGain * m.pLfe[g] };
+        auto& S = spectra[g];
+
+        for (int i = 0; i < 4; ++i)
+            S[(size_t) (i * 4 + i)] = p[i];
+
+        const cd lc = shrunk (m.cLC[g], p[0], p[1], g, true), lr = shrunk (m.cLR[g], p[0], p[2], g, true), cr = shrunk (m.cCR[g], p[1], p[2], g, true);
+        const cd le = lfeGain * shrunk (m.cLLfe[g], p[0], m.pLfe[g], g, false), ce = lfeGain * shrunk (m.cCLfe[g], p[1], m.pLfe[g], g, false),
+                 re = lfeGain * shrunk (m.cRLfe[g], p[2], m.pLfe[g], g, false);
+        struct Cross { cd value; int i, j; };
+        const Cross crosses[6] = { { lc, 0, 1 }, { lr, 0, 2 }, { cr, 1, 2 }, { le, 0, 3 }, { ce, 1, 3 }, { re, 2, 3 } };
+
+        for (const auto& x : crosses)
+        {
+            S[(size_t) (x.i * 4 + x.j)] = x.value;
+            S[(size_t) (x.j * 4 + x.i)] = std::conj (x.value);
+        }
+
+        const double hz = a.grid[g];
+        const int b = bandOf (hz);
+
+        if (b < 0)
+            continue;
+
+        const double screenDiag = p[0] + p[1] + p[2];
+        const double pairs[3] = { 2.0 * lr.real(), 2.0 * lc.real(), 2.0 * cr.real() };     // L/R, L/C, C/R
+        summed[b] += hz * std::max (0.0, screenDiag + pairs[0] + pairs[1] + pairs[2]);
+        uncancelled[b] += hz * (screenDiag + std::max (0.0, pairs[0]) + std::max (0.0, pairs[1]) + std::max (0.0, pairs[2]));
+
+        for (int k = 0; k < 3; ++k)
+            pairLoss[b][k] += hz * std::min (0.0, pairs[k]);
+    }
+
+    // The opposition of phase, band by band, and where it is worst
+    t.antiphaseWorstDb = 0.0;
+    t.antiphasePair = -1;
+
+    for (int b = 0; b < numBands; ++b)
+    {
+        t.antiphaseDb[(size_t) b] = uncancelled[b] > 1e-6 * (approvedTotal + 1e-60) ? std::min (0.0, limited ((summed[b] + 1e-60) / uncancelled[b])) : 0.0;
+
+        if (t.antiphaseDb[(size_t) b] < t.antiphaseWorstDb)
+        {
+            t.antiphaseWorstDb = t.antiphaseDb[(size_t) b];
+            t.antiphaseWorstHz = bandCentreHz[b];
+            t.antiphasePair = (int) (std::min_element (pairLoss[b], pairLoss[b] + 3) - pairLoss[b]);
+        }
+    }
+
+    // The other systems: gains of L, C, R and the LFE at each frequency
+    for (int which = 0; which < numOtherSystems; ++which)
+    {
+        ChainResult chain;
+        chain.kind = ChainResult::Kind::other;
+        chain.other = which;
+        chain.name = otherSystemName (which);
+        chain.weight = 1.0;
+        const bool withLfe = which == surroundPaWithLfe;
+        double band[numBands] = {}, reference[numBands] = {}, total = 0.0, referenceTotal = 0.0;
+
+        for (size_t g = 0; g < n; ++g)
+        {
+            const double hz = a.grid[g];
+            const int b = bandOf (hz);
+
+            if (b < 0)
+                continue;
+
+            // The fold-down sums L + 0.707 C and R + 0.707 C (ITU-R BS.775, LFE left out); the subwoofers play their sum
+            constexpr double centreIntoEachSide = 0.70710678118654752;     // 1 / sqrt 2, ITU-R BS.775 downmix
+            cd gains[4] = { 1.0, 2.0 * centreIntoEachSide, 1.0, withLfe ? 1.0 : 0.0 };
+
+            if (which == smallSpeakers)
+            {
+                // Second-order high-pass at 60 Hz (Butterworth, Q 0.71): a closed box is a second-order
+                // high-pass (Small 1972); the 60 Hz corner is a hypothesis for small speakers
+                const cd s (0.0, hz / 60.0);
+                const cd highPass = s * s / (s * s + std::sqrt (2.0) * s + 1.0);
+
+                for (auto& gain : gains)
+                    gain *= highPass;
+            }
+
+            // Reference: the same channels as in this system (with or without the LFE), cancellations left out
+            const auto& S = spectra[g];
+            double power = 0.0, uncancelledHere = 0.0;
+
+            for (int i = 0; i < 4; ++i)
+                for (int j = 0; j < 4; ++j)
+                {
+                    power += (gains[i] * std::conj (gains[j]) * S[(size_t) (i * 4 + j)]).real();
+
+                    const bool used = i == 3 || j == 3 ? withLfe : true;
+
+                    if (used)
+                        uncancelledHere += i == j ? S[(size_t) (i * 4 + i)].real() : std::max (0.0, S[(size_t) (i * 4 + j)].real());
+                }
+
+            band[b] += hz * std::max (0.0, power);
+            reference[b] += hz * uncancelledHere;
+            total += hz * std::max (0.0, power);
+            referenceTotal += hz * uncancelledHere;
+        }
+
+        // Rated as the playback systems: band by band, the tolerance, a doubling of loudness for the full penalty,
+        // each band by its share of the heard reference
+        chain.changeDb = limited ((total + 1e-60) / (referenceTotal + 1e-60));
+        double heardTotal = 0.0, heardBand[numBands] = {};
+        bool anyBand = false;
+
+        for (int b = 0; b < numBands; ++b)
+        {
+            heardBand[b] = reference[b] * t.bandAudible[(size_t) b];
+            heardTotal += heardBand[b];
+        }
+
+        for (int b = 0; b < numBands; ++b)
+        {
+            if (reference[b] <= 1e-6 * (referenceTotal + 1e-60))
+                continue;
+
+            chain.bandChangeDb[(size_t) b] = limited ((band[b] + 1e-60) / reference[b]);
+            const bool first = ! anyBand;
+            anyBand = true;
+            chain.minChangeDb = first ? chain.bandChangeDb[(size_t) b] : std::min (chain.minChangeDb, chain.bandChangeDb[(size_t) b]);
+            chain.maxChangeDb = first ? chain.bandChangeDb[(size_t) b] : std::max (chain.maxChangeDb, chain.bandChangeDb[(size_t) b]);
+            const double allowed = std::min (tolerance, doubling[b] - 0.5);
+            const double rated = std::clamp ((std::abs (chain.bandChangeDb[(size_t) b]) - allowed) / (doubling[b] - allowed), 0.0, 1.0);
+            chain.bandRated[(size_t) b] = rated;
+            chain.penalty += heardBand[b] / (heardTotal + 1e-60) * rated;
+        }
+
+        double heardAtAll = 0.0;
+
+        for (double v : t.bandAudible)
+            heardAtAll = std::max (heardAtAll, v);
+
+        chain.penalty = std::min (chain.penalty, 1.0) * heardAtAll;
+        t.others.push_back (chain);
+    }
+
+    (void) approved;
+}
+
 Translation PlaybackSimulator::compute (const Analysis& a, Level level, double lfeGainDb) const
 {
     Translation t;
@@ -249,7 +454,7 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
     // frequency.
     double reference[numBands] = {}, referenceTotal = 0.0, weightTotal = 0.0, bandWeight[numBands] = {};
     double smallSystems[numBands] = {};     // reference bass weighted by how much a small system would render it
-    double screenTotal = 0.0, lfeTotal = 0.0;
+    double screenTotal = 0.0, lfeTotal = 0.0, screenChannels = 0.0;
     std::vector<double> referencePower (n, 0.0);
 
     for (size_t g = 0; g < n; ++g)
@@ -271,10 +476,13 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
         referenceTotal += hz * power;
         weightTotal += hz;
         screenTotal += hz * m.pF[g];
+        screenChannels += hz * (m.pL[g] + m.pC[g] + m.pR[g]);
         lfeTotal += hz * lfe;
     }
 
-    t.hasBass = weightTotal > 0.0 && (screenTotal + lfeTotal) / weightTotal > silencePower;
+    // Bass is there if any channel carries it: a screen whose channels cancel in their sum
+    // (L and R in opposition) still has bass, which any other summing will lose
+    t.hasBass = weightTotal > 0.0 && (std::max (screenTotal, screenChannels) + lfeTotal) / weightTotal > silencePower;
 
     if (! t.hasBass)
         return t;
@@ -407,6 +615,7 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
 
         chain.changeDb = limited ((total + 1e-60) / (referenceTotal + 1e-60));
         chain.penalty = 0.0;
+        bool anyBand = false;
 
         for (int b = 0; b < numBands; ++b)
         {
@@ -414,6 +623,15 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
                 continue;
 
             chain.bandChangeDb[(size_t) b] = limited ((band[b] + 1e-60) / (reference[b] + 1e-60));
+
+            // The band that moves most down and most up (bands with no reference bass left out)
+            if (reference[b] > 1e-6 * referenceTotal)
+            {
+                const bool first = ! anyBand;
+                anyBand = true;
+                chain.minChangeDb = first ? chain.bandChangeDb[(size_t) b] : std::min (chain.minChangeDb, chain.bandChangeDb[(size_t) b]);
+                chain.maxChangeDb = first ? chain.bandChangeDb[(size_t) b] : std::max (chain.maxChangeDb, chain.bandChangeDb[(size_t) b]);
+            }
 
             // What the band is worth: its share of the heard reference bass, or
             // of this system's heard bass when the system has some where the
@@ -495,6 +713,8 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
     // Dependence: how much of the bass exists only in the LFE.
     t.interaction = std::clamp (worst, 0.0, 1.0);
     t.robustness = 100.0 * (1.0 - t.interaction) * (1.0 - t.dependence) * (1.0 - tuning.levelDependenceWeight * t.levelDependence);
+
+    computeOthers (a, t, level, lfeGain, reference, referenceTotal, doubling);
 
     // Overlap: RMS level of each group per band. A mean per-bin power over a
     // band of width W becomes an RMS power of mean . W . window / 3 (Hann window).

@@ -1790,16 +1790,25 @@ static void testRooms()
     PlaybackSimulator sim;
     RoomSimulator rooms;
 
+    // The fifteen cinema rooms only (the rows of the other systems follow them)
+    const auto cinemaRooms = [] (RoomSimResult r)
+    {
+        r.rooms.erase (std::remove_if (r.rooms.begin(), r.rooms.end(), [] (const RoomResult& x) { return x.otherSystem; }), r.rooms.end());
+        return r;
+    };
+
     const auto apartAnalysis = scene (0.0), sharedAnalysis = scene (1.0);
     const auto started = std::chrono::steady_clock::now();
-    const auto apart = rooms.compute (apartAnalysis, sim.compute (apartAnalysis), sim.tuning, PlaybackSimulator::Level::strong, 10.0);
+    const auto apartAll = rooms.compute (apartAnalysis, sim.compute (apartAnalysis), sim.tuning, PlaybackSimulator::Level::strong, 10.0);
+    const auto apart = cinemaRooms (apartAll);
     const double prepareSeconds = std::chrono::duration<double> (std::chrono::steady_clock::now() - started).count();
     const auto again = std::chrono::steady_clock::now();
-    const auto shared = rooms.compute (sharedAnalysis, sim.compute (sharedAnalysis), sim.tuning, PlaybackSimulator::Level::strong, 10.0);
+    const auto shared = cinemaRooms (rooms.compute (sharedAnalysis, sim.compute (sharedAnalysis), sim.tuning, PlaybackSimulator::Level::strong, 10.0));
     const double updateMs = 1000.0 * std::chrono::duration<double> (std::chrono::steady_clock::now() - again).count();
     std::printf ("  fifteen rooms: prepared in %.2f s, then %.2f ms per update\n", prepareSeconds, updateMs);
 
-    check (apart.rooms.size() == 15 && shared.rooms.size() == 15, "fifteen rooms", (double) apart.rooms.size());
+    check (apart.rooms.size() == 15 && shared.rooms.size() == 15 && apartAll.rooms.size() == (size_t) RoomSimulator::numRows(),
+           "fifteen rooms, then the other systems", (double) apartAll.rooms.size());
 
     double worstApart = 0.0, lowestApart = 100.0;
 
@@ -1854,7 +1863,7 @@ static void testRooms()
             PlaybackSimulator at;
             at.tuning.listeningLevelDbC = dbC;
             RoomSimulator roomsAt;
-            const auto r = roomsAt.compute (quietMix, at.compute (quietMix), at.tuning, PlaybackSimulator::Level::strong, 10.0);
+            const auto r = cinemaRooms (roomsAt.compute (quietMix, at.compute (quietMix), at.tuning, PlaybackSimulator::Level::strong, 10.0));
 
             for (const auto& room : r.rooms)
                 mean[index] += room.roomScore / (double) r.rooms.size();
@@ -1864,6 +1873,49 @@ static void testRooms()
 
         std::printf ("  identical LFE at -50 dBFS: mean room score %.0f at 70 dB(C), %.0f at 90 dB(C)\n", mean[0], mean[1]);
         check (mean[1] < mean[0] - 5.0, "a louder listening level makes more of the rooms' faults audible", mean[1]);
+    }
+
+    // Bass in opposition of phase between L and R: seen apart, and by the other systems only
+    {
+        const auto mixOf = [] (double rightSign)
+        {
+            Signal n, unusedN, c, unusedC;          // bass from 12 to 180 Hz, about -22 dBFS RMS
+            quadraturePair (8.0, 104, n, unusedN);
+            quadraturePair (8.0, 105, c, unusedC);
+            LfeEngine e (sampleRate, 1.0, 0.0);
+            Scene s;
+            s.l = n;
+            s.r = scaled (n, rightSign);
+            s.c = scaled (c, 0.4);
+            run (e, s);
+            return e.result();
+        };
+
+        const auto inPhase = mixOf (1.0), opposed = mixOf (-1.0);
+        const auto tIn = sim.compute (inPhase), tOpp = sim.compute (opposed);
+        const char* pairs[] = { "L / R", "L / C", "C / R" };
+        std::printf ("  bass of L and R in opposition: %.1f dB at %.0f Hz (%s); in phase: %.1f dB. Stereo PA with subwoofers on L + R: "
+                     "%+.1f dB (%.0f) against %+.1f dB (%.0f)\n",
+                     tOpp.antiphaseWorstDb, tOpp.antiphaseWorstHz, tOpp.antiphasePair >= 0 ? pairs[tOpp.antiphasePair] : "-", tIn.antiphaseWorstDb,
+                     tOpp.others[PlaybackSimulator::stereoPaNoLfe].changeDb, 100.0 * (1.0 - tOpp.others[PlaybackSimulator::stereoPaNoLfe].penalty),
+                     tIn.others[PlaybackSimulator::stereoPaNoLfe].changeDb, 100.0 * (1.0 - tIn.others[PlaybackSimulator::stereoPaNoLfe].penalty));
+        check (tOpp.antiphaseWorstDb < -10.0 && tOpp.antiphasePair == 0 && tIn.antiphaseWorstDb > -0.1,
+               "L and R in opposition: a large loss in any sum, L / R named; in phase: none", tOpp.antiphaseWorstDb);
+        check (tOpp.others.size() == (size_t) PlaybackSimulator::numOtherSystems
+                 && tOpp.others[PlaybackSimulator::stereoPaNoLfe].penalty > 0.5 && tIn.others[PlaybackSimulator::stereoPaNoLfe].penalty < 0.2,
+               "an other system with subwoofers on L + R catches the opposition of phase", tOpp.others[PlaybackSimulator::stereoPaNoLfe].penalty);
+
+        // Not ticked, the other systems leave the score alone; ticked, they count
+        RoomSimulator roomsHere;
+        const auto withRows = roomsHere.compute (opposed, tOpp, sim.tuning, PlaybackSimulator::Level::strong, 10.0);
+        auto plain = tOpp, ticked = tOpp;
+        std::vector<bool> none ((size_t) RoomSimulator::numRows(), false), other = none;
+        other[15 + PlaybackSimulator::stereoPaNoLfe] = true;
+        RoomSimulator::applyToScore (plain, withRows, none, sim.tuning.levelDependenceWeight);
+        RoomSimulator::applyToScore (ticked, withRows, other, sim.tuning.levelDependenceWeight);
+        std::printf ("  the same mix: score %.0f, %.0f with the stereo PA ticked\n", plain.robustness, ticked.robustness);
+        check (ticked.robustness < plain.robustness - 20.0 && std::abs (plain.robustness - tOpp.robustness) < 1e-9,
+               "the opposition of phase counts in the score when an other system is ticked, not otherwise", ticked.robustness);
     }
 
     // Ticked rooms enter the score as further systems: the worst one counts

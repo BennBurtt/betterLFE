@@ -216,7 +216,11 @@ struct ChainsInfo
     Translation translation;
     std::array<double, 3> sessionCorrelation { { 0.0, 0.0, 0.0 } };
     double sessionSeconds = 0.0;
+    bool otherSystemTicked = false;     // an other system counts in the score (Room Sim)
 };
+
+/** The colour that marks what is not cinema (the other systems). */
+const juce::Colour otherSystemColour { 0xffc89bff };
 
 /** Table of the simulated playback chains plus the related read-outs. */
 class ChainsView : public juce::Component

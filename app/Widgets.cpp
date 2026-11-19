@@ -986,7 +986,7 @@ void ChainsView::paint (juce::Graphics& g)
 {
     const auto& t = info.translation;
     auto area = getLocalBounds().toFloat();
-    const float rowHeight = 22.0f, labelWidth = 150.0f;
+    const float rowHeight = 22.0f, cellHeight = 32.0f, labelWidth = 150.0f;
 
     const auto cinema = [&t] (double delayMs, bool inverted) -> const ChainResult*
     {
@@ -1032,15 +1032,25 @@ void ChainsView::paint (juce::Graphics& g)
             return;
         }
 
-        const double db = chain->changeDb;
+        const auto dbText = [] (double db)
+        {
+            return db <= -PlaybackSimulator::changeLimitDb + 0.05
+                     ? juce::String::fromUTF8 ("\xe2\x89\xa4-") + juce::String ((int) PlaybackSimulator::changeLimitDb)
+                     : (db >= 0.0 ? "+" : "") + juce::String (db, 1);
+        };
+
         g.setColour (colourFor (chain->penalty));
         g.fillRoundedRectangle (box, 3.0f);
+
+        // The mean over 20-120 Hz, and under it the band that moves most down and most up
+        auto top = box.withHeight (box.getHeight() * 0.58f), bottom = box.withTrimmedTop (box.getHeight() * 0.52f);
         g.setColour (juce::Colours::white);
         g.setFont (uiFont (12.5f, true));
-        const auto value = db <= -PlaybackSimulator::changeLimitDb + 0.05
-                             ? juce::String::fromUTF8 ("\xe2\x89\xa4-") + juce::String ((int) PlaybackSimulator::changeLimitDb)
-                             : (db >= 0.0 ? "+" : "") + juce::String (db, 1);
-        g.drawText (value + " dB", box, juce::Justification::centred);
+        g.drawText (dbText (chain->changeDb) + " dB", top, juce::Justification::centredBottom);
+        g.setColour (juce::Colours::white.withAlpha (0.78f));
+        g.setFont (uiFont (10.0f));
+        g.drawText (dbText (chain->minChangeDb) + juce::String::fromUTF8 (" \xe2\x80\xa6 ") + dbText (chain->maxChangeDb), bottom,
+                    juce::Justification::centredTop);
     };
 
     const auto table = [&] (const juce::StringArray& columns, const juce::StringArray& rows,
@@ -1058,7 +1068,7 @@ void ChainsView::paint (juce::Graphics& g)
 
         for (int r = 0; r < rows.size(); ++r)
         {
-            auto row = area.removeFromTop (rowHeight);
+            auto row = area.removeFromTop (cellHeight);
             g.setColour (theme::text);
             g.setFont (uiFont (12.5f));
             g.drawText (rows[r], row.removeFromLeft (labelWidth), juce::Justification::centredLeft);
@@ -1075,7 +1085,8 @@ void ChainsView::paint (juce::Graphics& g)
         area.removeFromTop (8.0f);
     };
 
-    heading (tr ("Bass on each playback system against the mix as approved (cinema, sub on time, in polarity), 20-120 Hz"));
+    heading (tr ("Bass on each playback system against the mix as approved (cinema, sub on time, in polarity), 20-120 Hz. "
+                 "In each box: the mean, then the band that moves most down and most up"));
 
     const double delays[] = { -5.0, -2.5, 0.0, 2.5, 5.0 };
     // The subwoofer nearer or further than it should be: metres first, the time it makes in brackets
@@ -1093,6 +1104,31 @@ void ChainsView::paint (juce::Graphics& g)
     table ({ "60 Hz", "80 Hz", "100 Hz", tr ("Stereo, no LFE") }, { tr ("Bass managed"), tr ("+ encoder LFE filter") },
            [&] (int r, int c) { return c < 3 ? home (corners[c], r == 1) : stereo(); },
            [] (int r, int c) { return c < 3 || r == 0; });
+
+    // The other systems: not cinema, framed apart; they count only when ticked in Room Sim
+    {
+        const auto other = [&t] (int which) -> const ChainResult*
+        {
+            for (const auto& c : t.others)
+                if (c.other == which)
+                    return &c;
+
+            return nullptr;
+        };
+
+        const auto frame = area.withHeight (18.0f + cellHeight).expanded (3.0f, 2.0f);
+        g.setColour (otherSystemColour.withAlpha (0.10f));
+        g.fillRoundedRectangle (frame, 4.0f);
+        g.setColour (otherSystemColour.withAlpha (0.7f));
+        g.drawRoundedRectangle (frame, 4.0f, 1.0f);
+
+        juce::StringArray columns;
+
+        for (int i = 0; i < PlaybackSimulator::numOtherSystems; ++i)
+            columns.add (tr (PlaybackSimulator::otherSystemShortName (i)));
+
+        table (columns, { tr ("Other system (not cinema)") }, [&] (int, int c) { return other (c); });
+    }
 
 
     // Read-outs
@@ -1181,6 +1217,56 @@ void ChainsView::paint (juce::Graphics& g)
         g.drawFittedText (note, noteRow.toNearestInt(), juce::Justification::centredLeft, 1);
     }
 
+    // Opposition of phase on the screen: its own corner. Cinema does not see it (each channel has its
+    // own speaker); any sum does (fold-down, PA, phone, small speakers). It counts in the score only
+    // through the other systems, when one is ticked in Room Sim.
+    {
+        area.removeFromTop (4.0f);
+        auto block = area.removeFromTop (44.0f);
+        const bool counted = info.otherSystemTicked;
+        const double worstDb = t.hasBass ? t.antiphaseWorstDb : 0.0;
+        const bool warn = t.hasBass && worstDb < -PlaybackSimulator::antiphaseWarningDb;
+        g.setColour (otherSystemColour.withAlpha (0.10f));
+        g.fillRoundedRectangle (block, 4.0f);
+        g.setColour ((warn ? juce::Colour (0xffffb347) : otherSystemColour).withAlpha (0.7f));
+        g.drawRoundedRectangle (block, 4.0f, 1.0f);
+        block = block.reduced (6.0f, 3.0f);
+
+        auto titleRow = block.removeFromTop (18.0f);
+        g.setColour (warn ? juce::Colour (0xffffb347) : theme::text);
+        g.setFont (uiFont (12.5f, true));
+        const char* pairs[] = { "L / R", "L / C", "C / R" };
+        juce::String value = juce::String::fromUTF8 ("\xe2\x80\x94");
+
+        if (t.hasBass)
+            value = worstDb > -0.05 ? tr ("none")
+                                    : juce::String (worstDb, 1) + tr (" dB at ") + juce::String (juce::roundToInt (t.antiphaseWorstHz)) + " Hz ("
+                                        + juce::String (t.antiphasePair >= 0 ? pairs[t.antiphasePair] : "") + ")";
+
+        g.drawText (tr ("Screen channels in opposition of phase, summed: ") + value, titleRow.removeFromLeft (titleRow.getWidth() - 4.0f * 52.0f),
+                    juce::Justification::centredLeft);
+
+        // The four bands
+        for (int b = 0; b < ChainResult::numBands; ++b)
+        {
+            auto box = titleRow.removeFromLeft (52.0f).reduced (1.5f, 0.5f);
+            const double db = t.hasBass ? t.antiphaseDb[(size_t) b] : 0.0;
+            const float strength = (float) juce::jlimit (0.0, 1.0, -db / 12.0);
+            g.setColour (juce::Colour (0xff2a2a2a).interpolatedWith (juce::Colour (0xff3a9be0), strength));
+            g.fillRoundedRectangle (box, 3.0f);
+            g.setColour (strength > 0.3f ? juce::Colours::white : theme::dimText);
+            g.setFont (uiFont (10.0f));
+            g.drawText (juce::String (juce::roundToInt (PlaybackSimulator::bandCentreHz[b])) + " Hz " + juce::String (juce::roundToInt (db)), box,
+                        juce::Justification::centred);
+        }
+
+        g.setColour (theme::dimText);
+        g.setFont (uiFont (11.0f));
+        g.drawFittedText (counted ? tr ("Counted in the score: an other system is ticked in Room Sim. Not seen in cinema, where each channel has its own speaker.")
+                                  : tr ("Not counted in the score: tick an other system in Room Sim. Not seen in cinema, where each channel has its own speaker."),
+                          block.toNearestInt(), juce::Justification::centredLeft, 1);
+    }
+
     // What this table is, and is not
     area.removeFromTop (6.0f);
     g.setColour (theme::dimText.withAlpha (0.8f));
@@ -1243,8 +1329,10 @@ void RoomSimView::paint (juce::Graphics& g)
         g.drawFittedText (tr ("Fifteen rooms, twenty seats each (rectangular rooms, modal sum). Each dot is a seat: what the LFE / screen "
                           "interaction does to its bass, against the mix as approved. The room's own colour is left out: a "
                           "decorrelated LFE puts every dot on 0. Ticked rooms count in the score (click a row). "
-                          "Result = bass robustness x room score."),
-                          top.toNearestInt(), juce::Justification::centredLeft, 3);
+                          "Result = bass robustness x room score.")
+                          + " " + tr ("Below, in purple, the other systems: not cinema, electrical models of venues; their four bands in place of seats, "
+                                      "against the same channels with nothing cancelled."),
+                          top.toNearestInt(), juce::Justification::centredLeft, 4);
     }
 
     area.removeFromTop (6.0f);
@@ -1271,16 +1359,38 @@ void RoomSimView::paint (juce::Graphics& g)
         return;
     }
 
-    const float rowHeight = juce::jmin (46.0f, area.getHeight() / (float) result.rooms.size());
+    const auto numOthers = (size_t) std::count_if (result.rooms.begin(), result.rooms.end(), [] (const RoomResult& r) { return r.otherSystem; });
+    const float separator = numOthers > 0 ? 20.0f : 0.0f;
+    const float rowHeight = juce::jmin (46.0f, (area.getHeight() - separator) / (float) result.rooms.size());
 
     for (size_t i = 0; i < result.rooms.size(); ++i)
     {
         const auto& room = result.rooms[i];
+
+        // Where the other systems begin: a line, and what they are
+        if (room.otherSystem && (i == 0 || ! result.rooms[i - 1].otherSystem))
+        {
+            auto line = area.removeFromTop (separator);
+            g.setColour (otherSystemColour.withAlpha (0.6f));
+            g.fillRect (line.getX(), line.getCentreY(), line.getWidth(), 1.0f);
+            auto label = line.withSizeKeepingCentre (juce::jmin (line.getWidth(), 520.0f), line.getHeight());
+            g.setColour (theme::plot);
+            g.fillRect (label);
+            g.setColour (otherSystemColour);
+            g.setFont (uiFont (11.5f, true));
+            g.drawText (tr ("OTHER SYSTEMS - not cinema: venues, electrical model, screen channels summed"), label, juce::Justification::centred);
+        }
+
         auto row = area.removeFromTop (rowHeight);
         rowAreas.push_back (row);
         const bool counted = i < selected.size() && selected[i];
 
-        if (i % 2 == 0)
+        if (room.otherSystem)
+        {
+            g.setColour (otherSystemColour.withAlpha (0.07f));
+            g.fillRect (row);
+        }
+        else if (i % 2 == 0)
         {
             g.setColour (juce::Colours::white.withAlpha (0.025f));
             g.fillRect (row);
@@ -1289,7 +1399,7 @@ void RoomSimView::paint (juce::Graphics& g)
         // Tick box: does this room count in the score?
         {
             auto box = row.removeFromLeft (24.0f).withSizeKeepingCentre (13.0f, 13.0f);
-            g.setColour (counted ? juce::Colour (0xff3a9be0) : juce::Colour (0xff3a3a3a));
+            g.setColour (counted ? (room.otherSystem ? otherSystemColour.darker (0.3f) : juce::Colour (0xff3a9be0)) : juce::Colour (0xff3a3a3a));
             g.fillRoundedRectangle (box, 3.0f);
 
             if (counted)
@@ -1305,14 +1415,30 @@ void RoomSimView::paint (juce::Graphics& g)
 
         // Name and size
         auto name = row.removeFromLeft (nameWidth - 24.0f);
-        g.setColour (counted ? theme::text : theme::dimText);
-        g.setFont (uiFont (12.5f, counted));
-        g.drawText (tr (juce::String (room.spec.name)), name.removeFromTop (row.getHeight() * 0.55f), juce::Justification::bottomLeft);
-        g.setColour (theme::dimText);
-        g.setFont (uiFont (10.0f));
-        g.drawText (juce::String (room.spec.length, 0) + " x " + juce::String (room.spec.width, 0) + " x " + juce::String (room.spec.height, 1)
-                      + " m,  RT60 " + juce::String (room.spec.rt60, 2) + " s",
-                    name, juce::Justification::topLeft);
+
+        if (room.otherSystem)
+        {
+            // The short name, and what the system does (in full in the tooltip of its tick box)
+            const int which = (int) (i - (result.rooms.size() - numOthers));
+            g.setColour (counted ? otherSystemColour : otherSystemColour.withAlpha (0.6f));
+            g.setFont (uiFont (12.5f, counted));
+            g.drawText (tr ("Other system: ") + tr (PlaybackSimulator::otherSystemShortName (which)), name.removeFromTop (row.getHeight() * 0.55f),
+                        juce::Justification::bottomLeft);
+            g.setColour (theme::dimText);
+            g.setFont (uiFont (10.0f));
+            g.drawFittedText (tr (juce::String (room.description)), name.toNearestInt(), juce::Justification::topLeft, 1, 0.8f);
+        }
+        else
+        {
+            g.setColour (counted ? theme::text : theme::dimText);
+            g.setFont (uiFont (12.5f, counted));
+            g.drawText (tr (juce::String (room.spec.name)), name.removeFromTop (row.getHeight() * 0.55f), juce::Justification::bottomLeft);
+            g.setColour (theme::dimText);
+            g.setFont (uiFont (10.0f));
+            g.drawText (juce::String (room.spec.length, 0) + " x " + juce::String (room.spec.width, 0) + " x " + juce::String (room.spec.height, 1)
+                          + " m,  RT60 " + juce::String (room.spec.rt60, 2) + " s",
+                        name, juce::Justification::topLeft);
+        }
 
         // Result = robustness x room score, and the room score
         const double roomScore = i < shownRoom.size() ? shownRoom[i] : room.roomScore;
@@ -1347,7 +1473,20 @@ void RoomSimView::paint (juce::Graphics& g)
         {
             const float x = xFor (room.seatChangeDb[s]);
             g.setColour (ChainsView::colourFor (room.seatPenalty[s]).brighter (0.2f));
-            g.fillEllipse (x - 3.5f, y - 3.5f, 7.0f, 7.0f);
+
+            if (room.otherSystem)
+            {
+                // A band, not a seat: a square, with its frequency above it
+                g.fillRect (x - 3.5f, y - 3.5f, 7.0f, 7.0f);
+                g.setColour (otherSystemColour.withAlpha (0.8f));
+                g.setFont (uiFont (9.0f));
+                g.drawText (juce::String (juce::roundToInt (PlaybackSimulator::bandCentreHz[s])), juce::Rectangle<float> (x - 14.0f, y - 17.0f, 28.0f, 10.0f),
+                            juce::Justification::centred);
+            }
+            else
+            {
+                g.fillEllipse (x - 3.5f, y - 3.5f, 7.0f, 7.0f);
+            }
         }
 
         // Median seat

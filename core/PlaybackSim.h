@@ -82,7 +82,7 @@ namespace subguard
 
 struct ChainResult
 {
-    enum class Kind { cinema, bassManaged, stereo };
+    enum class Kind { cinema, bassManaged, stereo, other };
 
     Kind kind = Kind::cinema;
     std::string name;
@@ -90,9 +90,12 @@ struct ChainResult
     bool inverted = false;      // cinema: subwoofer polarity
     double crossoverHz = 0.0;   // bass managed
     bool encoderFilter = false; // bass managed: LFE through the encoder low-pass model
+    int other = -1;             // other systems: which (PlaybackSimulator::OtherSystem)
 
     static constexpr int numBands = 4;
-    double changeDb = 0.0;                          // bass against the reference, 20-120 Hz
+    double changeDb = 0.0;                          // bass against the reference, 20-120 Hz (all bands together)
+    double minChangeDb = 0.0, maxChangeDb = 0.0;    // the band that changes most down and most up
+    std::array<double, numBands> bandRated {};      // other systems: each band's own rating, 0 .. 1 (before its weight)
     std::array<double, numBands> bandChangeDb {};   // same per band (20-30, 30-60, 60-90, 90-120 Hz)
     double penalty = 0.0;                           // 0..1, perceptual, see the header comment
     double weight = 0.0;                            // relevance, 0..1: how much this system counts
@@ -154,6 +157,20 @@ struct Translation
     };
 
     std::array<Overlap, 3> overlap;
+
+    // Bass of the screen channels in opposition of phase: what any sum of
+    // them loses (subwoofers fed by L + R, mono, a phone), against the same
+    // channels with their cancellations left out (in-phase sums kept). Per
+    // band, dB (0 or less); the worst band, its centre frequency, and the
+    // pair behind it (0: L / R, 1: L / C, 2: C / R).
+    std::array<double, ChainResult::numBands> antiphaseDb {};
+    double antiphaseWorstDb = 0.0, antiphaseWorstHz = 0.0;
+    int antiphasePair = -1;
+
+    // Other systems (venues, not cinemas), rated electrically against the mix
+    // with its cancellations left out, so that an opposition of phase counts.
+    // They count in the score only when ticked in Room Sim.
+    std::vector<ChainResult> others;
 };
 
 class PlaybackSimulator
@@ -178,6 +195,9 @@ public:
         return level == Level::soft ? 0.90 : (level == Level::medium ? 0.75 : 0.50);
     }
     static constexpr double overlapWindowDb = 10.0;     // levels further apart than this do not overlap
+    // Opposition of phase on the screen: a loss beyond this, when the screen is summed, lights its corner
+    // (hypothesis: half the power, about the step at which a change of bass level is plainly heard)
+    static constexpr double antiphaseWarningDb = 3.0;
     static constexpr double balanceWarningDb = 6.0;     // LFE this far above the screen: the bass then follows each room's subwoofer level
 
     // What losing the LFE costs in a stereo downmix depends on frequency. Below
@@ -285,6 +305,18 @@ public:
 
     /** `lfeGainDb`: how much louder than a screen channel the LFE is played, 10 in a cinema, 0 to take it as recorded. */
     Translation compute (const Analysis&, Level level = Level::strong, double lfeGainDb = lfeInBandGainDb) const;
+
+    /** Other systems: how venues often play a mix (electrical, no room). */
+    enum OtherSystem { stereoPaNoLfe, surroundPaWithLfe, smallSpeakers, numOtherSystems };
+    static const char* otherSystemName (int);           // English, "Other system: ..."
+    static const char* otherSystemDescription (int);
+    static const char* otherSystemShortName (int);      // for a tick box
+
+private:
+    void computeOthers (const Analysis&, Translation&, Level, double lfeGain, const double* approved, double approvedTotal,
+                        const double* doubling) const;
+
+public:
 };
 
 } // namespace subguard

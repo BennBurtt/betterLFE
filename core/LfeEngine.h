@@ -100,6 +100,7 @@ struct Analysis
         // plays each channel from its own speakers): X.conj(Y), same gains.
         std::vector<std::complex<double>> cLC, cLR, cCR, cLLfe, cCLfe, cRLfe;
         std::vector<double> sigma;      // chance level of the F / LFE coherence at this averaging
+        std::vector<double> sigmaScreen;    // the same for the coherences between L, C and R (their own averaging)
     } matrix;
 
     double windowSeconds = 1.0;     // length of the analysis window
@@ -187,6 +188,7 @@ private:
     std::vector<double> specPower;                        // [bin * 2]: facade, LFE
     std::vector<double> stats, fastStats, now;            // [bin * statCount], see .cpp
     std::vector<double> m1Fast, m2Fast;                   // [grid]
+    std::vector<double> m1Screen, m2Screen;               // [grid], for the screen's own chance level
     std::vector<double> m1, m2;                           // [grid * 4]
     std::vector<double> workRe, workIm, twiddleRe, twiddleIm;
     std::array<std::vector<std::complex<double>>, numChannels> spectrum;

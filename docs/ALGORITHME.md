@@ -629,6 +629,53 @@ au profit de cette simulation.
 évasés, absorption variable avec la fréquence, caissons multiples réglés en
 délai par l'installateur).
 
+### Other systems : ce qui n'est pas du cinéma
+
+Sous les quinze salles, trois lignes en violet : des **systèmes qui ne sont
+pas du cinéma** (défilé, boutique, événement, petites enceintes). Ce sont des
+modèles électriques : pas de salle, pas de places, quatre bandes (25, 40, 70,
+100 Hz) à la place des places.
+
+| Système | Ce qu'il joue | Statut |
+|---|---|---|
+| Façade stéréo, subs sur L + R, sans LFE | repli L + 0,707 C, R + 0,707 C ; les subs jouent la somme | repli : sourcé, UIT-R BS.775 [12] (le LFE est omis) ; subs sur L + R : hypothèse (pratique courante en sonorisation) |
+| 5.1 sur une façade, subs sur L + R + LFE | le même repli plus le LFE à +10 dB dans les subs | +10 dB : sourcé [9] ; câblage des subs : hypothèse |
+| Petites enceintes, sans sub | le repli stéréo à travers un passe-haut du 2e ordre à 60 Hz | 2e ordre : sourcé, une enceinte close est un passe-haut du 2e ordre [48] ; 60 Hz : hypothèse |
+
+**Référence.** Chaque système est comparé aux **mêmes voies sans rien
+d'annulé** : la puissance de chaque voie, plus les termes croisés positifs
+(2 Σ max(0, Re S_ab)), sans les termes négatifs. Un mix dont les voies
+s'additionnent garde 0 dB. Un mix dont deux voies se retranchent perd ce qu'elles
+se retirent. Le LFE n'entre dans la référence que pour le système qui le joue :
+sa perte est déjà comptée par la dépendance au LFE (§ 3.6), elle n'est pas
+recomptée ici.
+
+**Note.** Comme un système de lecture (§ 3.5) : tolérance, doublement de sonie
+ISO 226, chaque bande pesée par sa part du grave entendu. Note du système =
+100 × (1 − pénalité). Coché dans Room Sim, il entre dans le score comme une
+salle. Non coché, il ne compte pas.
+
+**Opposition de phase : un coin à part.** Au cinéma, chaque voie a son
+enceinte : L et R en opposition de phase ne s'annulent pas dans l'air de la
+même façon, et les systèmes cinéma ne le voient pas. Toute somme le voit :
+repli stéréo, façade, téléphone, petites enceintes. Le coin « Voies écran en
+opposition de phase », dans la carte Playback Sim, donne bande par bande ce
+que perd l'écran une fois sommé face aux mêmes voies sans annulation, la pire
+bande et le couple en cause (L / R, L / C ou C / R). Il compte dans le score
+**seulement par les other systems, quand l'un est coché**. Seuil
+d'avertissement 3 dB (hypothèse : la moitié de la puissance).
+
+**Seuil de hasard propre à l'écran.** Les corrélations entre L, C et R sont
+ramenées à zéro sous le niveau que le hasard seul produirait, comme celles du
+LFE. Ce niveau est estimé sur la puissance de l'écran (et non sur le couple
+écran / LFE). Sans cela, un mix sans LFE n'aurait aucune corrélation
+exploitable entre ses voies d'écran. De même, un écran dont les voies
+s'annulent dans leur somme compte comme « du grave présent ». Vérifié : L et R
+en opposition (grave de 12 à 180 Hz, C 8 dB plus bas, sans rapport) perdent
+12,3 dB à 40 Hz une fois sommés, L / R désigné ; en phase, 0 dB. La façade
+stéréo perd 8,1 dB et note 0 (contre +0,2 dB et 100 en phase) ; cochée, elle
+fait passer le score du même mix de 100 à 0.
+
 ## 3 ter. Room Sim Pro : trois salles à soi
 
 Onglet « Room Sim Pro » (exclusif avec Room Sim). Le but : sortir de
@@ -1451,6 +1498,8 @@ du son) : bruit blanc ou rose, aucune ; grondement grave (sous 90 Hz), 1 à 3.
     M. R. Avis, B. M. Fazenda, W. J. Davies, « Thresholds of detection for
     changes to the Q factor of low-frequency modes in listening
     environments », *JAES* 55(7/8), 2007.
+48. R. H. Small, « Closed-box loudspeaker systems, Part I: Analysis », *JAES*
+    20(10), 798–808 (1972).
 
 
 ## Niveau du LFE et réglages

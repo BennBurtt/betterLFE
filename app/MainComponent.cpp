@@ -463,15 +463,29 @@ void MainComponent::buildCards()
             tick->onClick = [this, i] { setRoomSelected ((int) i, roomTicks[i]->getToggleState()); };
             roomTicks.push_back (std::move (tick));
         }
+
+        // The other systems, after the rooms: not cinema, in their own colour
+        for (int k = 0; k < PlaybackSimulator::numOtherSystems; ++k)
+        {
+            const size_t i = specs.size() + (size_t) k;
+            auto tick = std::make_unique<juce::ToggleButton> (tr ("Other: ") + tr (PlaybackSimulator::otherSystemShortName (k)));
+            tick->setTooltip (tr (PlaybackSimulator::otherSystemName (k)) + ". " + tr (PlaybackSimulator::otherSystemDescription (k)) + ". "
+                              + tr ("Not cinema: it also counts the screen channels in opposition of phase."));
+            tick->setColour (juce::ToggleButton::textColourId, otherSystemColour);
+            tick->setColour (juce::ToggleButton::tickColourId, otherSystemColour);
+            tick->setToggleState (roomSelected[i], juce::dontSendNotification);
+            tick->onClick = [this, i] { setRoomSelected ((int) i, roomTicks[i]->getToggleState()); };
+            roomTicks.push_back (std::move (tick));
+        }
     }
 
     roomView.onToggle = [this] (int room) { setRoomSelected (room, ! roomSelected[(size_t) room]); };
     roomView.setSelection (roomSelected);
 
-    populate (chainsCard, 600, 456, { &chainsView, &roomTicksLabel },
+    populate (chainsCard, 600, 640, { &chainsView, &roomTicksLabel },
               [this] (juce::Rectangle<int> r)
               {
-                  auto ticks = r.removeFromBottom (3 * 24);
+                  auto ticks = r.removeFromBottom (4 * 24);
                   roomTicksLabel.setBounds (r.removeFromBottom (22));
                   chainsView.setBounds (r);
                   const int width = ticks.getWidth() / 5;
@@ -1231,6 +1245,9 @@ void MainComponent::timerCallback()
             RoomSimulator::applyToScore (info.translation, roomResult, roomSelected, simulator.tuning.levelDependenceWeight);
         }
 
+        for (size_t i = (size_t) (RoomSimulator::numRows() - PlaybackSimulator::numOtherSystems); i < roomSelected.size(); ++i)
+            info.otherSystemTicked = info.otherSystemTicked || roomSelected[i];
+
         info.sessionCorrelation = snapshot.globalCorrelation;
         info.sessionSeconds = snapshot.globalSeconds;
         auto& t = info.translation;
@@ -1401,9 +1418,10 @@ void MainComponent::loadState()
     scoreSpeed.setValue (settings->getDoubleValue ("scoreSpeed", 0.0));
 
     {
+        // Saved before the other systems existed: fifteen rooms, the others left off
         const auto saved = settings->getValue ("roomSelection");
 
-        if (saved.length() == (int) roomSelected.size())
+        if (saved.length() == (int) roomSelected.size() || saved.length() == (int) RoomSimulator::defaultRooms().size())
             for (int i = 0; i < saved.length(); ++i)
                 setRoomSelected (i, saved[i] == '1');
     }
