@@ -311,7 +311,7 @@ public:
     Translation compute (const Analysis&, Level level = Level::strong, double lfeGainDb = lfeInBandGainDb) const;
 
     /** Other systems: how venues often play a mix (electrical, no room). */
-    enum OtherSystem { stereoPaNoLfe, surroundPaWithLfe, smallSpeakers, numOtherSystems };
+    enum OtherSystem { stereoPaNoLfe, surroundPaWithLfe, smallSpeakers, monoLtRt, headphones, tvSpeakers, laptop, numOtherSystems };
     static const char* otherSystemName (int);           // English, "Other system: ..."
     static const char* otherSystemDescription (int);
     static const char* otherSystemShortName (int);      // for a tick box

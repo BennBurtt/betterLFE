@@ -170,37 +170,71 @@ double Translation::audibleAt (int band, double shiftDb, double spreadDb, bool e
     return heard / total;
 }
 
+namespace
+{
+    // The other systems. Each is a set of legs (gains of L, C, R, the LFE and S); summed legs add in the air
+    // (subwoofers, speakers close together), separate legs are heard apart (the two ears on headphones).
+    // A high-pass of the given order and corner then stands for what the speakers keep of the bass.
+    constexpr double minus3 = 0.70710678118654752;      // 1 / sqrt 2: C into each side (ITU-R BS.775), surrounds into their side
+    constexpr double sHalf = 0.5 * minus3;              // S is all the surrounds summed: half of it to each side
+
+    struct OtherSpec
+    {
+        const char *name, *shortName, *description;
+        std::vector<std::array<cd, 5>> legs;
+        bool separate;          // legs heard apart (headphones) rather than summed
+        double highPassHz;      // 0: none
+        int highPassOrder;
+    };
+
+    const std::vector<OtherSpec>& otherSpecs()
+    {
+        const cd j (0.0, 1.0);
+        const std::array<cd, 5> lo { { 1.0, minus3, 0.0, 0.0, sHalf } }, ro { { 0.0, minus3, 1.0, 0.0, sHalf } },
+                                lfe { { 0.0, 0.0, 0.0, 1.0, 0.0 } },
+                                lt { { 1.0, minus3, 0.0, 0.0, -j * minus3 } }, rt { { 0.0, minus3, 1.0, 0.0, j * minus3 } };
+
+        static const std::vector<OtherSpec> specs = {
+            { "Other system: stereo PA, subwoofers on L + R, no LFE", "Stereo PA",
+              "A stereo fold-down (Lo = L + 0.71 C + 0.71 Ls, Ro alike, the LFE left out) on a PA whose subwoofers play Lo + Ro, as at a show or in a shop",
+              { lo, ro }, false, 0.0, 0 },
+            { "Other system: 5.1 on a PA, subwoofers on L + R + LFE", "5.1 PA + LFE",
+              "The mix on a PA whose processor feeds the subwoofers the fold-down and the LFE (+10 dB), as at an event",
+              { lo, ro, lfe }, false, 0.0, 0 },
+            { "Other system: small speakers, no subwoofer", "Small speakers",
+              "The stereo fold-down on small speakers that roll off under 60 Hz (12 dB per octave), no subwoofer, no LFE",
+              { lo, ro }, false, 60.0, 2 },
+            { "Other system: Lt / Rt fold-down heard in mono", "Mono (Lt / Rt)",
+              "A matrix fold-down (surrounds at -3 dB, -90 degrees in Lt and +90 in Rt) summed to mono, as on a mono TV or speaker: the surrounds cancel",
+              { lt, rt }, false, 0.0, 0 },
+            { "Other system: headphones, stereo fold-down", "Headphones",
+              "The stereo fold-down on headphones: each ear on its own, so nothing of L against R cancels; no LFE",
+              { lo, ro }, true, 0.0, 0 },
+            { "Other system: TV speakers", "TV",
+              "The stereo fold-down on a flat TV's speakers, rolling off under 100 Hz (12 dB per octave), no LFE",
+              { lo, ro }, false, 100.0, 2 },
+            { "Other system: laptop or tablet", "Laptop",
+              "The stereo fold-down on a laptop's speakers, rolling off under 150 Hz (24 dB per octave), no LFE",
+              { lo, ro }, false, 150.0, 4 },
+        };
+
+        return specs;
+    }
+}
+
 const char* PlaybackSimulator::otherSystemName (int which)
 {
-    switch (which)
-    {
-        case stereoPaNoLfe:     return "Other system: stereo PA, subwoofers on L + R, no LFE";
-        case surroundPaWithLfe: return "Other system: 5.1 on a PA, subwoofers on L + R + LFE";
-        case smallSpeakers:     return "Other system: small speakers, no subwoofer";
-        default:                return "";
-    }
+    return which >= 0 && which < numOtherSystems ? otherSpecs()[(size_t) which].name : "";
 }
 
 const char* PlaybackSimulator::otherSystemShortName (int which)
 {
-    switch (which)
-    {
-        case stereoPaNoLfe:     return "Stereo PA";
-        case surroundPaWithLfe: return "5.1 PA + LFE";
-        case smallSpeakers:     return "Small speakers";
-        default:                return "";
-    }
+    return which >= 0 && which < numOtherSystems ? otherSpecs()[(size_t) which].shortName : "";
 }
 
 const char* PlaybackSimulator::otherSystemDescription (int which)
 {
-    switch (which)
-    {
-        case stereoPaNoLfe:     return "A stereo fold-down (L + 0.71 C, R + 0.71 C, the LFE left out) on a PA whose subwoofers play L + R, as at a show or in a shop";
-        case surroundPaWithLfe: return "The 5.1 on a PA whose processor feeds the subwoofers L + R + C and the LFE (+10 dB), as at an event";
-        case smallSpeakers:     return "A stereo fold-down on small speakers that roll off under 60 Hz (12 dB per octave), no subwoofer, no LFE";
-        default:                return "";
-    }
+    return which >= 0 && which < numOtherSystems ? otherSpecs()[(size_t) which].description : "";
 }
 
 void PlaybackSimulator::computeOthers (const Analysis& a, Translation& t, Level level, double lfeGain,
@@ -292,15 +326,17 @@ void PlaybackSimulator::computeOthers (const Analysis& a, Translation& t, Level 
         }
     }
 
-    // The other systems: gains of L, C, R and the LFE at each frequency
+    // The other systems, against the same legs with nothing cancelled: each (leg, channel) a contributor
+    // at its gain, crosses kept only where they add. The fold-down's own level (C at -3 dB on both sides
+    // gives C back at 0 dB) is not a fault; what cancels, and what the speakers cannot play, is.
     for (int which = 0; which < numOtherSystems; ++which)
     {
+        const auto& spec = otherSpecs()[(size_t) which];
         ChainResult chain;
         chain.kind = ChainResult::Kind::other;
         chain.other = which;
-        chain.name = otherSystemName (which);
+        chain.name = spec.name;
         chain.weight = 1.0;
-        const bool withLfe = which == surroundPaWithLfe;
         double band[numBands] = {}, reference[numBands] = {}, total = 0.0, referenceTotal = 0.0;
 
         for (size_t g = 0; g < n; ++g)
@@ -311,37 +347,51 @@ void PlaybackSimulator::computeOthers (const Analysis& a, Translation& t, Level 
             if (b < 0)
                 continue;
 
-            // The fold-down sums L + 0.707 C and R + 0.707 C (ITU-R BS.775, LFE left out); the subwoofers play their sum
-            constexpr double centreIntoEachSide = 0.70710678118654752;     // 1 / sqrt 2, ITU-R BS.775 downmix
-            // The surrounds and heights fold in at 0.707 too (Ls into Lo, Rs into Ro), then into the subwoofers
-            cd gains[nc] = { 1.0, 2.0 * centreIntoEachSide, 1.0, withLfe ? 1.0 : 0.0, centreIntoEachSide };
+            // What the speakers keep: a Butterworth high-pass, magnitude only (every leg goes through the same one)
+            double keep = 1.0;
 
-            if (which == smallSpeakers)
+            if (spec.highPassHz > 0.0)
             {
-                // Second-order high-pass at 60 Hz (Butterworth, Q 0.71): a closed box is a second-order
-                // high-pass (Small 1972); the 60 Hz corner is a hypothesis for small speakers
-                const cd s (0.0, hz / 60.0);
-                const cd highPass = s * s / (s * s + std::sqrt (2.0) * s + 1.0);
-
-                for (auto& gain : gains)
-                    gain *= highPass;
+                const double x = std::pow (hz / spec.highPassHz, spec.highPassOrder);
+                keep = x * x / (1.0 + x * x);       // power
             }
 
-            // Reference: the same channels as in this system (with or without the LFE), cancellations left out
             const auto& S = spectra[g];
             double power = 0.0, uncancelledHere = 0.0;
 
-            for (int i = 0; i < nc; ++i)
-                for (int j = 0; j < nc; ++j)
-                {
-                    power += (gains[i] * std::conj (gains[j]) * S[(size_t) (i * nc + j)]).real();
+            // Outputs: one sum of every leg, or each leg on its own
+            const size_t outputs = spec.separate ? spec.legs.size() : 1;
 
-                    const bool used = i == 3 || j == 3 ? withLfe : true;
+            for (size_t o = 0; o < outputs; ++o)
+            {
+                const size_t firstLeg = spec.separate ? o : 0, lastLeg = spec.separate ? o + 1 : spec.legs.size();
+                std::array<cd, nc> sum {};
 
-                    if (used)
-                        uncancelledHere += i == j ? S[(size_t) (i * nc + i)].real() : std::max (0.0, S[(size_t) (i * nc + j)].real());
-                }
+                for (size_t k = firstLeg; k < lastLeg; ++k)
+                    for (int i = 0; i < nc; ++i)
+                        sum[(size_t) i] += spec.legs[k][(size_t) i];
 
+                for (int i = 0; i < nc; ++i)
+                    for (int jj = 0; jj < nc; ++jj)
+                        power += (sum[(size_t) i] * std::conj (sum[(size_t) jj]) * S[(size_t) (i * nc + jj)]).real();
+
+                // The reference: every contributor of this output, crosses only where they add
+                for (size_t k = firstLeg; k < lastLeg; ++k)
+                    for (size_t l = firstLeg; l < lastLeg; ++l)
+                        for (int i = 0; i < nc; ++i)
+                            for (int jj = 0; jj < nc; ++jj)
+                            {
+                                const double weight = std::abs (spec.legs[k][(size_t) i]) * std::abs (spec.legs[l][(size_t) jj]);
+
+                                if (weight <= 0.0)
+                                    continue;
+
+                                const double sij = S[(size_t) (i * nc + jj)].real();
+                                uncancelledHere += weight * (k == l && i == jj ? sij : std::max (0.0, sij));
+                            }
+            }
+
+            power *= keep;
             band[b] += hz * std::max (0.0, power);
             reference[b] += hz * uncancelledHere;
             total += hz * std::max (0.0, power);

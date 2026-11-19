@@ -680,24 +680,50 @@ délai par l'installateur).
 
 ### Other systems : ce qui n'est pas du cinéma
 
-Sous les quinze salles, trois lignes en violet : des **systèmes qui ne sont
-pas du cinéma** (défilé, boutique, événement, petites enceintes). Ce sont des
-modèles électriques : pas de salle, pas de places, quatre bandes (25, 40, 70,
-100 Hz) à la place des places.
+Sous les quinze salles, sept lignes en violet : des **systèmes qui ne sont
+pas du cinéma** (défilé, boutique, événement, télé, casque, ordinateur). Ce
+sont des modèles électriques : pas de salle, pas de places, quatre bandes
+(25, 40, 70, 100 Hz) à la place des places.
 
-| Système | Ce qu'il joue | Statut |
-|---|---|---|
-| Façade stéréo, subs sur L + R, sans LFE | repli L + 0,707 C, R + 0,707 C ; les subs jouent la somme | repli : sourcé, UIT-R BS.775 [12] (le LFE est omis) ; subs sur L + R : hypothèse (pratique courante en sonorisation) |
-| 5.1 sur une façade, subs sur L + R + LFE | le même repli plus le LFE à +10 dB dans les subs | +10 dB : sourcé [9] ; câblage des subs : hypothèse |
-| Petites enceintes, sans sub | le repli stéréo à travers un passe-haut du 2e ordre à 60 Hz | 2e ordre : sourcé, une enceinte close est un passe-haut du 2e ordre [48] ; 60 Hz : hypothèse |
+Chaque système est un ensemble de **branches** : les gains de L, C, R, du LFE
+et de S (surrounds et hauteurs sommés). Les branches sommées s'ajoutent dans
+l'air (caissons, haut-parleurs proches). Les branches séparées s'entendent à
+part (les deux oreilles au casque). Un passe-haut de Butterworth tient lieu de
+ce que les haut-parleurs gardent du grave. Lo = L + 0,707 C + 0,707 Ls ;
+Ro = R + 0,707 C + 0,707 Rs. S étant la somme des surrounds, la moitié en
+part de chaque côté. Le LFE est omis par tout repli à deux voies.
 
-**Référence.** Chaque système est comparé aux **mêmes voies sans rien
-d'annulé** : la puissance de chaque voie, plus les termes croisés positifs
-(2 Σ max(0, Re S_ab)), sans les termes négatifs. Un mix dont les voies
-s'additionnent garde 0 dB. Un mix dont deux voies se retranchent perd ce qu'elles
-se retirent. Le LFE n'entre dans la référence que pour le système qui le joue :
-sa perte est déjà comptée par la dépendance au LFE (§ 3.6), elle n'est pas
-recomptée ici.
+| Système | Branches | Filtre | Statut |
+|---|---|---|---|
+| Façade stéréo, subs sur L + R, sans LFE | Lo + Ro, sommés | aucun | repli : sourcé, UIT-R BS.775 [12] ; subs sur Lo + Ro : hypothèse (pratique courante) |
+| 5.1 sur une façade, subs + LFE | Lo + Ro + LFE (+10 dB), sommés | aucun | +10 dB : sourcé [9] ; câblage : hypothèse |
+| Petites enceintes, sans sub | Lo + Ro, sommés | 2ᵉ ordre, 60 Hz | 2ᵉ ordre : sourcé, l'enceinte close [48] ; 60 Hz : hypothèse |
+| Repli Lt / Rt en mono (télé, enceinte mono) | Lt = L + 0,707 C − j 0,707 S, Rt = R + 0,707 C + j 0,707 S, sommés : S s'annule | aucun | principe du matriçage (surround à ±90°, perdu en mono) : établi ; coefficients exacts : hypothèse |
+| Casque | Lo et Ro, chaque oreille à part | aucun | rien de L contre R ne s'annule ; sans LFE : hypothèse (selon le repli) |
+| Haut-parleurs de télé | Lo + Ro, sommés | 2ᵉ ordre, 100 Hz | hypothèse |
+| Ordinateur portable, tablette | Lo + Ro, sommés | 4ᵉ ordre, 150 Hz | hypothèse |
+
+Pas de téléphone : sous 120 Hz, un téléphone ne joue presque rien. Ce qu'il
+en reste, ce sont des harmoniques, hors de la bande analysée (20 à 120 Hz).
+Il noterait donc tous les mixes pareil.
+
+**Référence.** Chaque système est comparé à **ses mêmes branches sans rien
+d'annulé**. Chaque couple (branche, voie) est un contributeur à son gain. Les
+termes croisés ne sont gardés que là où ils s'ajoutent, pour les sorties qui
+s'additionnent. Le niveau propre du repli n'est donc pas une faute : un C
+replié à −3 dB des deux côtés et sommé revient à 0 dB. Ce qui compte, c'est
+ce qui s'annule (L contre R, l'écran contre les surrounds, les surrounds en
+mono Lt / Rt) et ce que les haut-parleurs ne jouent pas : le passe-haut n'est
+pas dans la référence. Le LFE n'entre dans la référence que pour le système
+qui le joue. Sa perte est déjà comptée par la dépendance au LFE (§ 3.6), elle
+n'est pas recomptée ici.
+
+Vérifié. Un son à 35 Hz puis à 105 Hz dans L et R, en phase : petites
+enceintes −9,5 dB puis −0,5 dB (note 0 puis 100) ; télé −17,9 puis −2,6 dB
+(0 puis 73) ; portable −24 puis −12,1 dB (0 et 0). Le grave profond part le
+premier, et d'autant plus que le système est petit. L contre R : −24 dB sur
+la façade, 0,0 dB au casque. Grave seulement dans les surrounds, en Lt / Rt
+mono : −24 dB ; seulement dans C : 0,0 dB.
 
 **Note.** Comme un système de lecture (§ 3.5) : tolérance, doublement de sonie
 ISO 226, chaque bande pesée par sa part du grave entendu. Note du système =
@@ -722,7 +748,7 @@ exploitable entre ses voies d'écran. De même, un écran dont les voies
 s'annulent dans leur somme compte comme « du grave présent ». Vérifié : L et R
 en opposition (grave de 12 à 180 Hz, C 8 dB plus bas, sans rapport) perdent
 12,3 dB à 40 Hz une fois sommés, L / R désigné ; en phase, 0 dB. La façade
-stéréo perd 8,1 dB et note 0 (contre +0,2 dB et 100 en phase) ; cochée, elle
+stéréo perd 8,4 dB et note 0 (contre 0,0 dB et 100 en phase) ; cochée, elle
 fait passer le score du même mix de 100 à 0.
 
 ## 3 ter. Room Sim Pro : trois salles à soi

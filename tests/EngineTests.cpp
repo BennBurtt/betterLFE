@@ -2972,8 +2972,72 @@ void testSurrounds()
            "cinema: surrounds on their own speakers; bass managed: summed with the screen in the subwoofer", managed80 (opposed));
     check (opposed.antiphasePair == 3 && opposed.antiphaseWorstDb < -10.0,
            "the screen against the surrounds in opposition is named in the antiphase corner", opposed.antiphaseWorstDb);
-    check (opposed.others[PlaybackSimulator::stereoPaNoLfe].changeDb < -3.0 && std::abs (none.others[PlaybackSimulator::stereoPaNoLfe].changeDb - 3.0) < 0.5,
-           "a PA fold-down sums the surrounds with the screen too (C alone: +3 dB, C at -3 dB on both sides)", opposed.others[0].changeDb);
+    check (opposed.others[PlaybackSimulator::stereoPaNoLfe].changeDb < -3.0 && std::abs (none.others[PlaybackSimulator::stereoPaNoLfe].changeDb) < 0.3,
+           "a PA fold-down sums the surrounds with the screen too (C alone, folded at -3 dB on both sides: 0 dB)", opposed.others[0].changeDb);
+
+    // Lt / Rt in mono: the surrounds cancel; C alone goes through
+    {
+        Signal x, xq;
+        quadraturePair (8.0, 43, x, xq);
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        Scene sc;
+        sc.s = x;
+        run (e, sc);
+        const auto onlySurround = sim.compute (e.result());
+        const double mono = onlySurround.others[PlaybackSimulator::monoLtRt].changeDb, cMono = none.others[PlaybackSimulator::monoLtRt].changeDb;
+        std::printf ("  Lt / Rt in mono: bass only in the surrounds %+.1f dB, only in C %+.1f dB\n", mono, cMono);
+        check (mono < -20.0 && std::abs (cMono) < 0.3, "an Lt / Rt fold-down in mono loses the surrounds' bass, keeps C's", mono);
+    }
+}
+
+// The small systems: where the bass sits decides what survives; headphones keep L against R
+void testSmallSystems()
+{
+    std::printf ("\nFold-downs and small systems\n");
+    PlaybackSimulator sim;
+
+    const auto toneMix = [] (double hz)
+    {
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        Scene s;
+        s.l = s.r = sine (hz, -20.0, 8.0);
+        run (e, s);
+        return e.result();
+    };
+
+    const auto deep = sim.compute (toneMix (35.0)), high = sim.compute (toneMix (105.0));
+    const char* names[] = { "small speakers", "TV", "laptop" };
+    const int which[] = { PlaybackSimulator::smallSpeakers, PlaybackSimulator::tvSpeakers, PlaybackSimulator::laptop };
+    bool ordered = true;
+
+    for (int k = 0; k < 3; ++k)
+    {
+        const auto& d = deep.others[(size_t) which[k]];
+        const auto& h = high.others[(size_t) which[k]];
+        std::printf ("  %-14s: bass at 35 Hz %+.1f dB (score %.0f), at 105 Hz %+.1f dB (score %.0f)\n", names[k], d.changeDb,
+                     100.0 * (1.0 - d.penalty), h.changeDb, 100.0 * (1.0 - h.penalty));
+        ordered = ordered && d.changeDb < h.changeDb - 6.0;
+    }
+
+    check (ordered && deep.others[PlaybackSimulator::laptop].changeDb < deep.others[PlaybackSimulator::tvSpeakers].changeDb
+             && deep.others[PlaybackSimulator::tvSpeakers].changeDb < deep.others[PlaybackSimulator::smallSpeakers].changeDb,
+           "deep bass is lost first, and the smaller the system the more", deep.others[PlaybackSimulator::laptop].changeDb);
+
+    // L against R: lost on a PA, kept on headphones
+    {
+        Signal x, xq;
+        quadraturePair (8.0, 44, x, xq);
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        Scene s;
+        s.l = x;
+        s.r = scaled (x, -1.0);
+        run (e, s);
+        const auto t = sim.compute (e.result());
+        std::printf ("  L against R: stereo PA %+.1f dB, headphones %+.1f dB\n", t.others[PlaybackSimulator::stereoPaNoLfe].changeDb,
+                     t.others[PlaybackSimulator::headphones].changeDb);
+        check (t.others[PlaybackSimulator::stereoPaNoLfe].changeDb < -20.0 && std::abs (t.others[PlaybackSimulator::headphones].changeDb) < 0.3,
+               "an opposition of L and R is lost on a PA, not on headphones (each ear on its own)", t.others[PlaybackSimulator::headphones].changeDb);
+    }
 }
 
 int main()
@@ -2996,6 +3060,7 @@ int main()
     testTimecodeAndLog();
     testOfflineReel();
     testSurrounds();
+    testSmallSystems();
 
     std::printf ("\n%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;

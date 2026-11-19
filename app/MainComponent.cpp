@@ -521,16 +521,24 @@ void MainComponent::buildCards()
     roomView.onToggle = [this] (int room) { setRoomSelected (room, ! roomSelected[(size_t) room]); };
     roomView.setSelection (roomSelected);
 
-    populate (chainsCard, 600, 664, { &chainsView, &roomTicksLabel },
+    populate (chainsCard, 600, 688, { &chainsView, &roomTicksLabel },
               [this] (juce::Rectangle<int> r)
               {
-                  auto ticks = r.removeFromBottom (4 * 24);
+                  // The fifteen rooms, five a row, then the other systems, four a row
+                  const int rooms = (int) RoomSimulator::defaultRooms().size(), others = (int) roomTicks.size() - rooms;
+                  const int otherRows = (others + 3) / 4;
+                  auto ticks = r.removeFromBottom ((3 + otherRows) * 24);
                   roomTicksLabel.setBounds (r.removeFromBottom (22));
                   chainsView.setBounds (r);
-                  const int width = ticks.getWidth() / 5;
+                  const int width = ticks.getWidth() / 5, otherWidth = ticks.getWidth() / 4;
 
-                  for (size_t i = 0; i < roomTicks.size(); ++i)
-                      roomTicks[i]->setBounds (ticks.getX() + width * (int) (i % 5), ticks.getY() + 24 * (int) (i / 5), width, 24);
+                  for (int i = 0; i < (int) roomTicks.size(); ++i)
+                  {
+                      if (i < rooms)
+                          roomTicks[(size_t) i]->setBounds (ticks.getX() + width * (i % 5), ticks.getY() + 24 * (i / 5), width, 24);
+                      else
+                          roomTicks[(size_t) i]->setBounds (ticks.getX() + otherWidth * ((i - rooms) % 4), ticks.getY() + 24 * (3 + (i - rooms) / 4), otherWidth, 24);
+                  }
               });
 
     for (auto& tick : roomTicks)
@@ -1720,10 +1728,10 @@ void MainComponent::loadState()
     scoreSpeed.setValue (settings->getDoubleValue ("scoreSpeed", 0.0));
 
     {
-        // Saved before the other systems existed: fifteen rooms, the others left off
+        // Saved with fewer other systems (or none): those that are new stay off
         const auto saved = settings->getValue ("roomSelection");
 
-        if (saved.length() == (int) roomSelected.size() || saved.length() == (int) RoomSimulator::defaultRooms().size())
+        if (saved.length() >= (int) RoomSimulator::defaultRooms().size() && saved.length() <= (int) roomSelected.size())
             for (int i = 0; i < saved.length(); ++i)
                 setRoomSelected (i, saved[i] == '1');
     }
