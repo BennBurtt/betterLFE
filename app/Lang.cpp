@@ -347,6 +347,35 @@ namespace
             { "Heads: the interference against the approved mix", "Têtes : l'interférence face au mix validé" },
             { "Coverage", "Répartition" }, { "Interference", "Interférences" }, { "interference ", "interférence " },
             { "Who gets bass, how much", "Qui a du grave, et combien" }, { "Why", "Pourquoi" },
+            // Menus
+            { "File", "Fichier" }, { "Edit", "Édition" }, { "Save the rooms...", "Enregistrer les salles…" },
+            { "Load rooms...", "Charger des salles…" }, { "Undo", "Annuler" }, { "Redo", "Rétablir" },
+            // Speaker models, aim, look-at point, hover
+            { "Model", "Modèle" }, { "Aim", "Orientation" }, { "Tilt", "Inclinaison" },
+            { "How the speaker radiates in the bass. Omnidirectional below about c / (pi x width): a screen speaker 76 cm wide "
+              "up to about 140 Hz. Cardioid models send less bass behind them.",
+              "Comment l'enceinte rayonne dans le grave. Omnidirectionnelle sous environ c / (pi x largeur) : une enceinte d'écran de "
+              "76 cm de large jusque vers 140 Hz. Les modèles cardioïdes envoient moins de grave derrière eux." },
+            { "Horizontal aim: 0 towards the back wall, positive towards the right wall. Double-click: 0.",
+              "Orientation horizontale : 0 vers le mur du fond, positif vers le mur droit. Double-clic : 0." },
+            { "Vertical aim: positive upwards. Double-click: 0.", "Inclinaison : positive vers le haut. Double-clic : 0." },
+            { "Omnidirectional", "Omnidirectionnelle" },
+            { "JBL 3730 ScreenArray (cinema screen)", "JBL 3730 ScreenArray (écran cinéma)" },
+            { "EAW KF730 (line array element)", "EAW KF730 (élément de ligne source)" },
+            { "Genelec 1238A (main monitor)", "Genelec 1238A (écoute principale)" },
+            { "Cardioid (K&F PIA M cardioid mode, d&b CCL)", "Cardioïde (K&F PIA M en mode cardioïde, d&b CCL)" },
+            { "Hypercardioid", "Hypercardioïde" },
+            { "LFE fill speakers", "Rappels LFE" },
+            { "Look at, from front", "Regard, depuis l'avant" }, { "Look at, from left", "Regard, depuis la gauche" },
+            { "Where the audience looks (a screen, a catwalk, an object on show), marked by a cross. "
+              "The placement assistant will put C and the phantom centre of L and R there.",
+              "L'endroit que regarde le public (un écran, un podium, un objet exposé), marqué par une croix. "
+              "L'assistant placement y mettra C et le centre fantôme de L et R." },
+            { "looked at", "regard" },
+            { "coverage score", "note de répartition" }, { "placement score", "note de placement" }, { "mix score", "note de mix" },
+            { "Loudness of its bass: ", "Sonie de son grave : " }, { "L C R alone: ", "LCR seuls : " }, { "LFE alone: ", "LFE seul : " },
+            { "Its bass level against the approved mix: ", "Son niveau de grave face au mix validé : " },
+            { "Felt under 40 Hz: ", "Ressenti sous 40 Hz : " },
             { "How loud the bass is at every head and point (phon, ISO 226), on the same scale as the mix as approved, "
               "the room and the placement of every speaker included. A mix with little bass shows little everywhere.",
               "La sonie du grave à chaque tête et en chaque point (phones, ISO 226), sur la même échelle que le mix validé, "

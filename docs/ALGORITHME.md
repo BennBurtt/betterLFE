@@ -647,8 +647,8 @@ de gauche et de 2,5 dB sur celles de droite (vérifié). Room Sim joue aussi
 chaque canal d'écran par sa propre enceinte. En Pro, la puissance entendue
 est coupée en trois termes exacts (LCR, LFE, croisement : voir « Deux
 lentilles » plus bas). Étalonnage : chaque groupe d'enceintes (L, C, R, caissons) est réglé
-séparément au niveau du mix validé ; les rappels gardent leur niveau face à
-l'enceinte d'écran de leur côté. C'est l'équivalent d'un réglage au bruit
+séparément au niveau du mix validé ; les rappels LFE sont réglés avec les
+caissons (voir plus bas). C'est l'équivalent d'un réglage au bruit
 rose et au sonomètre : la même **énergie totale** de 20 à 120 Hz sur les
 places d'étalonnage, son direct et réverbéré ensemble (sous la fréquence de
 Schroeder, ils ne se séparent pas : ce sont les mêmes modes). Une salle vive
@@ -660,11 +660,10 @@ aux TR60 très différents.
 les canaux sur les groupes d'enceintes, en puissance : *Centre %* (part de C
 jouée par l'enceinte centrale, le reste en centre fantôme dans L et R, −3 dB
 chacun à 0 %) ; *Front* (100 : chaque canal sur son enceinte ; 0 : chaque canal
-réparti également sur L, C et R) ; *Rear* (100 : les rappels gauches jouent
-Lc, les droits Rc ; plus bas, les deux côtés partagent leurs signaux) ;
-*F / R* (plus bas, une part des canaux d'écran part vers les rappels). Les
-rappels jouent Lc / Rc = L ou R + C à −3 dB, ou le LFE. Vérifié : routage
-unitaire à 100, −3 dB en L et R à Centre 0 %, 1/√3 partout à Front 0.
+réparti également sur L, C et R). Les rappels ne jouent que le LFE : des
+rappels LCR, en Atmos, relèvent du métier de l'installateur, pas du mix.
+Vérifié : routage unitaire à 100, −3 dB en L et R à Centre 0 %, 1/√3 partout
+à Front 0, aucun canal d'écran vers les rappels.
 
 **Même note que Room Sim, une référence plus exigeante.** Même modèle modal
 (modes jusqu'à 160 Hz), même note place par place et même score de salle
@@ -715,16 +714,20 @@ valeur permet de la taper) :
   rapport à l'axe de la salle ; délié, chacun a son panneau. Puis Centre. Pour
   chaque enceinte : distance au mur avant (front wall, celui de l'écran),
   distance au mur gauche, hauteur, délai, niveau, polarité (Ø), marche / arrêt
-  (On). Au grave, une enceinte rayonne de la même façon dans toutes les
-  directions : son orientation ne compte pas, seule sa position compte.
+  (On). L, C et R ont en plus un **modèle** (leur directivité dans le grave)
+  et une **orientation** (horizontale : 0 vers le mur du fond, positive vers le
+  mur droit ; inclinaison : positive vers le haut) ; voir « Directivité des
+  LCR » plus bas.
 - **Subwoofers** : 1 à 4, mêmes réglages.
-- **Fill speakers** (rappels) : On, Link (les rappels 2 et 4 sont les miroirs
-  de 1 et 3 : on règle des paires), 1 ou 2 paires (ou 1 à 4 déliés), mêmes
-  réglages plus ce qu'ils jouent : **Lc / Rc** (L ou R + C à −3 dB) ou LFE.
-  Un rappel gauche reçoit L avec un gain de 1 et C avec un gain de 0,708 ; la
-  corrélation réelle entre L et C (qu'ils s'additionnent en amplitude ou en
-  puissance) vient de la matrice interspectrale du mix. Délai par défaut : aligné sur l'écran à
-  leur propre distance (x / c).
+- **Rappels LFE** : On, Link (les rappels 2 et 4 sont les miroirs de 1 et 3 :
+  on règle des paires), 1 ou 2 paires (ou 1 à 4 déliés), mêmes réglages. Ils
+  jouent le LFE, omnidirectionnels comme les caissons. Délai par défaut :
+  aligné sur l'écran à leur propre distance (x / c). Un ancien fichier dont
+  les rappels jouaient Lc / Rc les relit en rappels LFE.
+- **Point de regard** : une croix jaune au sol, là où le public regarde (un
+  écran, un podium, un objet exposé). Par défaut, le milieu du mur avant pour
+  des rangs, le milieu de la salle pour un podium ou des anneaux. L'assistant
+  placement s'en servira pour placer C et le centre fantôme de L et R.
 - **Audience** : trois dispositions. En rangs (premier et dernier rang, part
   de la largeur, rangs, places par rang) ; en deux blocs avec une allée libre
   au milieu (podium de défilé, scène : part de la largeur laissée libre) ; en
@@ -948,7 +951,7 @@ Room Sim, lui, reste sur 20–120 Hz.
 **Deux lentilles : qui a du grave, et pourquoi.** Room Sim Pro répond à deux
 questions. Le calcul raisonne par **canal du mix**, pas par endroit : « LCR »
 veut dire les canaux L, C, R joués par toutes les enceintes qui les jouent
-(un ou deux jeux LCR, rappels Lc/Rc, divergences), où qu'elles soient ; « LFE »
+(un ou deux jeux LCR, divergences), où qu'elles soient ; « LFE »
 le canal LFE joué par les caissons et les rappels LFE. Il n'y a pas d'écran
 dans le calcul.
 
@@ -965,8 +968,8 @@ la valeur du mix marquée en blanc sur l'échelle. Dans la vue en couches, la
 couleur est la sonie de la couche, et la hauteur l'écart à la sonie du mix dans
 cette couche (le plan neutre est le mix). L'infra, sous 20 Hz, n'a pas de
 phones : il est donné en dB au-dessus du seuil de Møller & Pedersen [38].
-Filtre « Tout | LCR | LFE » : un trou en « LCR » vient des LCR ou des rappels
-Lc/Rc, un trou en « LFE » des caissons ou des rappels LFE. Près du seuil, les
+Filtre « Tout | LCR | LFE » : un trou en « LCR » vient des LCR, un trou en
+« LFE » des caissons ou des rappels LFE. Près du seuil, les
 courbes d'isosonie se resserrent : quelques dB de moins font beaucoup de
 phones (vérifié : un mix à 37 phones, des places qui s'en écartent d'environ
 10 phones pour ±3 dB).
@@ -1004,8 +1007,8 @@ chances d'être entendu (même audibilité que la notation). Vérifications :
   ne bouge que par le nouvel étalonnage (chaque caisson seul ne dépend pas de
   sa polarité) ;
 - déplacer un caisson laisse la partie LCR de chaque place identique ;
-  déplacer des rappels Lc/Rc change la partie LCR (jusqu'à 3,7 dB à une place)
-  et pas la partie LFE.
+  déplacer des rappels LFE change la partie LFE (jusqu'à 3,4 dB à une place)
+  et pas la partie LCR.
 
 Chaque enceinte seule coûte une somme sur les modes de plus par point pour les
 groupes de deux enceintes ou plus ; la préparation se répartit sur les cœurs
@@ -1021,6 +1024,68 @@ avec son P10 et son pire point. La note combinée,
 `1 − (1 − mix) × (1 − w × répartition)` par place, avec `w` = 0,5 par défaut
 (réglage Dev « Couverture (Pro), poids »), ne sert qu'au score Room Sim Pro
 qui joint les salles cochées.
+
+**Directivité des LCR.** Le LFE est omnidirectionnel ; le grave des LCR ne
+l'est pas toujours. Le critère classique : une face de largeur D devient
+directive au-dessus de ka = 1 (k = 2π f / c, a = D / 2), soit
+`f ≈ c / (π D)`. Directivité d'un piston dans un mur, au-dessus d'une
+source omnidirectionnelle dans le demi-espace (`D = (ka)² / (1 − J1(2ka)/(ka))`,
+Kinsler et coll., Beranek & Mellow) : +0,1 dB à ka = 0,5, +0,7 dB à ka = 1,
++1,6 dB à 1,5, +2,9 dB à 2, +6,2 dB à 3. La règle de diffraction des caissons
+(passage de 4π à 2π, `f ≈ 115 / largeur en m`, J. Murphy, dans la lignée
+d'Olson) donne le même ordre. Vérifié sur une mesure : la JBL 3730
+(762 mm, ka = 1 à 143 Hz) est à 360° à 125 Hz et à environ 180° de 160 à
+250 Hz (fiche JBL). Sur 20–120 Hz, une enceinte d'écran ordinaire est donc
+omnidirectionnelle à moins de 1 dB près ; la directivité ne compte que pour
+les enceintes cardioïdes, les lignes sources (dans le plan vertical) et les
+très grandes faces.
+
+*Modèle.* Une directivité du premier ordre autour de l'axe de l'enceinte,
+`p(θ) = a + (1 − a) cos θ`, `a` réglé par fréquence (1 : omni ; 0,5 :
+cardioïde, faisceau de 180° à −6 dB ; 0,25 : hypercardioïde). Facteur de
+directivité `Q = 3 / (3a² + (1 − a)²)`. Dans le modèle modal, c'est exact :
+une source cardioïde est un monopôle plus un dipôle le long de l'axe `u`, et
+chaque mode est excité par `a ψ(x_s) + (1 − a) / (jk) · u·∇ψ(x_s)` (le champ
+lointain d'un dipôle vaut `jk cos θ` fois celui du monopôle). Le gradient est
+pris par différences centrées à 1 cm, bien plus fin que tout mode sous
+160 Hz. Une enceinte cardioïde dos à un mur excite donc vraiment moins
+certains modes ; ce n'est pas une atténuation. Vérifié : un C au milieu d'une
+grande salle sèche (40 × 30 × 12 m), 60–120 Hz, à 4 m devant et 4 m
+derrière : omnidirectionnel +0,0 dB, cardioïde +14,4 dB.
+
+*Modèles d'enceintes* (fiches et manuels des fabricants) :
+
+| Modèle | a selon la fréquence | D'où ça vient |
+|---|---|---|
+| Omnidirectionnelle | 1 | source ponctuelle |
+| JBL 3730 ScreenArray | 0,84 à 125 Hz, 0,5 de 160 à 250 Hz | fiche JBL : 360° à 125 Hz, 180° de 160 à 250 Hz, indice de directivité 4–5 dB (demi-espace) |
+| EAW KF730 | 0,75 à 100 Hz, 0,5 à 125 Hz, 0,25 à 160 Hz | fiche EAW, plan horizontal, au 1/3 d'octave |
+| Genelec 1238A, 8361A, S360, 8351B, 8341A | modèle de largeur (ci-dessous) | manuels Genelec : de 125 Hz à 300–400 Hz, dans les −3 dB jusqu'à ±90° |
+| Cardioïde | 0,5 | premier ordre ; K&F PIA M en mode cardioïde : plus de 10 dB à l'arrière jusqu'à 107 Hz ; d&b CCL8 : 80° annoncés dès 60 Hz |
+| Hypercardioïde | 0,25 | premier ordre |
+
+Sous le premier point d'un modèle, `1 − a` décroît en proportion de la
+fréquence, comme la part dipolaire d'une petite source (k d) ; entre deux
+points, interpolation linéaire en log de la fréquence. *Modèle de largeur*
+(Genelec, largeurs 480, 357, 360, 287 et 237 mm) : `1 − a = 0,3 f / f1`,
+`f1 = c / (π D)`, jusqu'à une cardioïde au plus ; il donne −3 dB à 90° près de
+ka = 1, ce que montrent les diagrammes Genelec, et il colle à la JBL 3730.
+Meyer ne publie rien sous la coupure de ses Acheron (couverture du pavillon
+seulement ; prévisions dans MAPP). Le premier ordre ne descend pas sous
+environ 130° de faisceau : au-dessus de 200 Hz, les pavillons sont plus
+étroits, mais c'est hors de notre bande.
+
+**Taille des têtes.** Chaque tête est dessinée à l'échelle, 181 mm de
+diamètre : le tour de tête moyen d'ANSUR II (armée américaine, 2012 ;
+574 mm chez les hommes, 4082 personnes ; 561 mm chez les femmes, 1986
+personnes), hommes et femmes à parts égales, divisé par π. C'est un repère
+visuel, sans effet sur le calcul.
+
+**Lecture au survol.** Quatre lignes, chaque nombre dit ce qu'il est et
+face à quoi : la place et la note montrée ; la sonie de son grave en phones,
+face à celle du mix validé, pour le tout, les LCR seuls et le LFE seul ; son
+niveau de grave face au mix validé en dB, et ses trois causes (salle +
+enceintes + mix) ; ce qui se ressent sous 40 Hz, en dB SPL.
 
 **Étalonnage du système LFE.** Caissons et rappels LFE sont réglés ensemble,
 comme le ferait un installateur : joués ensemble, ils atteignent le niveau du
@@ -1059,7 +1124,9 @@ de répartition et la note d'interférences de la salle.
 **Vue 3D.** Boîte grise translucide, mur avant au fond, ouverte vers
 l'observateur ; un écran y est dessiné en clair si l'option « Écran » est
 cochée (un simple repère, sans effet sur le calcul ; décochée pour les lieux
-hors cinéma). L, C, R en blanc, caissons en orange, rappels en bleu, têtes
+hors cinéma). L, C, R en blanc (une flèche de 1,5 m montre où pointe une
+enceinte directive), caissons en orange, rappels en bleu, point de regard en
+croix jaune, têtes
 colorées selon la lentille. Glisser pour
 tourner, molette pour zoomer, double-clic pour revenir à la vue de départ.
 
@@ -1072,10 +1139,13 @@ réglages. Le drapeau en haut à gauche passe l'interface en français ou en
 anglais ; la fenêtre se reconstruit dans la langue choisie, qui est gardée.
 
 **Mémoire, export, import.** Les trois salles sont gardées entre deux
-lancements (réglage `roomPro`), et « Save config... » / « Load config... »
-écrivent et lisent un fichier `.subguardrooms`. Format texte, une ligne
-`roomN.champ = valeur` par réglage sous l'en-tête `SubGUARD Room Sim Pro`,
-version 4 (personnes, routage, nouvelles formes ; un fichier de version 3 qui avait le public en matériau de sol est converti) : positions en proportion de la salle (`roomN.L.x = 0.03`), liens
+lancements (réglage `roomPro`). Le menu **Fichier** de la barre des menus
+(« Enregistrer les salles… », ⌘S ; « Charger des salles… », ⌘O) écrit et lit
+un fichier `.subguardrooms` ; le menu **Édition** annule et rétablit (⌥Z,
+⌥⇧Z). Format texte, une ligne `roomN.champ = valeur` par réglage sous
+l'en-tête `SubGUARD Room Sim Pro`, version 6 (5 : l'écran ; 6 : modèle et
+orientation des LCR, point de regard, rappels LFE seuls ; un fichier de
+version 3 qui avait le public en matériau de sol est converti) : positions en proportion de la salle (`roomN.L.x = 0.03`), liens
 (`linkLR`, `linkFills`), mode de décroissance (`acoustics`), matériaux par leur
 nom stable (`roomN.material.floor = concrete`), forme (`shape`), second jeu
 L C R (`dualLCR`), disposition du public (`audienceLayout`, `aisle`,
@@ -1296,6 +1366,21 @@ du son) : bruit blanc ou rose, aucune ; grondement grave (sous 90 Hz), 1 à 3.
     and results », *Acoust. Sci. & Tech.* 45(1), 2024.
 38. H. Møller, C. S. Pedersen, « Hearing at low and infrasonic frequencies »,
     *Noise & Health* 6(23), 37–57 (2004).
+39. L. E. Kinsler, A. R. Frey, A. B. Coppens, J. V. Sanders, *Fundamentals of
+    Acoustics*, 4e éd., Wiley, 2000 (piston bafflé, directivité) ; L. L.
+    Beranek, T. J. Mellow, *Acoustics: Sound Fields and Transducers*,
+    Academic Press, 2012.
+40. H. F. Olson, « Direct radiator loudspeaker enclosures », *Audio
+    Engineering*, 1951 (repris dans *JAES* 17(1), 1969) ; J. Vanderkooy,
+    M. Rousseau, transition de diffraction 4π → 2π, AES Convention, 2009.
+41. JBL Professional, *3730 ScreenArray*, fiche technique (2011) ; EAW,
+    *KF730 Specifications* (2015), *KF853* et *Testing and Measurement* ;
+    Genelec, manuels des 1237A/1238A, 8361A, S360, 8351B et 8341A ; d&b
+    audiotechnik, *CCL8* ; Kling & Freitag, *PIA M* ; Meyer Sound,
+    *Acheron 80 / 100 / LF*.
+42. C. C. Gordon et coll., *2012 Anthropometric Survey of U.S. Army
+    Personnel (ANSUR II)*, Natick, 2014 ; données publiques (Penn State
+    OpenLab).
 
 
 ## Niveau du LFE et réglages

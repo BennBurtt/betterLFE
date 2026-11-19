@@ -1926,7 +1926,8 @@ static void testRoomPro()
                 sp.enabled = ! sp.enabled;
                 sp.fx = next() * 0.01; sp.fy = next() * 0.01; sp.fz = next() * 0.01; sp.delayMs = next(); sp.gainDb = next();
                 sp.inverted = ! sp.inverted;
-                sp.feed = 1 - sp.feed;
+                sp.model = 1 + (int) next() % 5;
+                sp.yaw = next(); sp.pitch = -next();
             };
 
             for (auto& sp : r.lcr)      change (sp);
@@ -1939,7 +1940,7 @@ static void testRoomPro()
             r.aisle = 0.1 * next(); r.ringInner = 0.01 * next(); r.ringOuter = 0.01 * next();
             r.shape = ProRoom::lShape;
             r.people = 2;
-            r.centrePercent = next(); r.frontDivergence = next(); r.rearDivergence = next(); r.frDivergence = next();
+            r.centrePercent = next(); r.frontDivergence = next(); r.focusX = 0.01 * next(); r.focusY = 0.01 * next();
             r.firstRow = next(); r.lastRow = next(); r.audienceWidth = next();
             r.rows = 7; r.perRow = 9; r.earHeight = next(); r.rake = next(); r.calibration = 1;
         }
@@ -2202,9 +2203,9 @@ static void testRoomPro()
         r.fills[0].fy = 0.1;
         r.fills[1].fy = 0.9;
         auto fills = r.routing();
-        check (fills[0][ProRoom::groupFillsLeft] == 1.0 && fills[0][ProRoom::groupFillsRight] == 0.0
-                 && std::abs (fills[1][ProRoom::groupFillsLeft] - std::pow (10.0, -3.0 / 20.0)) < 1e-9,
-               "fills: Lc = L + C at -3 dB, the right fill gets no L", fills[1][ProRoom::groupFillsLeft]);
+        check (same (fills[3][ProRoom::groupFillsLfe], 1.0) && same (fills[0][ProRoom::groupFillsLfe], 0.0)
+                 && same (fills[1][ProRoom::groupFillsLfe], 0.0) && same (fills[2][ProRoom::groupFillsLfe], 0.0),
+               "fills play the LFE only, never L, C or R", fills[0][ProRoom::groupFillsLfe]);
     }
 
     // People absorb: the same room is drier with an audience
@@ -2339,7 +2340,6 @@ static void testRoomPro()
         room.numFills = 2;
         room.fills[0].fx = 0.55;
         room.fills[0].fy = 0.03;
-        room.fills[0].feed = 1;     // LFE
         room.fills[0].delayMs = 1000.0 * room.fills[0].fx * room.length / RoomSimulator::speedOfSound;
         room.applyLinks();
         const auto with = RoomSimulator::rate (ProRoomModel::prepare (room, mix.grid), mix, mixT, sim.tuning, PlaybackSimulator::Level::medium, 10.0);
@@ -2442,7 +2442,7 @@ static void testRoomPro()
                "subwoofers set 6 dB off their level change the coverage", loud.ratingScore[RoomResult::coverageRating]);
     }
 
-    // A fill speaker playing Lc / Rc moved: the L C R part changes, the LFE part does not
+    // An LFE fill moved: the LFE part changes, the L C R part does not
     {
         auto room = ProRoom::fromSpec (RoomSimulator::defaultRooms()[6]);
         room.fillsOn = true;
@@ -2451,7 +2451,6 @@ static void testRoomPro()
 
         for (auto& f : room.fills)
         {
-            f.feed = 0;
             f.fx = 0.5;
             f.fy = 0.03;
             f.fz = 0.5;
@@ -2472,9 +2471,63 @@ static void testRoomPro()
             lfeMoved = std::max (lfeMoved, std::abs (after.seatPartDb[RoomResult::lfePart][i] - before.seatPartDb[RoomResult::lfePart][i]));
         }
 
-        std::printf ("  Lc / Rc fills moved from half way to 80 %% of the length: L C R alone changes by up to %.1f dB at a seat, "
-                     "the LFE alone by %.2f dB\n", lcrMoved, lfeMoved);
-        check (lcrMoved > 0.5 && lfeMoved < 1e-6, "moving an Lc / Rc fill changes the L C R part, never the LFE part", lfeMoved);
+        std::printf ("  LFE fills moved from half way to 80 %% of the length: the LFE alone changes by up to %.1f dB at a seat, "
+                     "L C R alone by %.2g dB\n", lfeMoved, lcrMoved);
+        check (lfeMoved > 0.5 && lcrMoved < 1e-6, "moving an LFE fill changes the LFE part, never the L C R part", lcrMoved);
+    }
+
+    // Directivity: a cardioid C in the middle of a large, dry room, aimed at the back wall. A point
+    // 4 m in front of it against one 4 m behind, against the same with an omnidirectional C.
+    {
+        ProRoom room = ProRoom::fromSpec ({ "dry hall", "dry hall", 40.0, 30.0, 12.0, 0.4 });
+        room.numSubs = 1;
+        room.subs[0].enabled = true;
+        room.lcr[0].enabled = room.lcr[2].enabled = false;
+        room.linkLR = false;
+        room.lcr[1].fx = 0.5; room.lcr[1].fy = 0.5; room.lcr[1].fz = 0.25;
+        room.lcr[1].yaw = 0.0; room.lcr[1].pitch = 0.0;
+        room.audienceLayout = ProRoom::rowsLayout;
+        room.firstRow = 0.4; room.lastRow = 0.6; room.audienceWidth = 0.02; room.rows = 2; room.perRow = 1;
+        room.earHeight = 3.0;
+        const auto seats = room.seatPositions();
+
+        const auto frontToBack = [&] (int model)
+        {
+            room.lcr[1].model = model;
+            const auto paths = ProRoomModel::prepare (room, sharedAnalysis.grid);
+            double front = 0.0, back = 0.0;
+
+            for (size_t i = 0; i < paths.points.size(); ++i)
+            {
+                const double hz = sharedAnalysis.grid[(size_t) paths.points[i]];
+
+                if (hz < 60.0 || hz > 120.0)
+                    continue;
+
+                for (int seat = 0; seat < paths.seats; ++seat)
+                {
+                    const double c = paths.p[(size_t) seat * paths.points.size() + i][5].real();     // C through its speaker
+                    (seats[(size_t) seat][0] > 0.5 * room.length ? front : back) += hz * c;
+                }
+            }
+
+            return 10.0 * std::log10 (front / back);
+        };
+
+        const double omni = frontToBack (ProSpeakerModel::indexOf ("omni"));
+        const double cardioid = frontToBack (ProSpeakerModel::indexOf ("cardioid"));
+        std::printf ("  C in the middle of a dry 40 x 30 x 12 m hall, 60-120 Hz, 4 m in front against 4 m behind: omnidirectional %+.1f dB, "
+                     "cardioid %+.1f dB\n", omni, cardioid);
+        check (seats.size() == 2 && std::abs (omni) < 3.0 && cardioid > omni + 4.0,
+               "a cardioid speaker sends more bass ahead than behind, an omnidirectional one does not", cardioid - omni);
+
+        // The models: omnidirectional below ka = 1, then less so; the JBL 3730 is a cardioid at 160 Hz
+        const auto& models = ProSpeakerModel::list();
+        const auto& jbl = models[(size_t) ProSpeakerModel::indexOf ("jbl3730")];
+        const auto& genelec = models[(size_t) ProSpeakerModel::indexOf ("genelec8361a")];
+        check (jbl.omniShare (40.0) > 0.9 && std::abs (jbl.omniShare (160.0) - 0.5) < 1e-9 && genelec.omniShare (60.0) > 0.9
+                 && std::abs (genelec.omniShare (343.0 / (3.14159265358979 * 0.357)) - 0.7) < 1e-6,
+               "speaker models: omnidirectional in the deep bass, -3 dB at 90 degrees at ka = 1 (width model)", jbl.omniShare (160.0));
     }
 
     // Why a seat gets what it gets: room, speakers and mix add up to the whole change

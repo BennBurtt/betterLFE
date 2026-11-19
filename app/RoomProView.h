@@ -57,9 +57,10 @@ public:
         std::array<std::vector<double>, RoomResult::numParts> phon, partDb;
         std::array<double, RoomResult::numParts> mixPhon {};
         std::array<std::vector<double>, RoomResult::numCauses> causeDb;
+        juce::String scoreName;                     // the score shown, e.g. "coverage score"
         bool operator== (const Details& o) const
         {
-            return phon == o.phon && partDb == o.partDb && causeDb == o.causeDb
+            return phon == o.phon && partDb == o.partDb && causeDb == o.causeDb && scoreName == o.scoreName
                      && std::equal (mixPhon.begin(), mixPhon.end(), o.mixPhon.begin(), [] (double x, double y) { return same (x, y); });
         }
     };
@@ -223,7 +224,8 @@ private:
                             std::function<void (int)> set, bool structure);
     void wide (const juce::String& label, std::unique_ptr<juce::Component>);
     void info (std::function<juce::String()> text);
-    void speaker (const juce::String& title, ProSpeaker&, const ProSpeaker& reference, bool sub, bool isFill, bool* link);
+    void speaker (const juce::String& title, ProSpeaker&, const ProSpeaker& reference, bool sub, bool isFill, bool* link,
+                  bool directional = false);
     void changed (bool structure);
     void refreshAll();
 
@@ -262,6 +264,10 @@ public:
     bool undo();
     bool redo();
 
+    /** Save the three rooms to a file, or load them (the File menu, Cmd-S and Cmd-O). */
+    void exportConfig();
+    void importConfig();
+
 private:
     static constexpr size_t maxUndo = 30;
     void rememberForUndo();
@@ -273,8 +279,6 @@ private:
     void configChanged();
     void showSelected();            // the selected room's results to the two views, in the lens chosen
     void startPreparing (const std::vector<double>& grid);
-    void exportConfig();
-    void importConfig();
 
     ProRooms config;
     int selected = 0;
@@ -326,7 +330,6 @@ private:
     juce::Viewport editorViewport;
     juce::TextButton settingsButton;
     bool settingsOpen = true;
-    juce::TextButton saveButton { tr ("Save config...") }, loadButton { tr ("Load config...") };
     std::unique_ptr<juce::FileChooser> chooser;
 };
 

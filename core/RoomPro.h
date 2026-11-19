@@ -1,17 +1,16 @@
 // Room Sim Pro: three rooms configured by the user, outside the standard
 // cinema layout. Same modal model and the same seat-by-seat rating as Room
 // Sim (RoomSimulator::rate), with every speaker placed freely: L, C, R (one
-// set, or two back to back), up to four subwoofers and up to four fill
-// speakers ("rappels"), each with its own delay, level and polarity.
+// set, or two back to back), up to four subwoofers and up to four LFE fill
+// speakers ("rappels"), each with its own delay, level and polarity. L, C
+// and R can be given a directivity (a speaker model) and an aim.
 // Portable C++17.
 //
 // Each channel of the mix (L, C, R, LFE) is played by its own speakers: bass
 // only in L is heard where the L speaker reaches. A routing in the manner of a
 // console panner spreads the channels over the speakers: centre % (C played
-// by C or as a phantom centre in L and R), front divergence (each screen
-// channel spread over L C R), rear divergence (left and right fills sharing
-// their feeds) and front / rear divergence (screen channels sent to the
-// fills). Fills play Lc / Rc (L or R + C at -3 dB) or the LFE.
+// by C or as a phantom centre in L and R) and front divergence (each screen
+// channel spread over L C R). Fills play the LFE only.
 //
 // Positions are kept as a share of the room: set the room size first, then
 // place the speakers; resizing the room moves them with it. The decay is set
@@ -57,6 +56,25 @@ struct ProMaterial
     static const char* groupName (int group);      // English
 };
 
+/** How a speaker radiates in the bass: a first-order pattern p(theta) = a + (1 - a) cos(theta) around its aim,
+    a (the omnidirectional share) set by frequency from published data. a = 1: omnidirectional; 0.5: cardioid;
+    0.25: hypercardioid. In the modal model, a monopole plus a dipole (see ProRoomModel::prepare). */
+struct ProSpeakerModel
+{
+    const char* key;            // stable name used in the saved files
+    const char* name;           // English; the interface translates it
+    const char* source;         // where the values come from (see docs/ALGORITHME.md)
+    double widthM;              // front width (m); 0 when not used
+    std::vector<std::pair<double, double>> points;     // (Hz, a), ascending; empty: from the width (ka model)
+
+    /** The omnidirectional share a at a frequency. Below the first point, (1 - a) falls in proportion to the
+        frequency, as the dipole part of a small source does (k d); between points, linear in log frequency. */
+    double omniShare (double hz) const;
+
+    static const std::vector<ProSpeakerModel>& list();
+    static int indexOf (const std::string& key);       // 0 (omnidirectional) when unknown
+};
+
 struct ProSpeaker
 {
     bool enabled = true;
@@ -66,12 +84,15 @@ struct ProSpeaker
     double delayMs = 0.0;               // added delay
     double gainDb = 0.0;                // level against its calibrated level
     bool inverted = false;
-    int feed = 0;                       // fill speakers only: 0 Lc / Rc (L or R + C at -3 dB), 1 the LFE
+    // L, C, R only: how it radiates (index into ProSpeakerModel::list()) and where it points:
+    // yaw 0 towards the back wall, positive towards the right wall (y up); pitch positive upwards (degrees)
+    int model = 0;
+    double yaw = 0.0, pitch = 0.0;
 
     bool operator== (const ProSpeaker& o) const
     {
         return enabled == o.enabled && same (fx, o.fx) && same (fy, o.fy) && same (fz, o.fz) && same (delayMs, o.delayMs)
-                 && same (gainDb, o.gainDb) && inverted == o.inverted && feed == o.feed;
+                 && same (gainDb, o.gainDb) && inverted == o.inverted && model == o.model && same (yaw, o.yaw) && same (pitch, o.pitch);
     }
 };
 
@@ -106,8 +127,10 @@ struct ProRoom
     // Routing, in the manner of a console panner (100: each channel on its own speakers)
     double centrePercent = 100.0;       // share of C played by the C speaker, the rest as a phantom centre in L and R
     double frontDivergence = 100.0;     // lower: each screen channel spread over L, C and R
-    double rearDivergence = 100.0;      // lower: left and right fills share their feeds
-    double frDivergence = 100.0;        // lower: the screen channels also sent to the fills
+
+    // Where the audience looks (share of the room, x from the front wall, y from the left wall):
+    // a screen, a catwalk, an object on show. For placing C and the phantom centre of L and R.
+    double focusX = 0.0, focusY = 0.5;
 
     // Audience
     int audienceLayout = rowsLayout;        // rows; two blocks with a free aisle in the middle; rings around the centre
@@ -139,13 +162,20 @@ struct ProRoom
     void applyLinks();
 
     /** Speaker groups: each plays a mix of the channels set by the routing. */
-    enum Group { groupL, groupC, groupR, groupSubs, groupFillsLeft, groupFillsRight, groupFillsLfe, numGroups };
+    enum Group { groupL, groupC, groupR, groupSubs, groupFillsLfe, numGroups };
 
     /** Every speaker as placed, with the second L C R set when there is one. gain and nominalWeight: relative amplitude, polarity included. */
-    struct Placed { std::array<double, 3> position; int group; double delayMs, gain, nominalWeight; };
+    struct Placed
+    {
+        std::array<double, 3> position;
+        int group;
+        double delayMs, gain, nominalWeight;
+        int model = 0;                                  // ProSpeakerModel::list() index
+        std::array<double, 3> aim { 1.0, 0.0, 0.0 };    // unit vector
+    };
     std::vector<Placed> placedSpeakers() const;
 
-    /** Amplitude with which each channel (L, C, R, LFE) feeds each group: the routing (centre %, divergences, fill feeds). */
+    /** Amplitude with which each channel (L, C, R, LFE) feeds each group: the routing (centre %, front divergence). */
     std::array<std::array<double, numGroups>, 4> routing() const;
 
     // Geometry
@@ -184,8 +214,9 @@ struct ProRooms
     static ProRooms defaults();     // a small, a medium and a large room
 
     // 2: positions as a share of the room, links, materials; 3: shape, layouts, second L C R;
-    // 4: people, routing (centre %, divergences), more shapes; 5: the screen can be removed
-    static constexpr int formatVersion = 5;
+    // 4: people, routing (centre %, divergences), more shapes; 5: the screen can be removed;
+    // 6: speaker models and aim, the point the audience looks at, fills play the LFE only
+    static constexpr int formatVersion = 6;
     std::string toText() const;
     static bool fromText (const std::string&, ProRooms& out);    // false: not a Room Sim Pro file; `out` untouched
 

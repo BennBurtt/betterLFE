@@ -82,6 +82,9 @@ public:
     /** Set by the window: switch the language and rebuild the content in it. */
     std::function<void()> onLanguageToggle;
 
+    /** Room Sim Pro, for the File and Edit menus of the window. */
+    RoomProView& roomPro()                      { return proView; }
+
 private:
     LanguageFlag languageFlag;
     enum CardId { sourceCard, spectrumCard, alertCard, transientsCard, chainsCard, devCard, numCards };

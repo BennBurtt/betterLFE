@@ -28,7 +28,9 @@ public:
     }
 };
 
-class MainWindow : public juce::DocumentWindow
+/** The window, with the File and Edit menus: in the menu bar on the Mac, at the top of the window elsewhere. */
+class MainWindow : public juce::DocumentWindow,
+                   private juce::MenuBarModel
 {
 public:
     explicit MainWindow (const LaunchOptions& options)
@@ -37,6 +39,11 @@ public:
         setUsingNativeTitleBar (true);
         setLanguage (savedLanguage());
         build();
+       #if JUCE_MAC
+        juce::MenuBarModel::setMacMainMenu (this);
+       #else
+        setMenuBar (this);
+       #endif
         setResizable (true, false);
         setResizeLimits (1000, 780, 10000, 10000);
         centreWithSize (getWidth(), getHeight());
@@ -66,6 +73,66 @@ public:
             });
         };
         setContentOwned (content, true);
+        menuItemsChanged();     // the menus follow the language
+    }
+
+    ~MainWindow() override
+    {
+       #if JUCE_MAC
+        juce::MenuBarModel::setMacMainMenu (nullptr);
+       #else
+        setMenuBar (nullptr);
+       #endif
+    }
+
+    // File: save and load the Room Sim Pro rooms. Edit: undo and redo their changes.
+    juce::StringArray getMenuBarNames() override       { return { tr ("File"), tr ("Edit") }; }
+
+    juce::PopupMenu getMenuForIndex (int index, const juce::String&) override
+    {
+        juce::PopupMenu menu;
+        const juce::String command = juce::String::fromUTF8 ("\xe2\x8c\x98"), option = juce::String::fromUTF8 ("\xe2\x8c\xa5"),
+                           shift = juce::String::fromUTF8 ("\xe2\x87\xa7");
+
+        const auto item = [&menu] (int id, const juce::String& text, const juce::String& keys)
+        {
+            juce::PopupMenu::Item i (text);
+            i.itemID = id;
+            i.shortcutKeyDescription = keys;
+            menu.addItem (i);
+        };
+
+        if (index == 0)
+        {
+            item (1, tr ("Save the rooms..."), command + "S");
+            item (2, tr ("Load rooms..."), command + "O");
+        }
+        else
+        {
+            item (3, tr ("Undo"), option + "Z");
+            item (4, tr ("Redo"), option + shift + "Z");
+        }
+
+        return menu;
+    }
+
+    void menuItemSelected (int id, int) override
+    {
+        auto* content = dynamic_cast<MainComponent*> (getContentComponent());
+
+        if (content == nullptr)
+            return;
+
+        auto& pro = content->roomPro();
+
+        switch (id)
+        {
+            case 1:     pro.exportConfig(); break;
+            case 2:     pro.importConfig(); break;
+            case 3:     pro.undo(); break;
+            case 4:     pro.redo(); break;
+            default:    break;
+        }
     }
 
     void closeButtonPressed() override

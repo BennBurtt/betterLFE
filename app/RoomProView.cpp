@@ -173,30 +173,41 @@ void Room3DView::paint (juce::Graphics& g)
     struct Mark { float depth; juce::Point<float> at; juce::Colour colour; juce::String label; bool square; int seat; };
     std::vector<Mark> marks;
 
-    const auto addSpeaker = [&] (const ProSpeaker& s, juce::Colour colour, const juce::String& label, bool mirror)
+    std::vector<std::pair<juce::Point<float>, juce::Point<float>>> aims;     // directional speakers: where they point
+
+    const auto addSpeaker = [&] (const ProSpeaker& s, juce::Colour colour, const juce::String& label, bool mirror, bool directional = false)
     {
         if (! s.enabled)
             return;
 
         float d = 0.0f;
         auto p = room.positionOf (s);
+        const double yaw = s.yaw * juce::MathConstants<double>::pi / 180.0, pitch = s.pitch * juce::MathConstants<double>::pi / 180.0;
+        std::array<double, 3> aim { std::cos (pitch) * std::cos (yaw), std::cos (pitch) * std::sin (yaw), std::sin (pitch) };
 
         if (mirror)
+        {
             p = { L - p[0], W - p[1], p[2] };
+            aim = { -aim[0], -aim[1], aim[2] };
+        }
 
         p = room.keptInside (p);
         const auto at = project (p[0], p[1], p[2], &d);
         marks.push_back ({ d, at, colour, label, true, -1 });
+
+        // A speaker that is not omnidirectional: a line 1.5 m long along its aim
+        if (directional && s.model != 0)
+            aims.push_back ({ at, project (p[0] + 1.5 * aim[0], p[1] + 1.5 * aim[1], p[2] + 1.5 * aim[2]) });
     };
 
     const char* lcrNames[] = { "L", "C", "R" };
 
     for (int i = 0; i < 3; ++i)
     {
-        addSpeaker (room.lcr[(size_t) i], speakerColour, lcrNames[i], false);
+        addSpeaker (room.lcr[(size_t) i], speakerColour, lcrNames[i], false, true);
 
         if (room.dualLCR)
-            addSpeaker (room.lcr[(size_t) i], speakerColour.darker (0.25f), juce::String (lcrNames[i]) + "2", true);
+            addSpeaker (room.lcr[(size_t) i], speakerColour.darker (0.25f), juce::String (lcrNames[i]) + "2", true, true);
     }
 
     for (int i = 0; i < std::clamp (room.numSubs, 1, ProRoom::maxSubs); ++i)
@@ -231,6 +242,25 @@ void Room3DView::paint (juce::Graphics& g)
 
     const float focal = 0.75f * (float) std::min (getWidth(), getHeight()) * 1.6f;
 
+    // Where the audience looks: a cross on the floor, 1 m across
+    {
+        const double fx = room.focusX * L, fy = room.focusY * W;
+        g.setColour (juce::Colour (0xffffe14a));
+        g.drawLine (juce::Line<float> (project (fx - 0.5, fy, 0.0), project (fx + 0.5, fy, 0.0)), 2.0f);
+        g.drawLine (juce::Line<float> (project (fx, fy - 0.5, 0.0), project (fx, fy + 0.5, 0.0)), 2.0f);
+        const auto at = project (fx, fy, 0.0);
+        g.setFont (uiFont (10.0f, true));
+        g.drawText (tr ("looked at"), juce::Rectangle<float> (at.x + 6.0f, at.y + 2.0f, 90.0f, 12.0f), juce::Justification::centredLeft);
+    }
+
+    // The aim of the directional speakers
+    g.setColour (juce::Colours::white.withAlpha (0.8f));
+
+    for (const auto& a : aims)
+    {
+        g.drawArrow (juce::Line<float> (a.first, a.second), 1.5f, 7.0f, 7.0f);
+    }
+
     for (const auto& m : marks)
     {
         const float scale = focal / m.depth;
@@ -249,11 +279,14 @@ void Room3DView::paint (juce::Graphics& g)
         }
         else
         {
-            const float r = juce::jlimit (2.0f, 7.0f, (float) (0.28 * scale));
-            g.setColour (m.colour.withAlpha (0.16f));
-            g.fillEllipse (m.at.x - 1.6f * r, m.at.y - 1.6f * r, 3.2f * r, 3.2f * r);
+            // The size of an average head: 181 mm across (ANSUR II, 2012: head circumference
+            // 574 mm for men, 561 mm for women; their mean over pi), drawn to scale
+            constexpr float headRadius = 0.0904f;
+            const float r = juce::jmax (1.5f, headRadius * scale);
             g.setColour (m.colour);
             g.fillEllipse (m.at.x - r, m.at.y - r, 2.0f * r, 2.0f * r);
+            g.setColour (juce::Colours::black.withAlpha (0.45f));
+            g.drawEllipse (m.at.x - r, m.at.y - r, 2.0f * r, 2.0f * r, 0.6f);
 
             if (m.seat == hovered)
             {
@@ -282,43 +315,50 @@ void Room3DView::paint (juce::Graphics& g)
     auto legend = getLocalBounds().reduced (10, 8).removeFromBottom (36).removeFromRight (300).toFloat();
     drawScale (g, legend, absolute, mixValue, caption);
 
-    // The head under the mouse: two lines
-    juce::String text, second;
-
+    // The head under the mouse: every number says what it is and against what
     if (hovered >= 0 && hovered < (int) seatPoints.size() && rated)
     {
         const auto h = (size_t) hovered;
         const auto value = [h] (const std::vector<double>& v) { return h < v.size() ? v[h] : std::nan (""); };
         const auto signedDb = [] (double v) { return std::isnan (v) ? juce::String ("--") : (v >= 0.0 ? "+" : "") + juce::String (v, 1) + " dB"; };
         const auto phon = [] (double v) { return std::isnan (v) ? juce::String ("--") : juce::String (juce::roundToInt (v)); };
+        const auto part = [&] (int p) { return phon (value (details.phon[(size_t) p])) + tr (" phon (mix ") + phon (details.mixPhon[(size_t) p]) + ")"; };
 
-        text = tr ("Seat ") + juce::String (hovered + 1) + ":  " + juce::String (juce::roundToInt (100.0 * (1.0 - penalties[h]))) + " %   "
-             + phon (value (details.phon[RoomResult::allParts])) + tr (" phon (mix ") + phon (details.mixPhon[RoomResult::allParts]) + ")   L C R "
-             + phon (value (details.phon[RoomResult::lcrPart])) + "  LFE " + phon (value (details.phon[RoomResult::lfePart]));
+        juce::StringArray lines;
+        lines.add (tr ("Seat ") + juce::String (hovered + 1) + "   " + details.scoreName + " "
+                   + juce::String (juce::roundToInt (100.0 * (1.0 - penalties[h]))) + " / 100");
+        lines.add (tr ("Loudness of its bass: ") + part (RoomResult::allParts) + "   " + tr ("L C R alone: ") + part (RoomResult::lcrPart)
+                   + "   " + tr ("LFE alone: ") + part (RoomResult::lfePart));
+        lines.add (tr ("Its bass level against the approved mix: ") + signedDb (value (details.partDb[RoomResult::allParts])) + "  =  "
+                   + tr ("room ") + signedDb (value (details.causeDb[RoomResult::roomCause])) + "  +  " + tr ("speakers ")
+                   + signedDb (value (details.causeDb[RoomResult::speakersCause])) + "  +  " + tr ("mix ")
+                   + signedDb (value (details.causeDb[RoomResult::mixCause])));
 
-        second = tr ("bass ") + signedDb (value (details.partDb[RoomResult::allParts])) + " = " + tr ("room ")
-               + signedDb (value (details.causeDb[RoomResult::roomCause])) + "  " + tr ("speakers ")
-               + signedDb (value (details.causeDb[RoomResult::speakersCause])) + "  " + tr ("mix ")
-               + signedDb (value (details.causeDb[RoomResult::mixCause]));
+        if (h < felt.size())
+            lines.add (tr ("Felt under 40 Hz: ") + juce::String (juce::roundToInt (felt[h])) + " dB SPL");
 
-        if (h < heard.size() && h < felt.size())
-            second << "   " << tr ("feels ") << juce::String (juce::roundToInt (felt[h])) << tr (" dB SPL under 40 Hz");
+        float width = 0.0f;
+
+        for (int i = 0; i < lines.size(); ++i)
+            width = juce::jmax (width, juce::GlyphArrangement::getStringWidth (uiFont (i == 0 ? 11.5f : 11.0f, i == 0), lines[i]));
+
         const auto at = seatPoints[h];
-        const float width = 16.0f + juce::jmax (juce::GlyphArrangement::getStringWidth (uiFont (11.5f, true), text),
-                                                juce::GlyphArrangement::getStringWidth (uiFont (11.0f), second));
-        auto box = juce::Rectangle<float> (at.x + 12.0f, at.y - 44.0f, width, 38.0f);
+        const float lineHeight = 16.0f;
+        auto box = juce::Rectangle<float> (at.x + 12.0f, at.y - 12.0f - lineHeight * (float) lines.size(), width + 18.0f,
+                                           lineHeight * (float) lines.size() + 8.0f);
         box = box.constrainedWithin (getLocalBounds().toFloat().reduced (4.0f));
         g.setColour (juce::Colour (0xee0e0f11));
         g.fillRoundedRectangle (box, 4.0f);
         g.setColour (seatColour (100.0 * (1.0 - penalties[h])));
         g.drawRoundedRectangle (box, 4.0f, 1.0f);
-        auto lines = box.reduced (8.0f, 3.0f);
-        g.setColour (juce::Colours::white);
-        g.setFont (uiFont (11.5f, true));
-        g.drawText (text, lines.removeFromTop (lines.getHeight() / 2.0f), juce::Justification::centredLeft);
-        g.setColour (juce::Colour (0xffd0d0d0));
-        g.setFont (uiFont (11.0f));
-        g.drawText (second, lines, juce::Justification::centredLeft);
+        auto area = box.reduced (9.0f, 4.0f);
+
+        for (int i = 0; i < lines.size(); ++i)
+        {
+            g.setColour (i == 0 ? juce::Colours::white : juce::Colour (0xffd4d4d4));
+            g.setFont (uiFont (i == 0 ? 11.5f : 11.0f, i == 0));
+            g.drawText (lines[i], area.removeFromTop (lineHeight), juce::Justification::centredLeft);
+        }
     }
 
     g.setColour (theme::dimText);
@@ -1158,7 +1198,8 @@ void RoomProEditor::info (std::function<juce::String()> text)
     items.push_back (std::move (item));
 }
 
-void RoomProEditor::speaker (const juce::String& title, ProSpeaker& s, const ProSpeaker& reference, bool sub, bool isFill, bool* link)
+void RoomProEditor::speaker (const juce::String& title, ProSpeaker& s, const ProSpeaker& reference, bool sub, bool isFill, bool* link,
+                             bool directional)
 {
     section (title, sub);
 
@@ -1187,8 +1228,22 @@ void RoomProEditor::speaker (const juce::String& title, ProSpeaker& s, const Pro
 
     knob (tr ("Level"), -20.0, 20.0, 0.5, " dB", s.gainDb, 0.0);
 
-    if (isFill)
-        choice (tr ("Plays"), { tr ("Lc / Rc (L or R + C at -3 dB)"), "LFE" }, [sp] { return sp->feed; }, [sp] (int v) { sp->feed = v; }, false);
+    if (directional)
+    {
+        // How it radiates in the bass, and where it points
+        juce::StringArray models;
+
+        for (const auto& m : ProSpeakerModel::list())
+            models.add (tr (m.name));
+
+        choice (tr ("Model"), models, [sp] { return sp->model; }, [sp] (int v) { sp->model = v; }, false)
+            .setTooltip (tr ("How the speaker radiates in the bass. Omnidirectional below about c / (pi x width): a screen speaker 76 cm wide "
+                             "up to about 140 Hz. Cardioid models send less bass behind them."));
+        knob (tr ("Aim"), -180.0, 180.0, 1.0, juce::String::fromUTF8 ("\xc2\xb0"), s.yaw, 0.0)
+            .setTooltip (tr ("Horizontal aim: 0 towards the back wall, positive towards the right wall. Double-click: 0."));
+        knob (tr ("Tilt"), -60.0, 60.0, 1.0, juce::String::fromUTF8 ("\xc2\xb0"), s.pitch, 0.0)
+            .setTooltip (tr ("Vertical aim: positive upwards. Double-click: 0."));
+    }
 }
 
 namespace
@@ -1381,15 +1436,15 @@ void RoomProEditor::rebuild()
 
     if (r.linkLR)
     {
-        speaker (tr ("Left / Right"), r.lcr[0], ref.lcr[0], true, false, &r.linkLR);
+        speaker (tr ("Left / Right"), r.lcr[0], ref.lcr[0], true, false, &r.linkLR, true);
     }
     else
     {
-        speaker (tr ("Left"), r.lcr[0], ref.lcr[0], true, false, &r.linkLR);
-        speaker (tr ("Right"), r.lcr[2], ref.lcr[2], true, false, nullptr);
+        speaker (tr ("Left"), r.lcr[0], ref.lcr[0], true, false, &r.linkLR, true);
+        speaker (tr ("Right"), r.lcr[2], ref.lcr[2], true, false, nullptr, true);
     }
 
-    speaker (tr ("Centre"), r.lcr[1], ref.lcr[1], true, false, nullptr);
+    speaker (tr ("Centre"), r.lcr[1], ref.lcr[1], true, false, nullptr, true);
 
     // Routing, as on a console panner
     section (tr ("Divergence"));
@@ -1397,10 +1452,6 @@ void RoomProEditor::rebuild()
         .setTooltip (tr ("Share of C played by the centre speaker; the rest goes to L and R as a phantom centre. Double-click: 100."));
     knob (tr ("Front"), 0.0, 100.0, 1.0, " %", r.frontDivergence, 100.0)
         .setTooltip (tr ("100: each screen channel on its own speaker. Lower: spread over L, C and R. Double-click: 100."));
-    knob (tr ("Rear"), 0.0, 100.0, 1.0, " %", r.rearDivergence, 100.0)
-        .setTooltip (tr ("100: left fills play Lc, right fills Rc. Lower: the two sides share their feeds. Double-click: 100."));
-    knob (tr ("F / R"), 0.0, 100.0, 1.0, " %", r.frDivergence, 100.0)
-        .setTooltip (tr ("100: the screen channels stay on the screen speakers. Lower: part of them goes to the fills. Double-click: 100."));
 
     section (tr ("Subwoofers"));
     choice (tr ("Number"), { "1", "2", "3", "4" }, [this] { return room->numSubs - 1; }, [this] (int v) { room->numSubs = v + 1; }, true);
@@ -1408,7 +1459,7 @@ void RoomProEditor::rebuild()
     for (int i = 0; i < juce::jlimit (1, ProRoom::maxSubs, r.numSubs); ++i)
         speaker (tr ("Sub") + " " + juce::String (i + 1), r.subs[(size_t) i], ref.subs[(size_t) i], true, false, nullptr);
 
-    section (tr ("Fill speakers"));
+    section (tr ("LFE fill speakers"));
     barToggle (tr ("Link"), tr ("Linked: fills 2 and 4 mirror fills 1 and 3 across the centre of the room."), r.linkFills, true, onGreen);
     barToggle (tr ("On"), tr ("Use fill speakers"), r.fillsOn, true, onGreen);
 
@@ -1467,6 +1518,14 @@ void RoomProEditor::rebuild()
         countKnob (tr ("Rows"), 1, 12, r.rows, ref.rows);
         countKnob (tr ("Per row"), 1, 24, r.perRow, ref.perRow);
     }
+
+    // Where the audience looks: marked by a cross on the floor
+    knob (tr ("Look at, from front"), 0.0, 1.0, 0.05, " m", [this] { return room->focusX * room->length; },
+          [this] (double v) { room->focusX = v / room->length; }, [this] { return room->length; }, [] { return 0.0; })
+        .setTooltip (tr ("Where the audience looks (a screen, a catwalk, an object on show), marked by a cross. "
+                         "The placement assistant will put C and the phantom centre of L and R there."));
+    knob (tr ("Look at, from left"), 0.0, 1.0, 0.05, " m", [this] { return room->focusY * room->width; },
+          [this] (double v) { room->focusY = v / room->width; }, [this] { return room->width; }, [this] { return 0.5 * room->width; });
 
     knob (tr ("Ear"), 0.8, 3.0, 0.05, " m", r.earHeight, 1.2);
     knob (tr ("Rake"), 0.0, 10.0, 0.05, " m", r.rake, 0.0);
@@ -1728,14 +1787,8 @@ RoomProView::RoomProView()
         });
     };
 
-    saveButton.setTooltip (tr ("Save the three rooms to a file."));
-    loadButton.setTooltip (tr ("Load three rooms from a file."));
     settingsButton.onClick = [this] { settingsOpen = ! settingsOpen; resized(); };
     addAndMakeVisible (settingsButton);
-    saveButton.onClick = [this] { exportConfig(); };
-    loadButton.onClick = [this] { importConfig(); };
-    addAndMakeVisible (saveButton);
-    addAndMakeVisible (loadButton);
 
     selectRoom (0);
 }
@@ -1805,6 +1858,8 @@ void RoomProView::showSelected()
     details.partDb = res.seatPartDb;
     details.mixPhon = res.approvedPhon;
     details.causeDb = res.seatCauseDb;
+    const juce::String scoreNames[] = { tr ("coverage score"), tr ("placement score"), tr ("mix score") };
+    details.scoreName = scoreNames[rating];
     view3d.setDetails (details);
     view3d.setHeads (res.seatHeardPhon, res.seatFeltDb);
     layerView.setData (room, &p, &res, lens, loudness ? part : cause);
@@ -1943,7 +1998,6 @@ void RoomProView::paint (juce::Graphics& g)
         g.drawText (show ? juce::String (juce::roundToInt (shownPro)) : juce::String ("--"), big, juce::Justification::centredLeft);
 
         top.removeFromRight (230.0f);       // the Soft / Medium / Strong selector
-        top.removeFromRight (230.0f);       // save and load
         g.setColour (theme::dimText);
         g.setFont (uiFont (11.5f));
         g.drawFittedText (tr ("Three rooms of your own, outside the cinema layout. Same rating as Room Sim and the same Dev settings and "
@@ -2055,12 +2109,7 @@ void RoomProView::paint (juce::Graphics& g)
 void RoomProView::resized()
 {
     auto area = getLocalBounds().reduced (16, 10);
-    auto top = area.removeFromTop (58);
-    top.removeFromRight (230);
-    auto buttons = top.removeFromRight (230).withSizeKeepingCentre (230, 26);
-    saveButton.setBounds (buttons.removeFromLeft (112));
-    buttons.removeFromLeft (6);
-    loadButton.setBounds (buttons);
+    area.removeFromTop (58);       // the header (save and load are in the File menu)
 
     area.removeFromTop (6);
     auto cardRow = area.removeFromTop (72);
@@ -2190,6 +2239,15 @@ bool RoomProView::keyPressed (const juce::KeyPress& key)
         else                        undo();
 
         return true;
+    }
+
+    // Cmd-S: save the rooms; Cmd-O: load rooms (as in the File menu)
+    if (mods.isCommandDown() && ! mods.isShiftDown())
+    {
+        const auto c = juce::CharacterFunctions::toLowerCase ((juce::juce_wchar) key.getKeyCode());
+
+        if (c == 's')   { exportConfig(); return true; }
+        if (c == 'o')   { importConfig(); return true; }
     }
 
     return false;

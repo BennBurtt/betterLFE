@@ -119,6 +119,66 @@ namespace
 
 //==============================================================================
 // Rooms
+//==============================================================================
+// Speaker models: how L, C, R radiate in the bass (see docs/ALGORITHME.md).
+// Below ka = 1 (a front of width D: f = c / (pi D)) a speaker is nearly
+// omnidirectional. The width model, (1 - a) = 0.3 f / f1 with f1 = c / (pi D)
+// down to a cardioid at most, matches the Genelec plots (-3 dB at 90 degrees
+// near ka = 1) and the JBL 3730 (360 degrees at 125 Hz, about 180 at 160 Hz).
+const std::vector<ProSpeakerModel>& ProSpeakerModel::list()
+{
+    static const std::vector<ProSpeakerModel> models {
+        { "omni", "Omnidirectional", "ideal point source", 0.0, { { 20.0, 1.0 } } },
+        { "jbl3730", "JBL 3730 ScreenArray (cinema screen)", "JBL 3730 spec sheet: 360 deg at 125 Hz, 180 deg 160-250 Hz, DI 4-5 dB (half space)",
+          0.762, { { 125.0, 0.84 }, { 160.0, 0.5 }, { 250.0, 0.5 } } },
+        { "eawkf730", "EAW KF730 (line array element)", "EAW KF730 spec sheet, horizontal: 360 deg at 100 Hz, 180 deg at 125 Hz, 120 deg at 160 Hz",
+          0.0, { { 100.0, 0.75 }, { 125.0, 0.5 }, { 160.0, 0.25 } } },
+        { "genelec1238a", "Genelec 1238A (main monitor)", "Genelec 1237A/1238A manual, fig. 18; width 480 mm", 0.480, {} },
+        { "genelec8361a", "Genelec 8361A", "Genelec 8361A manual, fig. 11; width 357 mm", 0.357, {} },
+        { "genelecs360", "Genelec S360", "Genelec S360 manual, fig. 14; width 360 mm", 0.360, {} },
+        { "genelec8351b", "Genelec 8351B", "Genelec 8351B manual, fig. 7; width 287 mm", 0.287, {} },
+        { "genelec8341a", "Genelec 8341A", "Genelec 8341A manual, fig. 9; width 237 mm", 0.237, {} },
+        { "cardioid", "Cardioid (K&F PIA M cardioid mode, d&b CCL)", "first-order cardioid, rear null; K&F PIA M: > 10 dB rear down to 107 Hz",
+          0.0, { { 20.0, 0.5 } } },
+        { "hypercardioid", "Hypercardioid", "first-order hypercardioid", 0.0, { { 20.0, 0.25 } } },
+    };
+    return models;
+}
+
+int ProSpeakerModel::indexOf (const std::string& key)
+{
+    const auto& models = list();
+
+    for (size_t i = 0; i < models.size(); ++i)
+        if (key == models[i].key)
+            return (int) i;
+
+    return 0;
+}
+
+double ProSpeakerModel::omniShare (double hz) const
+{
+    if (points.empty())
+    {
+        const double f1 = RoomSimulator::speedOfSound / (pi * std::max (widthM, 0.05));
+        return std::clamp (1.0 - 0.3 * hz / f1, 0.5, 1.0);
+    }
+
+    const auto& first = points.front();
+
+    if (hz <= first.first)
+        return std::clamp (1.0 - (1.0 - first.second) * hz / first.first, std::min (first.second, 1.0), 1.0);
+
+    for (size_t i = 1; i < points.size(); ++i)
+        if (hz <= points[i].first)
+        {
+            const double t = std::log (hz / points[i - 1].first) / std::log (points[i].first / points[i - 1].first);
+            return points[i - 1].second + t * (points[i].second - points[i - 1].second);
+        }
+
+    return points.back().second;
+}
+
 ProRoom ProRoom::fromSpec (const RoomSpec& spec)
 {
     ProRoom r;
@@ -254,6 +314,10 @@ std::vector<ProVenue> ProRoom::venues()
         }
 
         r.audienceLayout = v.layout;
+
+        // Where the audience looks: the front wall for rows, the middle of the room for a catwalk or a ring
+        r.focusX = v.layout == rowsLayout ? 0.0 : 0.5;
+        r.focusY = 0.5;
         r.firstRow = v.firstRow;
         r.lastRow = v.lastRow;
         r.audienceWidth = v.audienceWidth;
@@ -271,6 +335,7 @@ std::vector<ProVenue> ProRoom::venues()
         ProRoom r = fromSpec ({ "In the round, two L C R back to back", "In the round", 24.0, 24.0, 8.0, 0.6 });
         r.shape = round;
         r.screen = false;
+        r.focusX = r.focusY = 0.5;
         r.acoustics = 1;
         r.materials = materialsOf ("plasterboard", "plasterboard", "plasterboard", "plasterboard", "concrete", "plasterboard");
         r.people = standingPeople;
@@ -635,37 +700,42 @@ std::vector<ProRoom::Placed> ProRoom::placedSpeakers() const
 {
     std::vector<Placed> out;
 
-    const auto add = [&] (const ProSpeaker& s, int group, bool mirror)
+    const auto add = [&] (const ProSpeaker& s, int group, bool mirror, bool directional)
     {
         if (! s.enabled)
             return;
 
         auto p = positionOf (s);
+        const double yaw = s.yaw * pi / 180.0, pitch = s.pitch * pi / 180.0;
+        std::array<double, 3> aim { std::cos (pitch) * std::cos (yaw), std::cos (pitch) * std::sin (yaw), std::sin (pitch) };
 
         if (mirror)
+        {
             p = { length - p[0], width - p[1], p[2] };
+            aim = { -aim[0], -aim[1], aim[2] };
+        }
 
         const double sign = s.inverted ? -1.0 : 1.0;
-        out.push_back ({ keptInside (p), group, s.delayMs, sign * std::pow (10.0, s.gainDb / 20.0), sign });
+        Placed placed { keptInside (p), group, s.delayMs, sign * std::pow (10.0, s.gainDb / 20.0), sign };
+        placed.model = directional ? std::clamp (s.model, 0, (int) ProSpeakerModel::list().size() - 1) : 0;
+        placed.aim = aim;
+        out.push_back (placed);
     };
 
     for (int i = 0; i < 3; ++i)
     {
-        add (lcr[(size_t) i], groupL + i, false);
+        add (lcr[(size_t) i], groupL + i, false, true);
 
         if (dualLCR)
-            add (lcr[(size_t) i], groupL + i, true);
+            add (lcr[(size_t) i], groupL + i, true, true);
     }
 
     for (int i = 0; i < std::clamp (numSubs, 1, maxSubs); ++i)
-        add (subs[(size_t) i], groupSubs, false);
+        add (subs[(size_t) i], groupSubs, false, false);
 
     if (fillsOn)
         for (int i = 0; i < std::clamp (numFills, 1, maxFills); ++i)
-        {
-            const auto& f = fills[(size_t) i];
-            add (f, f.feed == 1 ? groupFillsLfe : (f.fy <= 0.5 ? groupFillsLeft : groupFillsRight), false);
-        }
+            add (fills[(size_t) i], groupFillsLfe, false, false);
 
     return out;
 }
@@ -673,18 +743,8 @@ std::vector<ProRoom::Placed> ProRoom::placedSpeakers() const
 std::array<std::array<double, ProRoom::numGroups>, 4> ProRoom::routing() const
 {
     std::array<std::array<double, numGroups>, 4> r {};
-    bool screenFills[2] = { false, false };
-
-    if (fillsOn)
-        for (int i = 0; i < std::clamp (numFills, 1, maxFills); ++i)
-            if (fills[(size_t) i].enabled && fills[(size_t) i].feed == 0)
-                screenFills[fills[(size_t) i].fy <= 0.5 ? 0 : 1] = true;
-
-    const bool anyScreenFill = screenFills[0] || screenFills[1];
     const double c = std::clamp (centrePercent / 100.0, 0.0, 1.0);
     const double front = 1.0 - std::clamp (frontDivergence / 100.0, 0.0, 1.0);
-    const double rear = 1.0 - std::clamp (rearDivergence / 100.0, 0.0, 1.0);
-    const double toFills = anyScreenFill ? 1.0 - std::clamp (frDivergence / 100.0, 0.0, 1.0) : 0.0;
 
     for (int ch = 0; ch < 3; ++ch)
     {
@@ -697,19 +757,8 @@ std::array<std::array<double, ProRoom::numGroups>, 4> ProRoom::routing() const
         for (double& p : screen)
             p = (1.0 - front) * p + front / 3.0;
 
-        // Fills: Lc / Rc, then rear divergence between the two sides, plus what front / rear divergence sends
-        const double side[2] = { ch == 0 ? 1.0 : (ch == 1 ? 0.5 : 0.0), ch == 2 ? 1.0 : (ch == 1 ? 0.5 : 0.0) };
-        double fill[2] = { ch == 0 ? 1.0 : (ch == 1 ? minusThreeDb * minusThreeDb : 0.0),
-                           ch == 2 ? 1.0 : (ch == 1 ? minusThreeDb * minusThreeDb : 0.0) };
-        const double mixed[2] = { (1.0 - 0.5 * rear) * fill[0] + 0.5 * rear * fill[1], 0.5 * rear * fill[0] + (1.0 - 0.5 * rear) * fill[1] };
-        fill[0] = mixed[0] + 0.5 * toFills * side[0];
-        fill[1] = mixed[1] + 0.5 * toFills * side[1];
-
         for (int g = 0; g < 3; ++g)
-            r[(size_t) ch][(size_t) g] = std::sqrt ((1.0 - 0.5 * toFills) * screen[g]);
-
-        r[(size_t) ch][groupFillsLeft] = screenFills[0] ? std::sqrt (fill[0]) : 0.0;
-        r[(size_t) ch][groupFillsRight] = screenFills[1] ? std::sqrt (fill[1]) : 0.0;
+            r[(size_t) ch][(size_t) g] = std::sqrt (screen[g]);
     }
 
     r[3][groupSubs] = 1.0;
@@ -801,8 +850,8 @@ bool ProRoom::operator== (const ProRoom& o) const
              && acoustics == o.acoustics && same (rt60, o.rt60) && materials == o.materials
              && lcr == o.lcr && linkLR == o.linkLR && dualLCR == o.dualLCR && screen == o.screen && numSubs == o.numSubs && subs == o.subs
              && fillsOn == o.fillsOn && linkFills == o.linkFills && numFills == o.numFills && fills == o.fills
-             && same (centrePercent, o.centrePercent) && same (frontDivergence, o.frontDivergence) && same (rearDivergence, o.rearDivergence)
-             && same (frDivergence, o.frDivergence)
+             && same (centrePercent, o.centrePercent) && same (frontDivergence, o.frontDivergence)
+             && same (focusX, o.focusX) && same (focusY, o.focusY)
              && audienceLayout == o.audienceLayout && same (firstRow, o.firstRow) && same (lastRow, o.lastRow) && same (audienceWidth, o.audienceWidth)
              && same (aisle, o.aisle) && same (ringInner, o.ringInner) && same (ringOuter, o.ringOuter)
              && rows == o.rows && perRow == o.perRow && same (earHeight, o.earHeight) && same (rake, o.rake) && people == o.people
@@ -839,7 +888,9 @@ namespace
             << key << ".delayMs = " << number (s.delayMs) << "\n"
             << key << ".gainDb = " << number (s.gainDb) << "\n"
             << key << ".inverted = " << (s.inverted ? 1 : 0) << "\n"
-            << key << ".feed = " << s.feed << "\n";
+            << key << ".model = " << ProSpeakerModel::list()[(size_t) std::clamp (s.model, 0, (int) ProSpeakerModel::list().size() - 1)].key << "\n"
+            << key << ".yaw = " << number (s.yaw) << "\n"
+            << key << ".pitch = " << number (s.pitch) << "\n";
     }
 
     struct Reader
@@ -861,7 +912,11 @@ namespace
             get (key + ".delayMs", s.delayMs);
             get (key + ".gainDb", s.gainDb);
             get (key + ".inverted", s.inverted);
-            get (key + ".feed", s.feed);
+            get (key + ".yaw", s.yaw);
+            get (key + ".pitch", s.pitch);
+
+            if (has (key + ".model"))
+                s.model = ProSpeakerModel::indexOf (values.at (key + ".model"));
         }
     };
 }
@@ -913,8 +968,8 @@ std::string ProRooms::toText() const
 
         out << k << "centrePercent = " << number (r.centrePercent) << "\n"
             << k << "frontDivergence = " << number (r.frontDivergence) << "\n"
-            << k << "rearDivergence = " << number (r.rearDivergence) << "\n"
-            << k << "frDivergence = " << number (r.frDivergence) << "\n"
+            << k << "focusX = " << number (r.focusX) << "\n"
+            << k << "focusY = " << number (r.focusY) << "\n"
             << k << "audienceLayout = " << r.audienceLayout << "\n"
             << k << "aisle = " << number (r.aisle) << "\n"
             << k << "ringInner = " << number (r.ringInner) << "\n"
@@ -1009,8 +1064,8 @@ bool ProRooms::fromText (const std::string& text, ProRooms& out)
 
         reader.get (k + "centrePercent", r.centrePercent);
         reader.get (k + "frontDivergence", r.frontDivergence);
-        reader.get (k + "rearDivergence", r.rearDivergence);
-        reader.get (k + "frDivergence", r.frDivergence);
+        reader.get (k + "focusX", r.focusX);
+        reader.get (k + "focusY", r.focusY);
         reader.get (k + "audienceLayout", r.audienceLayout);
         reader.get (k + "aisle", r.aisle);
         reader.get (k + "ringInner", r.ringInner);
@@ -1757,12 +1812,33 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
     const size_t numModes = modes.size(), n = paths.points.size();
     constexpr int ng = ProRoom::numGroups, nc = RoomPaths::numChannels;
 
-    // Mode shapes at every source and every seat (with the mode's scale), once
-    std::vector<std::vector<double>> atSource (sources.size(), std::vector<double> (numModes));
+    // Mode shapes at every source and every seat (with the mode's scale), once.
+    // A directional speaker is a monopole plus a dipole along its aim u: its
+    // pattern a + (1 - a) cos(theta) in free field comes from exciting each mode
+    // by a psi(x_s) + (1 - a) / (j k) u.grad psi(x_s) (the dipole's far field is
+    // jk cos(theta) times the monopole's). The gradient along u is taken by
+    // central differences 1 cm apart, far finer than any mode below 160 Hz.
+    std::vector<std::vector<double>> atSource (sources.size(), std::vector<double> (numModes)), alongAim = atSource;
+    std::vector<bool> directional (sources.size(), false);
 
     for (size_t s = 0; s < sources.size(); ++s)
+    {
+        directional[s] = sources[s].model != 0;
+
         for (size_t k = 0; k < numModes; ++k)
             atSource[s][k] = shape (r, modes[k], sources[s].position);
+
+        if (directional[s])
+        {
+            constexpr double h = 0.01;
+            const auto& p = sources[s].position;
+            const auto& u = sources[s].aim;
+            const Point ahead { p[0] + h * u[0], p[1] + h * u[1], p[2] + h * u[2] }, behind { p[0] - h * u[0], p[1] - h * u[1], p[2] - h * u[2] };
+
+            for (size_t k = 0; k < numModes; ++k)
+                alongAim[s][k] = (shape (r, modes[k], ahead) - shape (r, modes[k], behind)) / (2.0 * h);
+        }
+    }
 
     // Which groups have speakers, and whether a level offset makes the set-up differ from the calibrated one
     bool used[ng] = {}, offset[ng] = {};
@@ -1842,16 +1918,36 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
                     const cd gain = delay * sources[s].gain, nominalGain = delay * sources[s].nominalWeight;
                     auto& sum = groupAt[(size_t) sources[s].group];
                     auto& nominalSum = groupNominalAt[(size_t) sources[s].group];
-
                     const bool alsoAlone = speakersIn[sources[s].group] > 1;
+                    const double* psi = atSource[s].data();
+
+                    if (directional[s])
+                    {
+                        // a psi + (1 - a) / (j k) u.grad psi, k = w / c
+                        const double a = ProSpeakerModel::list()[(size_t) sources[s].model].omniShare (w / (2.0 * pi));
+                        const cd b = cd (0.0, -(1.0 - a) * RoomSimulator::speedOfSound / w);
+                        const double* grad = alongAim[s].data();
+
+                        for (size_t k = 0; k < numModes; ++k)
+                        {
+                            const cd excitation = a * psi[k] + b * grad[k];
+                            sum[k] += excitation * gain;
+                            nominalSum[k] += excitation * nominalGain;
+
+                            if (alsoAlone)
+                                speakerAt[s][k] = excitation * gain;
+                        }
+
+                        continue;
+                    }
 
                     for (size_t k = 0; k < numModes; ++k)
                     {
-                        sum[k] += atSource[s][k] * gain;
-                        nominalSum[k] += atSource[s][k] * nominalGain;
+                        sum[k] += psi[k] * gain;
+                        nominalSum[k] += psi[k] * nominalGain;
 
                         if (alsoAlone)
-                            speakerAt[s][k] = atSource[s][k] * gain;
+                            speakerAt[s][k] = psi[k] * gain;
                     }
                 }
 
@@ -1948,8 +2044,8 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
 
     // Calibration on the room as set up normally (every speaker at its level),
     // one speaker group at a time, over all seats or the reference seat:
-    // L, C, R and the subwoofers each to the stage level. Fills keep their
-    // level against the screen speaker of their side.
+    // L, C, R and the subwoofers each to the stage level; the LFE fills with
+    // the subwoofers (below).
     double mean[ng] = {}, weight = 0.0;
     const int reference = r.referenceSeat();
 
@@ -1977,8 +2073,6 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
     for (int g = 0; g < ng; ++g)
         scale[g] = weight > 0.0 && mean[g] > 0.0 ? std::sqrt (weight / mean[g]) : 1.0;
 
-    scale[ProRoom::groupFillsLeft] = scale[ProRoom::groupL];
-    scale[ProRoom::groupFillsRight] = scale[ProRoom::groupR];
 
     // The LFE system is set as a whole, as an installer does: subwoofers and
     // LFE fills playing together reach the stage level at the calibration

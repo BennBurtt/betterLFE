@@ -630,8 +630,10 @@ void MainComponent::positionCards()
 
 bool MainComponent::keyPressed (const juce::KeyPress& key)
 {
-    // Option-Z / Option-Shift-Z: undo and redo in Room Sim Pro
-    if (proMode)
+    // Option-Z / Option-Shift-Z: undo and redo in Room Sim Pro; Cmd-S / Cmd-O: save and load the rooms, from any view
+    const auto c = juce::CharacterFunctions::toLowerCase ((juce::juce_wchar) key.getKeyCode());
+
+    if (proMode || (key.getModifiers().isCommandDown() && (c == 's' || c == 'o')))
         return proView.keyPressed (key);
 
     return false;
