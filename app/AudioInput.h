@@ -94,6 +94,34 @@ public:
         return {};
     }
 
+    /** Stage measurement: plays `signal` on one output and records one input in the same callback, so the
+        two are aligned to the sample. Message thread, while no measurement runs. */
+    bool startMeasurement (std::vector<float> signal, int recordFrames, int outputChannel, int inputChannel)
+    {
+        if (measureState.load() == 1)
+            return false;
+
+        measureSignal = std::move (signal);
+        measureRecording.assign ((size_t) juce::jmax (recordFrames, (int) measureSignal.size()), 0.0f);
+        measureOut = outputChannel;
+        measureIn = inputChannel;
+        measurePos = 0;
+        measureState.store (1);
+        return true;
+    }
+
+    void cancelMeasurement()                    { measureState.store (0); }
+    bool measurementDone() const                { return measureState.load() == 2; }
+    bool measuring() const                      { return measureState.load() == 1; }
+    double measurementProgress() const          { return measureRecording.empty() ? 0.0 : (double) measurePos.load() / (double) measureRecording.size(); }
+
+    /** The recording, once done (then the next measurement can start). */
+    std::vector<float> takeRecording()
+    {
+        measureState.store (0);
+        return std::move (measureRecording);
+    }
+
     bool isRunning() const          { return running.load(); }
     double sampleRate() const       { return rate.load(); }
     int generation() const          { return startCount.load(); }   // bumps on every (re)start
@@ -127,6 +155,28 @@ public:
         for (int c = 0; c < numOutputs; ++c)
             if (output[c] != nullptr)
                 juce::FloatVectorOperations::clear (output[c], numSamples);
+
+        // Stage measurement: the sweep out, the microphone in, sample for sample
+        if (measureState.load() == 1)
+        {
+            float* out = measureOut >= 0 && measureOut < numOutputs ? output[measureOut] : nullptr;
+            const float* mic = measureIn >= 0 && measureIn < numInputs ? input[measureIn] : nullptr;
+            int pos = measurePos.load (std::memory_order_relaxed);
+            const int length = (int) measureRecording.size();
+
+            for (int i = 0; i < numSamples && pos < length; ++i, ++pos)
+            {
+                if (out != nullptr && pos < (int) measureSignal.size())
+                    out[i] = measureSignal[(size_t) pos];
+
+                measureRecording[(size_t) pos] = mic != nullptr ? mic[i] : 0.0f;
+            }
+
+            measurePos.store (pos);
+
+            if (pos >= length)
+                measureState.store (2);
+        }
 
         const float* source[4];
 
@@ -226,6 +276,11 @@ private:
     std::atomic<bool> running { false };
     std::atomic<float> rms { 0.0f };
     std::atomic<long long> readCount { 0 };
+
+    // Stage measurement (buffers written by the message thread only while idle)
+    std::vector<float> measureSignal, measureRecording;
+    int measureOut = -1, measureIn = -1;
+    std::atomic<int> measurePos { 0 }, measureState { 0 };       // 0 idle, 1 running, 2 done
 
     // LTC, audio thread side, then published under a sequence counter
     LtcReader ltcReader;

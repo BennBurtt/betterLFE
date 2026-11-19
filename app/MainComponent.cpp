@@ -129,6 +129,16 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
     testView.onUseTestSource = [this] { useTestSource (true); };
     testView.onLoadRooms = [this] { proView.loadRooms (ProRooms::defaults()); };
 
+    // Stage: the room's subwoofer / screen alignment, with a microphone
+    addChildComponent (stageView);
+    stageButton.setClickingTogglesState (true);
+    stageButton.setTooltip (tr ("Your stage: a sweep on a screen speaker and on the subwoofer, a microphone at the mixing seat; "
+                                "how they add up around the crossover, and the delay and polarity that would make it right."));
+    stageButton.onClick = [this] { showMode (stageButton.getToggleState() ? 5 : 0); };
+    addAndMakeVisible (stageButton);
+    stageView.onMeasure = [this] (const StageView::Choice& c) { startStageMeasurement (c); };
+    stageView.onStop = [this] { endStageMeasurement (tr ("Stopped.")); };
+
     // Log: what was seen, stamped with the timeline's timecode
     addChildComponent (logView);
     logButton.setClickingTogglesState (true);
@@ -867,6 +877,8 @@ void MainComponent::resized()
     testButton.setBounds (bar.removeFromLeft (70));
     bar.removeFromLeft (6);
     logButton.setBounds (bar.removeFromLeft (60));
+    bar.removeFromLeft (6);
+    stageButton.setBounds (bar.removeFromLeft (70));
 
     history.setBounds (area.removeFromBottom (48));
     roomView.setBounds (area);
@@ -877,7 +889,9 @@ void MainComponent::resized()
     testView.setVisible (testMode);
     logView.setBounds (area);
     logView.setVisible (logMode);
-    const bool analyzer = ! roomMode && ! proMode && ! testMode && ! logMode;
+    stageView.setBounds (area);
+    stageView.setVisible (stageMode);
+    const bool analyzer = ! roomMode && ! proMode && ! testMode && ! logMode && ! stageMode;
     spectrum.setVisible (analyzer);
     transientStrip.setVisible (analyzer);
     correlation.setVisible (analyzer);
@@ -984,7 +998,12 @@ void MainComponent::showMode (int mode)
     proMode = mode == 2;
     testMode = mode == 3;
     logMode = mode == 4;
+    stageMode = mode == 5;
     logButton.setToggleState (logMode, juce::dontSendNotification);
+    stageButton.setToggleState (stageMode, juce::dontSendNotification);
+
+    if (stageMode)
+        refreshStageDevices();
     roomButton.setToggleState (roomMode, juce::dontSendNotification);
     proButton.setToggleState (proMode, juce::dontSendNotification);
     testButton.setToggleState (testMode, juce::dontSendNotification);
@@ -993,6 +1012,150 @@ void MainComponent::showMode (int mode)
         proView.grabKeyboardFocus();
 
     resized();
+}
+
+void MainComponent::refreshStageDevices()
+{
+    juce::StringArray outputs;
+
+    if (auto* type = deviceManager.getCurrentDeviceTypeObject())
+        outputs = type->getDeviceNames (false);
+
+    auto* device = deviceManager.getCurrentAudioDevice();
+    const auto setup = deviceManager.getAudioDeviceSetup();
+    stageView.setDevices (outputs, setup.outputDeviceName.isNotEmpty() ? setup.outputDeviceName : setup.inputDeviceName,
+                          device != nullptr ? device->getOutputChannelNames().size() : 0,
+                          device != nullptr ? device->getInputChannelNames().size() : 0);
+}
+
+void MainComponent::startStageMeasurement (const StageView::Choice& c)
+{
+    if (stageRun != nullptr)
+        return;
+
+    if (analysis.isTestSource() || deviceManager.getCurrentAudioDevice() == nullptr)
+    {
+        stageView.setStatus (tr ("Choose your audio interface as the input device (Source) first."), false);
+        return;
+    }
+
+    if (c.screenOutput < 0 || c.subOutput < 0 || c.micInput < 0 || c.screenOutput == c.subOutput)
+    {
+        stageView.setStatus (tr ("Choose two different outputs and the microphone's input."), false);
+        return;
+    }
+
+    // The device opened with its outputs as well, for the time of the measurement
+    auto run = std::make_unique<StageRun>();
+    run->choice = c;
+    auto setup = deviceManager.getAudioDeviceSetup();
+    run->inputDevice = setup.inputDeviceName;
+    setup.outputDeviceName = c.outputDevice.isNotEmpty() ? c.outputDevice : setup.inputDeviceName;
+    setup.useDefaultOutputChannels = false;
+    setup.outputChannels.clear();
+    setup.outputChannels.setRange (0, juce::jmax (c.screenOutput, c.subOutput) + 1, true);
+    setup.useDefaultInputChannels = false;
+    setup.inputChannels.clear();
+    setup.inputChannels.setRange (0, juce::jmax (channelsNeeded(), c.micInput + 1), true);
+    const auto error = deviceManager.setAudioDeviceSetup (setup, true);
+
+    if (error.isNotEmpty())
+    {
+        stageView.setStatus (tr ("Could not open the outputs: ") + error, false);
+        selectDevice (run->inputDevice);
+        return;
+    }
+
+    run->sweep.sampleRate = input.sampleRate();
+    run->sweep.levelDbfs = c.levelDbfs;
+    run->signal = StageAlignment::makeSweep (run->sweep);
+    run->step = 1;
+    run->wait = 0.7;
+    stageRun = std::move (run);
+    stageView.setResult ({});
+    stageView.setStatus (tr ("Getting ready..."), true);
+}
+
+void MainComponent::stageTick (double dt)
+{
+    if (stageRun == nullptr)
+        return;
+
+    auto& r = *stageRun;
+    r.wait -= dt;
+    const auto recordFrames = (int) r.signal.size() + (int) (r.sweep.tailSeconds * r.sweep.sampleRate);
+
+    if (r.wait > 0.0)
+        return;
+
+    switch (r.step)
+    {
+        case 1:
+        case 3:
+            if (input.startMeasurement (r.signal, recordFrames, r.step == 1 ? r.choice.screenOutput : r.choice.subOutput, r.choice.micInput))
+                ++r.step;
+            break;
+
+        case 2:
+        case 4:
+        {
+            const bool screen = r.step == 2;
+            stageView.setStatus ((screen ? tr ("Sweep on the screen speaker: ") : tr ("Sweep on the subwoofer: "))
+                                     + juce::String (juce::roundToInt (100.0 * input.measurementProgress())) + " %", true);
+
+            if (! input.measurementDone())
+                break;
+
+            (screen ? r.screen : r.sub) = input.takeRecording();
+            r.wait = 0.7;
+            ++r.step;
+
+            if (! screen)
+            {
+                // Both recorded: back to listening, then the analysis on its own thread
+                const auto signal = r.signal;
+                const auto screenRec = r.screen, subRec = r.sub;
+                const double rate = r.sweep.sampleRate;
+                juce::Component::SafePointer<MainComponent> safe (this);
+                stageView.setStatus (tr ("Working it out..."), true);
+                selectDevice (r.inputDevice);
+
+                juce::Thread::launch ([safe, signal, screenRec, subRec, rate]
+                {
+                    const auto result = StageAlignment::analyse (StageAlignment::impulseResponse (signal, screenRec),
+                                                                 StageAlignment::impulseResponse (signal, subRec), rate);
+
+                    juce::MessageManager::callAsync ([safe, result]
+                    {
+                        if (safe == nullptr)
+                            return;
+
+                        safe->stageView.setResult (result);
+                        safe->stageRun.reset();
+                        safe->stageView.setStatus (result.valid ? tr ("Measured.") : tr ("Nothing usable was recorded: check the microphone input and the level."), false);
+                    });
+                });
+            }
+            break;
+        }
+
+        default:
+            break;
+    }
+}
+
+void MainComponent::endStageMeasurement (const juce::String& text)
+{
+    if (stageRun == nullptr)
+        return;
+
+    input.cancelMeasurement();
+
+    if (stageRun->step < 5)
+        selectDevice (stageRun->inputDevice);
+
+    stageRun.reset();
+    stageView.setStatus (text, false);
 }
 
 FrameRate MainComponent::logRate() const
@@ -1343,6 +1506,8 @@ void MainComponent::timerCallback()
 
     if (testMode)
         testView.setState (analysis.isTestSource(), analysis.playingTest(), analysis.testSeconds());
+
+    stageTick (dt);
 
     // Offline analysis: progress, then the report
     if (offlineJob != nullptr)

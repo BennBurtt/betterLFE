@@ -10,6 +10,7 @@
 #include "RoomProView.h"
 #include "TestView.h"
 #include "LogView.h"
+#include "StageView.h"
 #include "OfflineJob.h"
 #include "../core/EventLog.h"
 #include "../core/Inertia.h"
@@ -161,7 +162,28 @@ private:
     LogView logView;
     juce::TextButton logButton { tr ("Log") };
     bool logMode = false;
-    void showMode (int mode);       // 0 the analyzer, 1 Room Sim, 2 Room Sim Pro, 3 Test, 4 Log
+    void showMode (int mode);       // 0 the analyzer, 1 Room Sim, 2 Room Sim Pro, 3 Test, 4 Log, 5 Stage
+
+    // Stage: the subwoofer / screen alignment of the room, measured with a microphone
+    StageView stageView;
+    juce::TextButton stageButton { tr ("Stage") };
+    bool stageMode = false;
+
+    struct StageRun
+    {
+        int step = 0;
+        double wait = 0.0;
+        StageView::Choice choice;
+        StageAlignment::Sweep sweep;
+        std::vector<float> signal, screen, sub;
+        juce::String inputDevice;
+    };
+
+    std::unique_ptr<StageRun> stageRun;
+    void startStageMeasurement (const StageView::Choice&);
+    void stageTick (double dt);
+    void endStageMeasurement (const juce::String& status);
+    void refreshStageDevices();
 
     // Event log: stamped with LTC read on an input, or with a session clock
     EventLog eventLog;

@@ -3,6 +3,7 @@
 
 #include "DeliverableChecks.h"
 #include "EventLog.h"
+#include "StageAlignment.h"
 #include "OfflineAnalysis.h"
 #include "Timecode.h"
 #include "../core/AlertTracker.h"
@@ -3107,6 +3108,76 @@ void testDeliverables()
     check (std::abs (bad[2].at - 3602.0) < 0.01, "the clipping is placed in time", bad[2].at - 3600.0);
 }
 
+// Your stage: subwoofer and screen speaker measured with a sweep, their sum around the crossover
+void testStageAlignment()
+{
+    std::printf ("\nStage: subwoofer / screen alignment\n");
+    StageAlignment::Sweep sw;
+    sw.sampleRate = sampleRate;
+    const auto sweep = StageAlignment::makeSweep (sw);
+
+    // A biquad from the RBJ cookbook
+    struct Bq { double b0, b1, b2, a1, a2, z1 = 0, z2 = 0; double run (double x) { const double y = b0 * x + z1; z1 = b1 * x - a1 * y + z2; z2 = b2 * x - a2 * y; return y; } };
+    const auto make = [] (bool hp, double hz, double q)
+    {
+        const double w = 2.0 * pi * hz / sampleRate, c = std::cos (w), al = std::sin (w) / (2.0 * q), a0 = 1.0 + al;
+        Bq b { hp ? (1 + c) / 2 / a0 : (1 - c) / 2 / a0, hp ? -(1 + c) / a0 : (1 - c) / a0, hp ? (1 + c) / 2 / a0 : (1 - c) / 2 / a0, -2 * c / a0, (1 - al) / a0 };
+        return b;
+    };
+
+    // What the microphone hears: 7 ms of system latency for both; the screen 10 ms away, rolling off under 50 Hz;
+    // the subwoofer 14 ms away, 4th-order low-pass at 90 Hz, wired inverted, with a reflection 6 ms later
+    const auto record = [&] (bool subwoofer, double extraSubMs, bool invert)
+    {
+        const size_t total = sweep.size() + (size_t) (sw.tailSeconds * sampleRate);
+        std::vector<float> out (total, 0.0f);
+        std::vector<Bq> chain = subwoofer ? std::vector<Bq> { make (false, 90.0, 0.5412), make (false, 90.0, 1.3066) } : std::vector<Bq> { make (true, 50.0, 0.7071) };
+        const double delayMs = 7.0 + (subwoofer ? 14.0 + extraSubMs : 10.0);
+        const auto delay = (size_t) (delayMs * 0.001 * sampleRate), echo = (size_t) (0.006 * sampleRate);
+        std::mt19937 rng (5);
+        std::normal_distribution<double> hiss (0.0, 0.0005);
+
+        for (size_t i = 0; i < total; ++i)
+        {
+            double x = i < sweep.size() ? sweep[i] : 0.0;
+
+            for (auto& b : chain)
+                x = b.run (x);
+
+            x *= subwoofer && invert ? -1.0 : 1.0;
+
+            if (i + delay < total)
+                out[i + delay] += (float) x;
+
+            if (subwoofer && i + delay + echo < total)
+                out[i + delay + echo] += (float) (0.4 * x);
+
+            out[i] += (float) hiss (rng);
+        }
+
+        return out;
+    };
+
+    const auto screenIr = StageAlignment::impulseResponse (sweep, record (false, 0.0, false));
+    const auto subIr = StageAlignment::impulseResponse (sweep, record (true, 0.0, true));
+    const auto r = StageAlignment::analyse (screenIr, subIr, sampleRate);
+    std::printf ("  arrivals: screen %.1f ms, subwoofer %.1f ms; crossover %.0f Hz; sum there %.1f dB as it is (inverted would be better: %s), "
+                 "best %.1f dB with the subwoofer %s and %+.2f ms\n",
+                 r.screenArrivalMs, r.subArrivalMs, r.crossoverHz, r.sumNowDb, r.nowInverted ? "yes" : "no", r.sumBestDb,
+                 r.bestInverted ? "inverted" : "in polarity", r.bestDelayMs);
+    check (r.valid && std::abs (r.screenArrivalMs - 17.0) < 1.5 && r.subArrivalMs > r.screenArrivalMs + 2.0,
+           "the sweep gives each speaker's response and its arrival", r.screenArrivalMs);
+    check (r.crossoverHz > 45.0 && r.crossoverHz < 120.0 && r.nowInverted && r.sumBestDb > r.sumNowDb + 3.0 && r.sumBestDb > -1.5,
+           "the wrong polarity is seen, and a delay and polarity that make the sum whole are found", r.sumBestDb);
+
+    // Put right as advised (relative to the subwoofer as it was: inverted), measured again: nothing left to gain
+    const auto fixedIr = StageAlignment::impulseResponse (sweep, record (true, r.bestDelayMs, ! r.bestInverted));
+    const auto again = StageAlignment::analyse (screenIr, fixedIr, sampleRate);
+    std::printf ("  set as advised: sum %.1f dB, best %.1f dB at %+.2f ms\n", again.sumNowDb, again.sumBestDb, again.bestDelayMs);
+    check (again.sumNowDb > again.sumBestDb - 0.3 && ! again.bestInverted && std::abs (again.bestDelayMs) < 0.5,
+           "once set as advised, the measurement finds nothing more to change", again.bestDelayMs);
+}
+
 int main()
 {
     testFilterDesign();
@@ -3129,6 +3200,7 @@ int main()
     testSurrounds();
     testSmallSystems();
     testDeliverables();
+    testStageAlignment();
 
     std::printf ("\n%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;

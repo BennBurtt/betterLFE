@@ -1510,6 +1510,57 @@ fichier avec ses défauts les fait tous ressortir (true peak, crête du LFE,
 décalé de 45° et de crête 0,95 (−0,45 dB), a ses échantillons à 0,71 de sa
 crête : la crête échantillon lit −3,46 dBFS, le true peak −0,51 dBTP.
 
+## 7. Ta régie : sub et écran au micro (onglet Régie)
+
+Le reste de SubGUARD juge le mix. Cet onglet vérifie la salle où il est
+fait : comment le sub et une enceinte écran s'additionnent à la place de
+mixage.
+
+**Mesure.** On choisit deux sorties : l'enceinte écran, C, et le sub, par
+le chemin du LFE, tels qu'ils sont réglés, processeur compris. On choisit
+aussi l'entrée d'un micro de mesure posé à la place de mixage. Chaque sortie
+joue un **balayage sinusoïdal exponentiel** de 15 à 600 Hz, 6 s, au niveau
+choisi (Farina [52]). Le micro est enregistré dans le même callback audio que
+la lecture : les deux sont calés à l'échantillon près, et la latence du
+système est la même pour les deux mesures. Le périphérique est ouvert avec
+ses sorties le temps de la mesure, puis rendu tel qu'il était.
+
+**Réponses.** L'enregistrement est divisé par le balayage en fréquence
+(Y·X* / (|X|² + ε), ε = 10⁻⁴ du maximum) : c'est la réponse impulsionnelle de
+la sortie au micro. Les deux réponses sont fenêtrées sur le **même**
+intervalle, de 20 ms avant la première arrivée à 500 ms, avec un fondu sur le
+dernier quart. Leur décalage reste donc tel qu'il est, salle comprise. On en
+tire leurs fonctions de transfert de 20 à 200 Hz, au 1/24 d'octave.
+
+**Ce qui est lu.**
+
+- **La coupure** : là où l'écran et le sub ont le même niveau (lissé au
+  tiers d'octave), entre 40 et 160 Hz.
+- **La somme actuelle**, sur une octave de part et d'autre :
+  Σ|H_écran + H_sub|² face à la somme parfaitement en phase
+  Σ(|H_écran| + |H_sub|)², en dB.
+- **Le meilleur réglage du sub** : le délai, de −15 à +15 ms par pas de
+  0,05 ms, et la polarité qui rendent la somme la plus forte. À égalité, on
+  garde le plus petit changement. Le conseil est donné face au système tel
+  qu'il est : « garder la polarité » garde celle qu'il a.
+- **Les arrivées** (première montée à la moitié de la crête de chaque
+  réponse), pour information. Le sub arrive toujours plus tard que ce que dit
+  sa distance, à cause de son filtre.
+
+Le conseil se lit en ms et en m (343 m/s). Un délai négatif veut dire avancer
+le sub, ou retarder l'écran d'autant. C'est une seule place : il faut en
+vérifier quelques-unes.
+
+Vérifié sur une régie simulée : 7 ms de latence ; l'écran à 10 ms, passe-haut
+du 2ᵉ ordre à 50 Hz ; le sub à 14 ms, passe-bas du 4ᵉ ordre à 90 Hz, câblé
+inversé, avec une réflexion 6 ms plus tard ; un souffle de fond. Résultats :
+
+- arrivée de l'écran 16,5 ms (17 attendus) ;
+- coupure trouvée à 58 Hz ;
+- somme actuelle −3,6 dB, et le sub « s'additionnerait mieux inversé » ;
+- meilleur réglage : polarité gardée, −5,25 ms, somme −0,0 dB ;
+- réglé ainsi puis remesuré, plus rien à changer (0,00 ms, somme −0,0 dB).
+
 ## Ce qui est vérifié
 
 `tests/EngineTests.cpp` contrôle sur signaux synthétiques : niveaux, repliement,
@@ -1702,6 +1753,9 @@ du son) : bruit blanc ou rose, aucune ; grondement grave (sous 90 Hz), 1 à 3.
     true-peak audio level*, annexe 2 (true peak par suréchantillonnage 4×).
 51. EBU R 128, *Loudness normalisation and permitted maximum level of audio
     signals* (crête vraie maximale −1 dBTP).
+52. A. Farina, « Simultaneous measurement of impulse response and distortion
+    with a swept-sine technique », AES 108th Convention, Paris, 2000,
+    paper 5093.
 
 
 ## Niveau du LFE et réglages
