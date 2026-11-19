@@ -45,12 +45,13 @@
 //                   bass-managed systems. The worst case, not an average: a
 //                   mix that cancels on one plausible system is not made safe
 //                   by the systems where it survives.
-//     dependence  = 0.83 x the penalty of the stereo downmix without LFE, i.e.
+//     dependence  = 1.0 x the penalty of the stereo downmix without LFE, i.e.
 //                   of what the bass loses wherever the LFE is missing or
 //                   wrongly set. Infra-bass is left out of it: below 25 Hz
 //                   it counts for a quarter, from 60 Hz up it counts fully.
 //
-//     robustness = 100 . (1 - interaction) . (1 - dependence) . (1 - 0.15 level dependence)
+//     robustness = 100 . (1 - interaction) . (1 - dependence) . (1 - 0.20 level dependence)
+//     (the weights are the Tuning defaults below, adjustable in the Dev panel)
 //
 //   Anchors: screen alone 100; LFE identical to the screen 0 (an inverted
 //   subwoofer cancels it); LFE alone about 22 (the room alone decides the

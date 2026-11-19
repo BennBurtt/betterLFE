@@ -166,7 +166,7 @@ private:
                 rangeLabel { {}, tr ("Level range:") }, statusLabel;
     juce::ComboBox formatBox, deviceBox, fpsBox, windowBox, rangeBox, alertModeBox;
     std::array<juce::TextButton, 3> levelButtons;       // Soft, Medium, Strong
-    juce::ToggleButton lfeGainToggle { tr ("LFE +10 dB (theatre level)") }, animationToggle { tr ("Background animation") },
+    juce::ToggleButton lfeGainToggle { tr ("LFE +10 dB (theatre level)") },
                        peakHoldToggle { tr ("Peak hold") }, tiltToggle { tr ("Bass tilt (old display)") },
                        levelWeightToggle { tr ("Weigh by level balance") };
     LabelledSlider inertia { tr ("Inertia:"), 0, 100, 1, 50 }, integration { tr ("Integration:"), 0.5, 5.0, 0.1, 2.0 },

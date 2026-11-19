@@ -252,8 +252,7 @@ void MainComponent::buildCards()
     lfeGainToggle.setTooltip (tr ("On: the LFE counts 10 dB louder than a screen channel, as a cinema plays it. Off: as recorded.\n"
                               "It applies everywhere: spectrum, alerts, playback chains and score."));
     lfeGainToggle.setToggleState (true, juce::dontSendNotification);
-    animationToggle.setToggleState (true, juce::dontSendNotification);
-    animationToggle.onClick = [this] { header.setAnimationEnabled (animationToggle.getToggleState()); };
+    header.setAnimationEnabled (false);       // a still picture: nothing moves in the corner of the eye
 
     inertia.format = [] (double v) { return juce::String ((int) v) + "%"; };
     integration.format = [] (double v) { return juce::String (v, 1) + " s"; };
@@ -397,7 +396,7 @@ void MainComponent::buildCards()
               });
 
     populate (spectrumCard, 330, 352, { &rangeLabel, &rangeBox, &peakHoldToggle, &tiltToggle, &inertia, &integration,
-                                        &fpsLabel, &fpsBox, &windowLabel, &windowBox, &animationToggle },
+                                        &fpsLabel, &fpsBox, &windowLabel, &windowBox },
               [this] (juce::Rectangle<int> r)
               {
                   rangeLabel.setBounds (r.removeFromTop (20));
@@ -417,7 +416,6 @@ void MainComponent::buildCards()
                   windowLabel.setBounds (combos.removeFromTop (20));
                   windowBox.setBounds (combos);
                   r.removeFromTop (8);
-                  animationToggle.setBounds (r.removeFromTop (26));
               });
 
     populate (alertCard, 320, 210, { &decay, &alertModeBox, &levelWeightToggle, &scoreSpeed },
@@ -988,18 +986,19 @@ double MainComponent::windowSeconds() const
 
 void MainComponent::setListeningLevel (double dbC)
 {
-    listeningDbC = juce::jlimit (70.0, 90.0, std::round (dbC));
+    listeningDbC = juce::jlimit (60.0, 100.0, std::round (dbC));
     listeningButton.setButtonText (tr ("Listening ") + juce::String ((int) listeningDbC) + " dB(C)");
     simulator.tuning.listeningLevelDbC = listeningDbC;
 }
 
 void MainComponent::showListeningMenu()
 {
-    // 76 to 85 dB(C), the levels of dubbing stages, stand out; the rest is dimmed
+    // 76 to 85 dB(C), the levels of dubbing stages, stand out; the rest is dimmed. From 60 (a shop) to 100
+    // (a loud venue); above 90 the ISO 226 contours are extrapolated (the standard stops at 90 phon)
     juce::PopupMenu menu;
     menu.addSectionHeader (tr ("Listening level: a screen channel at -20 dBFS RMS gives"));
 
-    for (int db = 90; db >= 70; --db)
+    for (int db : { 100, 95, 92, 91, 90, 89, 88, 87, 86, 85, 84, 83, 82, 81, 80, 79, 78, 77, 76, 75, 74, 73, 72, 71, 70, 68, 65, 62, 60 })
     {
         juce::PopupMenu::Item item (juce::String (db) + " dB(C)" + (db == 85 ? tr ("   cinema calibration") : ""));
         item.itemID = db;
@@ -1395,8 +1394,6 @@ void MainComponent::loadState()
 
         applyDevSettings();
     }
-    animationToggle.setToggleState (settings->getBoolValue ("animation", true), juce::dontSendNotification);
-    header.setAnimationEnabled (animationToggle.getToggleState());
     inertia.setValue (settings->getDoubleValue ("inertia", 50.0));
     integration.setValue (settings->getDoubleValue ("integration", 2.0));
     levelButtons[(size_t) juce::jlimit (0, 2, settings->getIntValue ("alertSensitivity", 3) - 1)].setToggleState (true, juce::dontSendNotification);
@@ -1459,7 +1456,6 @@ void MainComponent::saveState()
         for (auto* slider : devSliders())
             settings->setValue (keys[index++], slider->value());
     }
-    settings->setValue ("animation", animationToggle.getToggleState());
     settings->setValue ("inertia", inertia.value());
     settings->setValue ("integration", integration.value());
     settings->setValue ("alertSensitivity", (int) currentLevel() + 1);

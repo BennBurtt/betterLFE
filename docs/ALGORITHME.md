@@ -264,8 +264,10 @@ de 6 dB, c'est grave ».
 
 **Niveau d'écoute.** La conversion n'est plus figée à 80 phones : elle suit le
 niveau réel du grave et le niveau d'écoute choisi (bouton « Listening » à
-gauche de Reset, toujours affiché : 70 à 90 dB(C) ; 76 à 85, en clair, sont les
-niveaux des auditoriums de mixage).
+gauche de Reset, toujours affiché : 60 à 100 dB(C) ; 76 à 85, en clair, sont les
+niveaux des auditoriums de mixage ; 60 à 70 pour une boutique, 90 à 100 pour un
+lieu très fort. Au-dessus de 90 dB(C), les courbes d'ISO 226 sont extrapolées :
+la norme s'arrête à 90 phones).
 
 1. Le niveau d'écoute est le niveau de pression qu'un canal d'écran produit
    avec le signal de calibrage à −20 dBFS RMS : 85 dB(C) en salle [9].
