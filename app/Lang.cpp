@@ -347,6 +347,26 @@ namespace
             { "Heads: the interference against the approved mix", "Têtes : l'interférence face au mix validé" },
             { "Coverage", "Répartition" }, { "Interference", "Interférences" }, { "interference ", "interférence " },
             { "Who gets bass, how much", "Qui a du grave, et combien" }, { "Why", "Pourquoi" },
+            // Test tab
+            { "Test", "Test" }, { "Test signals", "Signaux de test" }, { "SubGUARD test signals", "Signaux de test SubGUARD" },
+            { "The built-in test signals: choose \"SubGUARD test signals\" as the input device, then click a signal.",
+              "Les signaux de test intégrés : choisir « Signaux de test SubGUARD » comme périphérique d'entrée, puis cliquer un signal." },
+            { "Use the test signals as input", "Utiliser les signaux de test comme entrée" },
+            { "Same as choosing \"SubGUARD test signals\" as the input device in Source.",
+              "Comme choisir « Signaux de test SubGUARD » comme périphérique d'entrée dans Source." },
+            { "Stop", "Arrêter" }, { "Load the rooms of the measurements", "Charger les salles des mesures" },
+            { "Room Sim Pro: the three rooms the Room Sim Pro signals were measured in (small screening room, "
+              "multiplex 200 seats, premium large format). Undo with Option-Z.",
+              "Room Sim Pro : les trois salles où les signaux Room Sim Pro ont été mesurés (petite salle de projection, "
+              "multiplexe 200 places, grand format premium). Annuler avec Option-Z." },
+            { "Input: the test signals. Click a signal to play it; it loops. Level Strong, LFE +10 dB checked, as measured.",
+              "Entrée : les signaux de test. Cliquer un signal pour le jouer, en boucle. Niveau Strong, LFE +10 dB coché, comme pour les mesures." },
+            { "To hear them: Source > input device > \"SubGUARD test signals\" (or the button below).",
+              "Pour les écouter : Source > périphérique d'entrée > « Signaux de test SubGUARD » (ou le bouton ci-dessous)." },
+            { "The analysis: score, alerts, transients", "L'analyse : score, alertes, transitoires" },
+            { "Room Sim Pro: one thing at a time (open the Room Sim Pro tab while it plays)",
+              "Room Sim Pro : une chose à la fois (ouvrir l'onglet Room Sim Pro pendant la lecture)" },
+            { "Built-in test signals, 48 kHz (Test tab)", "Signaux de test intégrés, 48 kHz (onglet Test)" },
             // Menus
             { "File", "Fichier" }, { "Edit", "Édition" }, { "Save the rooms...", "Enregistrer les salles…" },
             { "Load rooms...", "Charger des salles…" }, { "Undo", "Annuler" }, { "Redo", "Rétablir" },

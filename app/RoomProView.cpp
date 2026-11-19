@@ -1811,6 +1811,13 @@ void RoomProView::setRooms (const ProRooms& rooms)
     changedAt = 0.0;
 }
 
+void RoomProView::loadRooms (const ProRooms& rooms)
+{
+    rememberForUndo();
+    setRooms (rooms);
+    configChanged();
+}
+
 void RoomProView::selectRoom (int index)
 {
     selected = juce::jlimit (0, ProRooms::count - 1, index);

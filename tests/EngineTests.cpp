@@ -8,11 +8,13 @@
 #include "../core/PlaybackSim.h"
 #include "../core/RoomSim.h"
 #include "../core/RoomPro.h"
+#include "../core/TestSignals.h"
 #include <chrono>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <set>
 #include <functional>
 #include <random>
 #include <string>
@@ -2608,6 +2610,42 @@ static void testRoomPro()
     }
 }
 
+static void testSignals()
+{
+    std::printf ("built-in test signals\n");
+    const auto& scenes = TestSignals::all();
+    std::set<std::string> names;
+    int translated = 0, pro = 0;
+
+    for (const auto& scene : scenes)
+    {
+        names.insert (scene.file);
+        translated += ! scene.titleFr.empty() && ! scene.lookForFr.empty() ? 1 : 0;
+        pro += scene.roomSimPro ? 1 : 0;
+    }
+
+    check (scenes.size() == 36 && names.size() == scenes.size() && pro == 14 && translated == 36,
+           "36 test signals (14 for Room Sim Pro), each named once, each with its French text", (double) translated);
+
+    // The same signal twice: the same samples (a file and the app's built-in signal are the same sound)
+    double worst = 0.0, energy = 0.0;
+
+    for (const auto& scene : scenes)
+    {
+        auto a = scene.make(), b = scene.make();
+
+        for (int i = 0; i < 4800; ++i)
+        {
+            const double t = 0.5 + i / (double) TestSignals::sampleRate;
+            const auto x = a (t), y = b (t);
+            worst = std::max ({ worst, std::abs (x.l - y.l), std::abs (x.c - y.c), std::abs (x.r - y.r), std::abs (x.lfe - y.lfe) });
+            energy += x.l * x.l + x.c * x.c + x.r * x.r + x.lfe * x.lfe;
+        }
+    }
+
+    check (worst < 1e-12 && energy > 0.0, "each test signal is the same every time it starts", worst);
+}
+
 int main()
 {
     testFilterDesign();
@@ -2622,6 +2660,7 @@ int main()
     testRunner();
     testRooms();
     testRoomPro();
+    testSignals();
     testPlaybackChains();
     testInertiaAndAutoReset();
 

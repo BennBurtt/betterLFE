@@ -8,6 +8,7 @@
 #include "ChannelFormats.h"
 #include "Widgets.h"
 #include "RoomProView.h"
+#include "TestView.h"
 #include "../core/Inertia.h"
 
 namespace subguard
@@ -100,6 +101,10 @@ private:
     void selectDevice (const juce::String& name);
     void refreshDeviceList();
     void updateStatus (const juce::String& error = {});
+
+    /** The built-in test signals as the input (the "SubGUARD test signals" device), or back to the audio devices. */
+    void useTestSource (bool on);
+    static constexpr int testDeviceId = 10000;      // its entry in the input device list
     double windowSeconds() const;
     void loadState();
     void saveState();
@@ -139,6 +144,10 @@ private:
     RoomProView proView;
     juce::TextButton proButton { tr ("Room Sim Pro") };
     bool proMode = false;
+    TestView testView;
+    juce::TextButton testButton { tr ("Test") };
+    bool testMode = false;
+    void showMode (int mode);       // 0 the analyzer, 1 Room Sim, 2 Room Sim Pro, 3 Test
 
     // Rooms that count in the score: ticked in Playback chains or in Room Sim
     std::vector<bool> roomSelected = RoomSimulator::defaultSelection();

@@ -244,6 +244,9 @@ public:
     ~RoomProView() override;
 
     void setRooms (const ProRooms&);
+
+    /** Replaces the three rooms as a change of the user's (undo brings them back). */
+    void loadRooms (const ProRooms&);
     const ProRooms& getRooms() const            { return config; }
     std::function<void()> onConfigChanged;      // to save it
 

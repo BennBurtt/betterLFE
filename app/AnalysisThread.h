@@ -6,11 +6,13 @@
 #pragma once
 
 #include "../core/AnalysisRunner.h"
+#include "../core/TestSignals.h"
 #include "AudioInput.h"
 
 #include <juce_core/juce_core.h>
 
 #include <atomic>
+#include <functional>
 #include <cmath>
 #include <memory>
 #include <mutex>
@@ -87,6 +89,15 @@ public:
             r->requestReset();
     }
 
+    /** The built-in test signals in place of the audio input (the "SubGUARD test signals" device). */
+    void setTestSource (bool on)    { testSource = on; }
+    bool isTestSource() const       { return testSource.load(); }
+
+    /** Which test signal plays (index into TestSignals::all()), -1 for none. Each one loops, from a clean analysis. */
+    void playTest (int index)       { testWanted = index; }
+    int playingTest() const         { return testPlaying.load(); }
+    double testSeconds() const      { return testClock.load(); }       // into the current pass
+
 private:
     void build (double sampleRate)
     {
@@ -113,6 +124,32 @@ private:
             const double elapsed = juce::jlimit (0.0, 0.25, now - last);
             last = now;
             auto r = runner();
+
+            // Built-in test signals: made at 48 kHz at the pace of the clock, the device ignored
+            if (testSource.load())
+            {
+                if (std::abs (r->sampleRate() - TestSignals::sampleRate) > 0.5 || rebuildWanted)
+                {
+                    build (TestSignals::sampleRate);
+                    r = runner();
+                }
+
+                while (input.read (buffer.data(), blockFrames) > 0) {}
+
+                owed += elapsed * TestSignals::sampleRate;
+                auto due = (int) owed;
+                owed -= due;
+
+                while (due > 0)
+                {
+                    const int n = juce::jmin (due, blockFrames);
+                    makeTest (buffer.data(), n, *r);
+                    r->feed (buffer.data(), n);
+                    due -= n;
+                }
+
+                continue;
+            }
 
             if (! demoMode && input.isRunning())
             {
@@ -204,6 +241,47 @@ private:
         demoTime += numFrames / rate;
     }
 
+    void makeTest (float* out, int numFrames, AnalysisRunner& r)
+    {
+        const auto& scenes = TestSignals::all();
+        const int wanted = testWanted.load();
+
+        // Another signal: a fresh generator and a clean analysis
+        if (wanted != testPlaying.load())
+        {
+            testPlaying = wanted;
+            generator = wanted >= 0 && wanted < (int) scenes.size() ? scenes[(size_t) wanted].make() : nullptr;
+            testTime = 0.0;
+            r.requestReset();
+        }
+
+        std::fill (out, out + (size_t) numFrames * AudioInput::frameSize, 0.0f);
+
+        if (generator == nullptr)
+            return;
+
+        const double length = scenes[(size_t) testPlaying.load()].seconds;
+
+        for (int i = 0; i < numFrames; ++i, out += AudioInput::frameSize)
+        {
+            // Looped: at the end of a pass, the same signal from its start
+            if (testTime >= length)
+            {
+                generator = scenes[(size_t) testPlaying.load()].make();
+                testTime = 0.0;
+            }
+
+            const auto f = generator (testTime);
+            out[chL] = (float) f.l;
+            out[chC] = (float) f.c;
+            out[chR] = (float) f.r;
+            out[chLFE] = (float) f.lfe;
+            testTime += 1.0 / TestSignals::sampleRate;
+        }
+
+        testClock = testTime;
+    }
+
     static constexpr int blockFrames = 4096;
 
     AudioInput& input;
@@ -220,6 +298,12 @@ private:
 
     std::vector<std::array<double, 3>> demoTones;
     double demoTime = 0.0;
+
+    std::atomic<bool> testSource { false };
+    std::atomic<int> testWanted { -1 }, testPlaying { -1 };
+    std::atomic<double> testClock { 0.0 };
+    std::function<TestFrame (double)> generator;      // the analysis thread's own
+    double testTime = 0.0;
 };
 
 } // namespace subguard

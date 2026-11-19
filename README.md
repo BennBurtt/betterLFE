@@ -35,6 +35,9 @@ Et 14 fichiers pour comprendre Room Sim Pro dans `test-files/room-sim-pro/`
 (une seule chose par fichier, mesurée dans les trois salles par défaut) : voir
 [`docs/FICHIERS_TEST_ROOM_SIM_PRO.md`](docs/FICHIERS_TEST_ROOM_SIM_PRO.md).
 
+Les 36 signaux sont aussi **dans l'app** : onglet **Test**, après avoir choisi
+« Signaux de test SubGUARD » comme périphérique d'entrée dans la carte Source.
+
 ## Organisation
 
 | Dossier | Contenu |

@@ -1,21 +1,27 @@
-# Fichiers de test Room Sim Pro
+# Signaux de test Room Sim Pro
 
-Quatorze fichiers. Chacun isole **une seule chose**, pour voir ce que font les
-deux lentilles de Room Sim Pro. `./build_mac.sh` les écrit dans
-`test-files/room-sim-pro/`, avec un `README.txt` (mesures des trois salles) et
-`default_rooms.subguardrooms`.
+Quatorze signaux. Chacun isole **une seule chose**, pour voir ce que font les
+deux lentilles de Room Sim Pro. Ils sont **dans l'app** : rien à télécharger.
 
 ## Mise en route
 
-1. Dans SubGUARD, format **5.1 ITU**, niveau **Strong**, case **LFE +10 dB**
-   cochée.
-2. Onglet Room Sim Pro : **Fichier > Charger des salles…** et choisir
-   `default_rooms.subguardrooms`. Ce sont les trois salles mesurées
-   ci-dessous : petite salle de projection, multiplexe 200 places, grand
-   format premium.
-3. Sélectionner la **salle 2 (multiplexe 200 places)** : les chiffres ci-dessous
-   sont les siens.
-4. Lire chaque fichier en boucle.
+1. Carte **Source**, menu **périphérique d'entrée** : choisir **« Signaux de
+   test SubGUARD »** (tout en bas de la liste). L'app joue alors ses propres
+   signaux à la place d'une entrée audio, à 48 kHz. Pour revenir à ta carte
+   son, la choisir dans la même liste.
+2. Niveau **Strong**, case **LFE +10 dB** cochée (les mesures ci-dessous sont
+   faites ainsi).
+3. Onglet **Test** : bouton **« Charger les salles des mesures »**. Ce sont
+   les trois salles mesurées ci-dessous : petite salle de projection,
+   multiplexe 200 places, grand format premium (Option-Z pour revenir aux
+   tiennes).
+4. Cliquer un signal dans l'onglet Test : il joue en boucle. Ouvrir l'onglet
+   **Room Sim Pro**, salle 2 (multiplexe 200 places) : les chiffres
+   ci-dessous sont les siens.
+
+Les mêmes signaux existent en fichiers WAV : `./build_mac.sh` les écrit dans
+`test-files/room-sim-pro/`, avec `README.txt` (mesures des trois salles) et
+`default_rooms.subguardrooms` (Fichier > Charger des salles…).
 
 ## Les deux lentilles en deux phrases
 
@@ -29,12 +35,12 @@ deux lentilles de Room Sim Pro. `./build_mac.sh` les écrit dans
   enceintes (lieu). **Mix** : l'interférence entre le LFE et les LCR (mix).
   Gris : rien ; bleu : la cause retire du grave ; rouge : elle en ajoute.
 
-## Les fichiers
+## Les signaux
 
-Mesuré dans la salle 2, en fin de fichier, par le moteur lui-même. « Têtes »
+Mesuré dans la salle 2, après un passage complet, par le moteur lui-même. « Têtes »
 donne la plage des places ; les causes donnent la plage des places en dB.
 
-| Fichier | Contenu | Où regarder, ce qu'il faut voir | Mesuré (salle 2) |
+| Signal | Contenu | Où regarder, ce qu'il faut voir | Mesuré (salle 2) |
 |---|---|---|---|
 | `P01_bass_L_only` | Du grave dans L seulement | **Lentille 1, LCR** : les têtes près de L sont les plus fortes. **LFE** : gris foncé, rien. **Lentille 2, Mix** : gris (pas de LFE, donc pas d'interférence LFE / LCR). **Enceintes** : gris (une seule enceinte). **Salle** : bleu et rouge, la salle seule | mix 51 phones ; têtes 38 à 59. Salle −6,0 à +5,3 dB ; enceintes 0 ; mix 0. Notes : répartition 48, placement 100, mix 100 |
 | `P02_bass_C_only` | Du grave dans C seulement | Comme P01, autour de C | mix 49 ; têtes 35 à 55. Salle −5,4 à +4,5 ; enceintes 0 ; mix 0 |
@@ -51,7 +57,7 @@ donne la plage des places ; les causes donnent la plage des places en dB.
 | `P13_low_only` | Du grave dans C, de 60 à 120 Hz | **Vue en couches** : seule la couche du haut (grave) bouge | couches du mix : très grave 3 phones, grave 49 |
 | `P14_infra_only` | Une sinusoïde à 12 Hz dans le LFE, rien d'autre | **Vue en couches** : seule la couche du bas (infra) bouge, en dB au-dessus du seuil (pas de phones sous 20 Hz). Les têtes restent gris foncé : rien n'est entendu de 20 à 120 Hz | infra du mix 6 dB au-dessus du seuil ; rien de 20 à 120 Hz |
 
-## Ce que ces fichiers apprennent
+## Ce que ces signaux apprennent
 
 - **Une enceinte seule** (P01 à P03) : la lentille 2 ne montre que la salle.
   Enceintes et mix restent gris : il n'y a rien avec quoi interférer.

@@ -90,40 +90,25 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
 
     roomButton.setClickingTogglesState (true);
     roomButton.setTooltip (tr ("Room Sim: the bass seat by seat in fifteen cinema rooms, from a live corridor room to a treated IMAX."));
-    roomButton.onClick = [this]
-    {
-        roomMode = roomButton.getToggleState();
-
-        if (roomMode)
-        {
-            proMode = false;
-            proButton.setToggleState (false, juce::dontSendNotification);
-        }
-
-        resized();
-    };
+    roomButton.onClick = [this] { showMode (roomButton.getToggleState() ? 1 : 0); };
     addAndMakeVisible (roomButton);
 
     addChildComponent (proView);
     proView.onConfigChanged = [this] { saveState(); };
     proButton.setClickingTogglesState (true);
     proButton.setTooltip (tr ("Room Sim Pro: three rooms of your own, every speaker placed freely, with fill speakers. Its own score, not part of the global one."));
-    proButton.onClick = [this]
-    {
-        proMode = proButton.getToggleState();
-
-        if (proMode)
-            proView.grabKeyboardFocus();
-
-        if (proMode)
-        {
-            roomMode = false;
-            roomButton.setToggleState (false, juce::dontSendNotification);
-        }
-
-        resized();
-    };
+    proButton.onClick = [this] { showMode (proButton.getToggleState() ? 2 : 0); };
     addAndMakeVisible (proButton);
+
+    // Test: the built-in test signals, played as an input
+    addChildComponent (testView);
+    testButton.setClickingTogglesState (true);
+    testButton.setTooltip (tr ("The built-in test signals: choose \"SubGUARD test signals\" as the input device, then click a signal."));
+    testButton.onClick = [this] { showMode (testButton.getToggleState() ? 3 : 0); };
+    addAndMakeVisible (testButton);
+    testView.onPlay = [this] (int index) { analysis.playTest (index); };
+    testView.onUseTestSource = [this] { useTestSource (true); };
+    testView.onLoadRooms = [this] { proView.loadRooms (ProRooms::defaults()); };
 
     languageFlag.setTooltip (currentLanguage() == Language::french ? tr ("Interface en français. Cliquer : English.")
                                                                    : tr ("Interface in English. Click: français."));
@@ -212,15 +197,24 @@ void MainComponent::buildCards()
     {
         applyFormat();
 
-        if (! restoring && ! options.demoSignal)
+        if (! restoring && ! options.demoSignal && ! analysis.isTestSource())
             selectDevice (deviceBox.getText());
     };
 
     deviceBox.setTextWhenNothingSelected (tr ("No input device"));
     deviceBox.onChange = [this]
     {
-        if (! restoring && deviceBox.getSelectedId() > 0)
-            selectDevice (deviceBox.getText());
+        if (restoring || deviceBox.getSelectedId() <= 0)
+            return;
+
+        if (deviceBox.getSelectedId() == testDeviceId)
+        {
+            useTestSource (true);
+            return;
+        }
+
+        useTestSource (false);
+        selectDevice (deviceBox.getText());
     };
 
     fpsBox.addItem (tr ("90 FPS"), 90);
@@ -779,15 +773,19 @@ void MainComponent::resized()
     roomButton.setBounds (bar.removeFromLeft (100));
     bar.removeFromLeft (6);
     proButton.setBounds (bar.removeFromLeft (120));
+    bar.removeFromLeft (6);
+    testButton.setBounds (bar.removeFromLeft (70));
 
     history.setBounds (area.removeFromBottom (48));
     roomView.setBounds (area);
     roomView.setVisible (roomMode);
     proView.setBounds (area);
     proView.setVisible (proMode);
-    spectrum.setVisible (! roomMode && ! proMode);
-    transientStrip.setVisible (! roomMode && ! proMode);
-    correlation.setVisible (! roomMode && ! proMode);
+    testView.setBounds (area);
+    testView.setVisible (testMode);
+    spectrum.setVisible (! roomMode && ! proMode && ! testMode);
+    transientStrip.setVisible (! roomMode && ! proMode && ! testMode);
+    correlation.setVisible (! roomMode && ! proMode && ! testMode);
     correlation.setBounds (area.removeFromBottom (juce::jmax (150, area.getHeight() * 2 / 7)));
     transientStrip.setBounds (area.removeFromBottom (68));
     spectrum.setBounds (area);
@@ -817,6 +815,13 @@ void MainComponent::openDevices()
     deviceManager.initialise (16, 0, saved.get(), true);
     refreshDeviceList();
 
+    // The test signals were the input last time: again
+    if (auto* settings = properties.getUserSettings(); settings != nullptr && settings->getBoolValue ("testSource", false))
+    {
+        useTestSource (true);
+        return;
+    }
+
     if (auto* device = deviceManager.getCurrentAudioDevice())
         selectDevice (device->getName());       // enables exactly the channels the format needs
     else
@@ -836,7 +841,9 @@ void MainComponent::refreshDeviceList()
     const auto current = deviceManager.getAudioDeviceSetup().inputDeviceName;
     deviceBox.clear (juce::dontSendNotification);
     deviceBox.addItemList (names, 1);
-    deviceBox.setSelectedId (names.indexOf (current) + 1, juce::dontSendNotification);
+    deviceBox.addSeparator();
+    deviceBox.addItem (tr ("SubGUARD test signals"), testDeviceId);      // built in: see the Test tab
+    deviceBox.setSelectedId (analysis.isTestSource() ? testDeviceId : names.indexOf (current) + 1, juce::dontSendNotification);
 }
 
 void MainComponent::selectDevice (const juce::String& name)
@@ -858,10 +865,49 @@ void MainComponent::selectDevice (const juce::String& name)
     updateStatus (deviceManager.setAudioDeviceSetup (setup, true));
 }
 
+void MainComponent::useTestSource (bool on)
+{
+    if (on == analysis.isTestSource())
+        return;
+
+    analysis.setTestSource (on);
+
+    if (on)
+        deviceManager.closeAudioDevice();       // the signals are made inside the app
+
+    if (auto* settings = properties.getUserSettings())
+        settings->setValue ("testSource", on);
+
+    refreshDeviceList();
+    updateStatus();
+}
+
+void MainComponent::showMode (int mode)
+{
+    roomMode = mode == 1;
+    proMode = mode == 2;
+    testMode = mode == 3;
+    roomButton.setToggleState (roomMode, juce::dontSendNotification);
+    proButton.setToggleState (proMode, juce::dontSendNotification);
+    testButton.setToggleState (testMode, juce::dontSendNotification);
+
+    if (proMode)
+        proView.grabKeyboardFocus();
+
+    resized();
+}
+
 void MainComponent::updateStatus (const juce::String& error)
 {
     juce::String text;
     auto colour = theme::text;
+
+    if (analysis.isTestSource() && error.isEmpty())
+    {
+        statusLabel.setText (tr ("Built-in test signals, 48 kHz (Test tab)"), juce::dontSendNotification);
+        statusLabel.setColour (juce::Label::textColourId, juce::Colour (0xff7ed957));
+        return;
+    }
 
     if (error.isNotEmpty())
     {
@@ -1020,6 +1066,9 @@ void MainComponent::timerCallback()
     const double nowSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
     const double dt = juce::jlimit (0.001, 0.25, nowSeconds - lastTick);
     lastTick = nowSeconds;
+
+    if (testMode)
+        testView.setState (analysis.isTestSource(), analysis.playingTest(), analysis.testSeconds());
 
     // Settings for the analysis thread: they apply from its next 20 ms step.
     // The spectrum is measured with a fixed 150 ms average; the Inertia
