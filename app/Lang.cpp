@@ -358,6 +358,7 @@ namespace
             { "Bass leans on the LFE: it carries ", "Le grave repose sur le LFE : il en porte " },
             { " of the bass; a fold-down without the LFE loses ", " ; un repli sans LFE perd " },
             { "LFE and screen interfere", "Le LFE et l'écran interfèrent" },
+            { "Surrounds and screen add up in the bass-managed subwoofer", "Surrounds et écran s'additionnent dans le sub en bass management" },
             { ": worst on ", " : pire sur " },
             { "A subwoofer set off its level moves the bass (mean ", "Un sub mal réglé en niveau fait bouger le grave (moyenne " },
             { "The rooms or other systems ticked in Room Sim lower it", "Les salles ou other systems cochés dans Room Sim le font baisser" },

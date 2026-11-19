@@ -671,6 +671,10 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
         // its level, as they are and as an unrelated LFE would give them
         double screenPart[numBands] = {}, lfePart[numBands] = {}, crossPart[numBands] = {};
 
+        // Bass managed: the same system with the surrounds and heights added in
+        // power, as from their own speakers, to tell their part from the LFE's
+        double bandNoS[numBands] = {};
+
         for (size_t g = 0; g < n; ++g)
         {
             const double hz = a.grid[g];
@@ -701,6 +705,14 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
                 const double screen = std::norm (gain.screen) * pX + (managed ? 0.0 : pS[g]), lfe = std::norm (gain.lfe) * m.pLfe[g];
                 const double cross = 2.0 * (gain.screen * std::conj (gain.lfe) * cXL).real();
                 power = screen + lfe + cross;
+
+                if (managed)
+                {
+                    const double alone = std::norm (gain.screen) * m.pF[g] + pS[g] + lfe
+                                         + 2.0 * (gain.screen * std::conj (gain.lfe) * cFL[g]).real();
+                    bandNoS[b] += hz * std::max (alone, 0.0);
+                }
+
                 screenPart[b] += hz * screen;
                 lfePart[b] += hz * lfe;
                 crossPart[b] += hz * cross;
@@ -750,6 +762,27 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
 
         // Scaled by how many listeners hear the bass at all
         chain.penalty = std::min (chain.penalty, 1.0) * heardAtAll;
+
+        // Whose doing the change is, bass managed: the change band by band with the
+        // surrounds and heights as summed in the subwoofer, against the same with them
+        // added in power. What disappears is theirs (weighted by each band's share of
+        // the reference). No LFE: all of it is theirs.
+        if (chain.kind == ChainResult::Kind::bassManaged)
+        {
+            double full = 0.0, withoutS = 0.0;
+
+            for (int b = 0; b < numBands; ++b)
+            {
+                if (reference[b] <= 1e-6 * referenceTotal)
+                    continue;
+
+                const double share = reference[b] / (referenceTotal + 1e-60);
+                full += share * std::abs (chain.bandChangeDb[(size_t) b]);
+                withoutS += share * std::abs (limited ((bandNoS[b] + 1e-60) / (reference[b] + 1e-60)));
+            }
+
+            chain.surroundPart = full > 1e-9 ? std::clamp ((full - withoutS) / full, 0.0, 1.0) : 0.0;
+        }
 
         if (isStereo)
         {

@@ -1966,6 +1966,10 @@ void MainComponent::timerCallback()
                                                            + juce::String (juce::jmax (0.0, -t.downmixChangeDb), 1) + " dB" });
 
                     juce::String worst;
+                    // Bass managed with the surrounds or heights summing with the screen in the
+                    // subwoofer: the change is theirs, not the LFE's (none may even be playing)
+                    const bool fromSurrounds = t.worstRoom.empty() && t.worstChain >= 0 && (size_t) t.worstChain < t.chains.size()
+                                               && t.chains[(size_t) t.worstChain].surroundPart > 0.5;
 
                     if (! t.worstRoom.empty())
                         worst = tr ("room ") + tr (juce::String (t.worstRoom));
@@ -1973,7 +1977,8 @@ void MainComponent::timerCallback()
                         worst = tr (juce::String (t.chains[(size_t) t.worstChain].name)) + " ("
                                 + (t.chains[(size_t) t.worstChain].changeDb >= 0.0 ? "+" : "") + juce::String (t.chains[(size_t) t.worstChain].changeDb, 1) + " dB)";
 
-                    factors.push_back ({ t.interaction, tr ("LFE and screen interfere") + (worst.isNotEmpty() ? tr (": worst on ") + worst : juce::String()) });
+                    factors.push_back ({ t.interaction, (fromSurrounds ? tr ("Surrounds and screen add up in the bass-managed subwoofer")
+                                                                                 : tr ("LFE and screen interfere")) + (worst.isNotEmpty() ? tr (": worst on ") + worst : juce::String()) });
                     factors.push_back ({ simulator.tuning.levelDependenceWeight * t.levelDependence,
                                          tr ("A subwoofer set off its level moves the bass (mean ") + juce::String (t.levelMeanDb, 1) + " dB)" });
 

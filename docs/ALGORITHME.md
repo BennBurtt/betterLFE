@@ -429,7 +429,15 @@ au score :
 
 - la dépendance au LFE, avec la part du grave qu'il porte et ce qu'un repli
   sans LFE perd ;
-- l'interaction LFE / écran, avec le pire système ;
+- l'interaction, avec le pire système. Elle a deux causes possibles, et la
+  ligne nomme la bonne. En bass management, le même système est recalculé avec
+  S ajoutée en puissance (comme sur ses propres enceintes) : si plus de la
+  moitié de l'écart, bande par bande (pondéré par la part de chaque bande dans
+  la référence), disparaît, l'écart vient des surrounds et hauteurs sommés avec
+  l'écran dans le caisson, et la ligne le dit (« Surrounds et écran
+  s'additionnent dans le sub en bass management »). Sinon c'est « Le LFE et
+  l'écran interfèrent ». Sans LFE, l'écart est toujours attribué aux surrounds.
+  Le seuil de 50 % est une **hypothèse** (la cause majoritaire) ;
 - la dépendance au niveau du sub ;
 - ce que retirent les salles ou other systems cochés.
 
@@ -1662,7 +1670,7 @@ du son) : bruit blanc ou rose, aucune ; grondement grave (sous 90 Hz), 1 à 3.
   subsiste. Elles ne donnent un verdict que si le LFE ressemble au mix.
 - Tout en bas (5–15 Hz), la résolution est limitée par la durée de la fenêtre :
   utiliser le mode « Ultra (2 s) » pour cette zone.
-- Les surrounds ne sont pas analysés, ni redirigés dans les chaînes simulées.
+- Les surrounds et hauteurs ne forment qu'une voie, S : un écart entre eux (Ls contre Rs) n'est pas vu (voir 3.4 bis).
 - Les systèmes de lecture sont des modèles électriques ; l'acoustique d'une
   salle n'est pas simulée. Voir 3.8 pour ce qui est établi et ce qui est supposé.
 

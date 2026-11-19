@@ -99,6 +99,9 @@ struct ChainResult
     std::array<double, numBands> bandChangeDb {};   // same per band (20-30, 30-60, 60-90, 90-120 Hz)
     double penalty = 0.0;                           // 0..1, perceptual, see the header comment
     double weight = 0.0;                            // relevance, 0..1: how much this system counts
+    // Bass managed: the part of the change that comes from the surrounds and heights
+    // summed with the screen in the subwoofer, not from the LFE (0..1, see the .cpp)
+    double surroundPart = 0.0;
 };
 
 struct Translation

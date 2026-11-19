@@ -2990,6 +2990,35 @@ void testSurrounds()
         std::printf ("  Lt / Rt in mono: bass only in the surrounds %+.1f dB, only in C %+.1f dB\n", mono, cMono);
         check (mono < -20.0 && std::abs (cMono) < 0.3, "an Lt / Rt fold-down in mono loses the surrounds' bass, keeps C's", mono);
     }
+
+    // Whose doing: no LFE, the surrounds summed with the screen in the subwoofer are the
+    // worst case, and the change is theirs; the LFE with the screen and no surrounds: the LFE's
+    {
+        const auto partOfWorst = [] (const Translation& t)
+        {
+            return t.worstChain >= 0 && t.chains[(size_t) t.worstChain].kind == ChainResult::Kind::bassManaged
+                       ? t.chains[(size_t) t.worstChain].surroundPart : -1.0;
+        };
+        Signal c, cq;
+        quadraturePair (8.0, 41, c, cq);
+        LfeEngine e (sampleRate, 1.0, 0.0);
+        Scene sc;
+        sc.c = c;
+        sc.lfe = scaled (c, 0.3);
+        run (e, sc);
+        const auto lfeOnly = sim.compute (e.result());
+        double lfePart = 0.0;
+
+        for (const auto& ch : lfeOnly.chains)
+            if (ch.kind == ChainResult::Kind::bassManaged)
+                lfePart = std::max (lfePart, ch.surroundPart);
+
+        std::printf ("  surrounds' part of the worst case: S = C %.2f, S = -C %.2f; LFE = 0.3 C, no S: at most %.2f\n",
+                     partOfWorst (same), partOfWorst (opposed), lfePart);
+        check (partOfWorst (same) > 0.9 && partOfWorst (opposed) > 0.9,
+               "no LFE: the bass-managed change is put down to the surrounds, not to the LFE", partOfWorst (same));
+        check (lfePart < 0.1, "LFE with the screen and no surrounds: the change is the LFE's", lfePart);
+    }
 }
 
 // The small systems: where the bass sits decides what survives; headphones keep L against R
