@@ -5,7 +5,7 @@ namespace subguard
 
 namespace
 {
-    constexpr int controlsHeight = 118;
+    constexpr int controlsHeight = 142;
     constexpr double speedOfSound = 343.0;
 }
 
@@ -101,48 +101,49 @@ void StageView::setResult (const StageAlignment::Result& r)
 void StageView::resized()
 {
     auto area = getLocalBounds().reduced (16, 10);
-    area.removeFromTop (40);
+    area.removeFromTop (44);
+    const auto fit = [] (juce::Label& l) { return juce::roundToInt (textWidth (l.getFont(), l.getText()) + 10.0f); };
+    const auto pair = [&fit] (juce::Rectangle<int>& row, juce::Label& label, juce::Component& box, int boxWidth)
+    {
+        label.setBounds (row.removeFromLeft (fit (label)));
+        box.setBounds (row.removeFromLeft (boxWidth));
+        row.removeFromLeft (20);
+    };
+
     auto row = area.removeFromTop (26);
-    deviceLabel.setBounds (row.removeFromLeft (110));
-    deviceBox.setBounds (row.removeFromLeft (260));
-    row.removeFromLeft (16);
-    levelLabel.setBounds (row.removeFromLeft (90));
-    levelBox.setBounds (row.removeFromLeft (110));
-    area.removeFromTop (6);
+    pair (row, deviceLabel, deviceBox, juce::jmin (300, juce::jmax (160, row.getWidth() - fit (deviceLabel) - fit (levelLabel) - 150)));
+    pair (row, levelLabel, levelBox, 120);
+    area.removeFromTop (8);
     row = area.removeFromTop (26);
-    screenLabel.setBounds (row.removeFromLeft (170));
-    screenBox.setBounds (row.removeFromLeft (110));
-    row.removeFromLeft (16);
-    subLabel.setBounds (row.removeFromLeft (140));
-    subBox.setBounds (row.removeFromLeft (110));
-    row.removeFromLeft (16);
-    micLabel.setBounds (row.removeFromLeft (140));
-    micBox.setBounds (row.removeFromLeft (100));
-    row.removeFromLeft (16);
-    measureButton.setBounds (row.removeFromLeft (100));
+    pair (row, screenLabel, screenBox, 120);
+    pair (row, subLabel, subBox, 120);
+    area.removeFromTop (8);
+    row = area.removeFromTop (26);
+    pair (row, micLabel, micBox, 120);
+    measureButton.setBounds (row.removeFromLeft (juce::roundToInt (textWidth (uiFont (13.5f), measureButton.getButtonText()) + 30.0f)));
     row.removeFromLeft (8);
-    stopButton.setBounds (row.removeFromLeft (70));
+    stopButton.setBounds (row.removeFromLeft (juce::roundToInt (textWidth (uiFont (13.5f), stopButton.getButtonText()) + 30.0f)));
 }
 
 void StageView::paint (juce::Graphics& g)
 {
     g.fillAll (theme::plot);
     auto area = getLocalBounds().reduced (16, 10);
-    auto title = area.removeFromTop (40);
+    auto title = area.removeFromTop (44).withTrimmedRight (levelSelectorWidth);
     g.setColour (theme::text);
     g.setFont (uiFont (15.0f, true));
     g.drawText (tr ("Your stage: subwoofer and screen"), title.removeFromTop (20), juce::Justification::centredLeft);
     g.setColour (theme::dimText);
-    g.setFont (uiFont (11.5f));
+    g.setFont (uiFont (12.0f));
     g.drawFittedText (tr ("A measurement microphone at the mixing seat. The two outputs feed the screen speaker (C) and the subwoofer "
                           "(the LFE path) as they are set now, processor included. Nothing here changes the mix: it checks the room."),
-                      title.toNearestInt(), juce::Justification::centredLeft, 2);
+                      title.toNearestInt(), juce::Justification::topLeft, 2, 0.85f);
 
-    area.removeFromTop (controlsHeight - 40);
+    area.removeFromTop (controlsHeight - 44);
     auto statusRow = area.removeFromTop (22);
     g.setColour (running ? juce::Colour (0xff3a9be0) : theme::dimText);
     g.setFont (uiFont (12.5f));
-    g.drawText (status, statusRow, juce::Justification::centredLeft);
+    g.drawFittedText (status, statusRow, juce::Justification::centredLeft, 1, 0.8f);
 
     if (! result.valid)
     {
@@ -150,13 +151,13 @@ void StageView::paint (juce::Graphics& g)
             return;
 
         g.setColour (juce::Colour (0xffffb347));
-        g.drawText (tr ("No result: ") + juce::String (result.problem), area.removeFromTop (22), juce::Justification::centredLeft);
+        g.drawFittedText (tr ("No result: ") + juce::String (result.problem), area.removeFromTop (22), juce::Justification::centredLeft, 1, 0.8f);
         return;
     }
 
     // The verdict, in words
     {
-        auto text = area.removeFromTop (70);
+        const auto verdictFont = uiFont (14.0f, true), noteFont = uiFont (12.0f);
         const bool aligned = result.sumNowDb >= result.sumBestDb - 1.0;
         juce::String verdict;
 
@@ -171,15 +172,17 @@ void StageView::paint (juce::Graphics& g)
                       + tr ("Around ") + juce::String (juce::roundToInt (result.crossoverHz)) + tr (" Hz the sum goes from ")
                       + juce::String (result.sumNowDb, 1) + tr (" dB to ") + juce::String (result.sumBestDb, 1) + tr (" dB against a perfect in-phase sum.");
 
+        const juce::String note = tr ("Arrivals (first rise of each response): screen ") + juce::String (result.screenArrivalMs, 1) + tr (" ms, subwoofer ")
+                                    + juce::String (result.subArrivalMs, 1) + " ms." + (result.nowInverted ? tr (" As it is, the subwoofer would sum better inverted.") : juce::String())
+                                    + tr (" Over an octave each side of the crossover; one seat only: check a few.");
+        const int verdictLines = linesFor (verdictFont, verdict, (float) area.getWidth()), noteLines = linesFor (noteFont, note, (float) area.getWidth());
+
         g.setColour (aligned ? juce::Colour (0xff7ed957) : juce::Colour (0xffffb347));
-        g.setFont (uiFont (14.0f, true));
-        g.drawFittedText (verdict, text.removeFromTop (44).toNearestInt(), juce::Justification::topLeft, 2);
+        g.setFont (verdictFont);
+        g.drawFittedText (verdict, area.removeFromTop (verdictLines * 18 + 4), juce::Justification::topLeft, verdictLines, 0.95f);
         g.setColour (theme::dimText);
-        g.setFont (uiFont (11.5f));
-        g.drawFittedText (tr ("Arrivals (first rise of each response): screen ") + juce::String (result.screenArrivalMs, 1) + tr (" ms, subwoofer ")
-                              + juce::String (result.subArrivalMs, 1) + " ms." + (result.nowInverted ? tr (" As it is, the subwoofer would sum better inverted.") : juce::String())
-                              + tr (" Over an octave each side of the crossover; one seat only: check a few."),
-                          text.toNearestInt(), juce::Justification::topLeft, 2);
+        g.setFont (noteFont);
+        g.drawFittedText (note, area.removeFromTop (noteLines * 15 + 6), juce::Justification::topLeft, noteLines, 0.95f);
     }
 
     // The responses, 20 to 200 Hz
@@ -199,7 +202,7 @@ void StageView::paint (juce::Graphics& g)
     const auto xOf = [&plot] (double hz) { return plot.getX() + plot.getWidth() * (float) (std::log (hz / 20.0) / std::log (10.0)); };
     const auto yOf = [&] (double db) { return plot.getY() + plot.getHeight() * (float) juce::jlimit (0.0, 1.0, (top - db) / (top - bottom)); };
 
-    g.setFont (uiFont (10.0f));
+    g.setFont (uiFont (11.0f));
 
     for (double hz : { 20.0, 30.0, 50.0, 80.0, 100.0, 150.0, 200.0 })
     {
@@ -256,13 +259,18 @@ void StageView::paint (juce::Graphics& g)
     draw (result.bestDb, juce::Colour (0xff7ed957), 1.8f, true);
 
     // Legend
-    auto legend = juce::Rectangle<float> (plot.getRight() - 300.0f, plot.getY() + 4.0f, 296.0f, 14.0f);
+    float legendWidth = 0.0f;
+
+    for (const auto& name : { tr ("screen"), tr ("subwoofer"), tr ("sum now"), tr ("sum, as advised") })
+        legendWidth += textWidth (uiFont (11.0f), name) + 28.0f;
+
+    auto legend = juce::Rectangle<float> (plot.getRight() - legendWidth - 4.0f, plot.getY() + 4.0f, legendWidth, 14.0f);
     const std::pair<juce::Colour, juce::String> items[] = { { juce::Colour (0xff3a9be0), tr ("screen") }, { juce::Colour (0xffff8a00), tr ("subwoofer") },
                                                             { juce::Colours::white, tr ("sum now") }, { juce::Colour (0xff7ed957), tr ("sum, as advised") } };
 
     for (const auto& [colour, name] : items)
     {
-        auto cell = legend.removeFromLeft (74.0f);
+        auto cell = legend.removeFromLeft (textWidth (uiFont (11.0f), name) + 28.0f);
         g.setColour (colour);
         g.fillRect (cell.getX(), cell.getCentreY() - 1.0f, 12.0f, 2.0f);
         g.setColour (theme::dimText);

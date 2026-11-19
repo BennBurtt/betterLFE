@@ -31,6 +31,15 @@ namespace theme
 
 juce::Font uiFont (float height, bool bold = false);
 
+/** Width of a text in a font, in pixels. */
+float textWidth (const juce::Font&, const juce::String&);
+
+/** Lines a text takes at this width once wrapped (at least 1). */
+int linesFor (const juce::Font&, const juce::String&, float width);
+
+/** Draws a text that must stay readable: wrapped on up to `maxLines`, then shrunk to `minScale`, never cut with "...". */
+void drawReadable (juce::Graphics&, const juce::String&, juce::Rectangle<float>, juce::Justification, int maxLines = 2, float minScale = 0.8f);
+
 //==============================================================================
 /** Clickable speaker: shows the alert level of one screen channel, click to mute. */
 class SpeakerIndicator : public juce::Component,
@@ -193,21 +202,41 @@ private:
 };
 
 //==============================================================================
-/** A panel that opens over the analyzer when its button is pressed. */
+/** A panel that opens over the analyzer when its button is pressed. Its content scrolls
+    when the window is too short for it. */
 class Card : public juce::Component
 {
 public:
-    explicit Card (juce::String titleText) : title (std::move (titleText)) {}
+    explicit Card (juce::String titleText);
 
     /** Lays out the card's children inside the given content area. */
     std::function<void (juce::Rectangle<int>)> onLayout;
+
+    /** A child of the card's content. */
+    void add (juce::Component& child)           { content.addAndMakeVisible (child); }
+
+    /** The size the card wants; it is given less (and scrolls) when the window is smaller. */
+    void setDesignSize (int width, int height)  { designWidth = width; designHeight = height; setSize (width, height); }
+    int getDesignWidth() const                  { return designWidth; }
+    int getDesignHeight() const                 { return contentHeightFor ? contentHeightFor (designWidth - 28) + 42 : designHeight; }
+
+    /** Content whose height depends on what it shows (text that wraps): its height at a width. */
+    std::function<int (int width)> contentHeightFor;
 
     void paint (juce::Graphics&) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent&) override {}    // clicks do not fall through to the plot
 
 private:
+    struct Content : public juce::Component
+    {
+        void mouseDown (const juce::MouseEvent&) override {}
+    };
+
     juce::String title;
+    juce::Viewport viewport;
+    Content content;
+    int designWidth = 300, designHeight = 200;
 };
 
 /** Everything the playback-chains card shows. */
@@ -218,6 +247,9 @@ struct ChainsInfo
     double sessionSeconds = 0.0;
     bool otherSystemTicked = false;     // an other system counts in the score (Room Sim)
 };
+
+/** Width kept free at the top right of the main views: the Soft / Medium / Strong selector sits there. */
+constexpr int levelSelectorWidth = 230;
 
 /** The colour that marks what is not cinema (the other systems). */
 const juce::Colour otherSystemColour { 0xffc89bff };
@@ -232,10 +264,19 @@ public:
     void update (const ChainsInfo&);
     void paint (juce::Graphics&) override;
 
+    /** The height everything takes at this width (text wraps rather than being cut). */
+    int preferredHeight (int width) const;
+
+    /** Called when what is shown needs another height (a line more or less). */
+    std::function<void()> onHeightChanged;
+
     static juce::Colour colourFor (double penalty);
 
 private:
+    float render (juce::Graphics&, float width) const;
+
     ChainsInfo info;
+    int lastHeight = -1;
 };
 
 /** Room Sim: the fifteen rooms, seat by seat. */
@@ -245,6 +286,9 @@ public:
     void update (const RoomSimResult&, double robustness, bool hasScore);
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
+
+    /** The height everything takes at this width; the view scrolls in the window when it is taller. */
+    int preferredHeight (int width);
 
     /** Which rooms count in the score; a click on a row toggles it. */
     void setSelection (const std::vector<bool>& on)     { selected = on; repaint(); }
@@ -257,6 +301,8 @@ private:
     std::vector<double> shownRoom;      // room scores, smoothed for display
     double robustness = 100.0;
     bool hasScore = false;
+
+    float render (juce::Graphics&, float width);
 };
 
 /** Scrolling record of the last minutes: one thin lane per indicator. */

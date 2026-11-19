@@ -24,6 +24,9 @@ public:
     std::function<void()> onUseTestSource;          // switch the input device to the test signals
     std::function<void()> onLoadRooms;              // the three Room Sim Pro rooms of the measurements
 
+    /** Room Sim Pro set aside: its signals and its button are not shown. */
+    void setRoomProShown (bool shown);
+
     /** Each frame: whether the test signals are the input, which one plays and how far into its pass. */
     void setState (bool testSourceOn, int playing, double seconds);
 
@@ -51,7 +54,7 @@ private:
     List list { *this };
     juce::Viewport viewport;
     juce::TextButton useButton, stopButton, roomsButton;
-    bool sourceOn = false;
+    bool sourceOn = false, roomProShown = true;
     int playing = -1;
     double position = 0.0;
 };

@@ -45,9 +45,10 @@ private:
     public:
         explicit List (LogView& o) : owner (o) {}
         void paint (juce::Graphics&) override;
-        int preferredHeight() const;
+        int preferredHeight (int width) const;
 
     private:
+        float rowHeightFor (const LogEvent&, int width) const;
         LogView& owner;
     };
 
@@ -62,6 +63,7 @@ private:
     bool analysing = false;
     juce::String progressText;
     double progressFraction = 0.0;
+    juce::Rectangle<int> progressArea;
     std::vector<LogEvent> shown;
     FrameRate shownRate = FrameRate::fps25;
     juce::String clockText, sourceText;

@@ -26,6 +26,26 @@ public:
         setColour (juce::ToggleButton::tickColourId, theme::text);
         setColour (juce::ToggleButton::tickDisabledColourId, theme::dimText);
     }
+
+    // The same type everywhere, and text that shrinks a little rather than being cut
+    juce::Font getTextButtonFont (juce::TextButton&, int buttonHeight) override    { return uiFont (juce::jmin (13.5f, (float) buttonHeight * 0.55f)); }
+    juce::Font getComboBoxFont (juce::ComboBox& box) override                       { return uiFont (juce::jmin (13.5f, (float) box.getHeight() * 0.55f)); }
+    juce::Font getPopupMenuFont() override                                          { return uiFont (14.0f); }
+
+    void drawToggleButton (juce::Graphics& g, juce::ToggleButton& button, bool highlighted, bool down) override
+    {
+        const float fontSize = juce::jmin (13.0f, (float) button.getHeight() * 0.6f);
+        const float tick = fontSize * 1.1f;
+        auto area = button.getLocalBounds().toFloat();
+
+        drawTickBox (g, button, 4.0f, (area.getHeight() - tick) * 0.5f, tick, tick, button.getToggleState(), button.isEnabled(), highlighted, down);
+
+        g.setColour (button.findColour (juce::ToggleButton::textColourId).withMultipliedAlpha (button.isEnabled() ? 1.0f : 0.5f));
+        g.setFont (uiFont (fontSize));
+        const auto text = area.withTrimmedLeft (tick + 10.0f).withTrimmedRight (2.0f);
+        const int lines = text.getHeight() >= fontSize * 2.3f ? 2 : 1;
+        g.drawFittedText (button.getButtonText(), text.toNearestInt(), juce::Justification::centredLeft, lines, 0.7f);
+    }
 };
 
 /** The window, with the File and Edit menus: in the menu bar on the Mac, at the top of the window elsewhere. */
@@ -86,7 +106,11 @@ public:
     }
 
     // File: save and load the Room Sim Pro rooms, export the event log. Edit: undo and redo the rooms' changes.
-    juce::StringArray getMenuBarNames() override       { return { tr ("File"), tr ("Edit") }; }
+    juce::StringArray getMenuBarNames() override
+    {
+        // Edit only undoes and redoes the Room Sim Pro rooms: not shown while Room Sim Pro is set aside
+        return MainComponent::roomProEnabled ? juce::StringArray { tr ("File"), tr ("Edit") } : juce::StringArray { tr ("File") };
+    }
 
     juce::PopupMenu getMenuForIndex (int index, const juce::String&) override
     {
@@ -104,9 +128,13 @@ public:
 
         if (index == 0)
         {
-            item (1, tr ("Save the rooms..."), command + "S");
-            item (2, tr ("Load rooms..."), command + "O");
-            menu.addSeparator();
+            if (MainComponent::roomProEnabled)
+            {
+                item (1, tr ("Save the rooms..."), command + "S");
+                item (2, tr ("Load rooms..."), command + "O");
+                menu.addSeparator();
+            }
+
             item (5, tr ("Export the event log (CSV)..."), {});
             item (6, tr ("Export markers (EDL)..."), {});
             menu.addSeparator();

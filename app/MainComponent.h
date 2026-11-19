@@ -90,6 +90,9 @@ public:
     /** Set by the window: switch the language and rebuild the content in it. */
     std::function<void()> onLanguageToggle;
 
+    /** Room Sim Pro is set aside for now: its code stays, its tab, menus and keys are hidden. */
+    static constexpr bool roomProEnabled = false;
+
     /** Room Sim Pro, for the File and Edit menus of the window. */
     RoomProView& roomPro()                      { return proView; }
 
@@ -150,6 +153,8 @@ private:
     // Room Sim: replaces the analyzer views (the score and the history strip stay)
     RoomSimulator roomSim;
     RoomSimView roomView;
+    juce::Viewport roomViewport;           // Room Sim scrolls when the window is too short for its rows
+    void layoutRoomView();
     RoomSimResult roomResult;
     juce::TextButton roomButton { tr ("Room Sim") };
     bool roomMode = false;

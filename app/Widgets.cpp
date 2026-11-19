@@ -10,6 +10,30 @@ juce::Font uiFont (float height, bool bold)
     return juce::Font (juce::FontOptions (height, bold ? juce::Font::bold : juce::Font::plain));
 }
 
+float textWidth (const juce::Font& font, const juce::String& text)
+{
+    return juce::GlyphArrangement::getStringWidth (font, text);
+}
+
+int linesFor (const juce::Font& font, const juce::String& text, float width)
+{
+    if (width <= 1.0f || text.isEmpty())
+        return 1;
+
+    juce::GlyphArrangement glyphs;
+    glyphs.addJustifiedText (font, text, 0.0f, 0.0f, width, juce::Justification::topLeft);
+    const auto box = glyphs.getBoundingBox (0, -1, true);
+    return juce::jmax (1, juce::roundToInt (box.getHeight() / font.getHeight()));
+}
+
+void drawReadable (juce::Graphics& g, const juce::String& text, juce::Rectangle<float> area, juce::Justification justification,
+                   int maxLines, float minScale)
+{
+    // Lines that fit in the height, at most maxLines; drawFittedText wraps, then shrinks
+    const int lines = juce::jlimit (1, juce::jmax (1, maxLines), (int) std::floor (area.getHeight() / (g.getCurrentFont().getHeight() * 0.95f)));
+    g.drawFittedText (text, area.toNearestInt(), justification, lines, minScale);
+}
+
 namespace
 {
     constexpr double lfeCutHz = 120.0;
@@ -649,7 +673,7 @@ void SpectrumPlot::paint (juce::Graphics& g)
 
         const auto text = juce::String (hz, 1) + tr (" Hz     LCR ") + juce::String (shown (facadeDb[nearest], hz), 1)
                             + tr (" dB     LFE ") + juce::String (shown (lfeDb[nearest], hz), 1) + " dB";
-        const float width = 290.0f;
+        const float width = std::min (area.getWidth() - 8.0f, textWidth (uiFont (13.0f, true), text) + 24.0f);
         auto box = juce::Rectangle<float> (juce::jlimit (area.getX() + 4.0f, area.getRight() - width - 4.0f, hoverX + 10.0f),
                                            area.getY() + 32.0f, width, 22.0f);
         g.setColour (juce::Colour (0xe6101010));
@@ -723,8 +747,12 @@ void TransientStrip::paint (juce::Graphics& g)
     auto scaleRow = inner.removeFromBottom (14.0f);
     g.setColour (juce::Colour (0xff777777));
     g.setFont (uiFont (10.0f));
-    g.drawText (tr ("early -") + juce::String ((int) range) + " ms", scaleRow.removeFromLeft (84.0f), juce::Justification::centredLeft);
-    g.drawText (tr ("late +") + juce::String ((int) range) + " ms", scaleRow.removeFromRight (84.0f), juce::Justification::centredRight);
+    {
+        const auto early = tr ("early -") + juce::String ((int) range) + " ms", late = tr ("late +") + juce::String ((int) range) + " ms";
+        const float w = std::max (textWidth (uiFont (10.0f), early), textWidth (uiFont (10.0f), late)) + 8.0f;
+        g.drawText (early, scaleRow.removeFromLeft (w), juce::Justification::centredLeft);
+        g.drawText (late, scaleRow.removeFromRight (w), juce::Justification::centredRight);
+    }
     const auto scale = scaleRow;
     const float mid = scale.getCentreX(), y = scale.getCentreY();
     g.setColour (juce::Colour (0xff555555));
@@ -735,8 +763,8 @@ void TransientStrip::paint (juce::Graphics& g)
     {
         g.setColour (juce::Colour (0xff777777));
         g.setFont (uiFont (12.0f));
-        g.drawText (tr ("Transient check off. Solo in your DAW what you want to check, then switch it on in the Transients panel."),
-                    inner, juce::Justification::centredLeft);
+        g.drawFittedText (tr ("Transient check off. Solo in your DAW what you want to check, then switch it on in the Transients panel."),
+                          inner.toNearestInt(), juce::Justification::centredLeft, 2, 0.85f);
         return;
     }
 
@@ -746,7 +774,7 @@ void TransientStrip::paint (juce::Graphics& g)
     {
         g.setColour (juce::Colour (0xff555555));
         g.setFont (uiFont (12.0f));
-        g.drawText (tr ("waiting for an attack in the mix"), inner, juce::Justification::centredLeft);
+        g.drawFittedText (tr ("waiting for an attack in the mix"), inner.toNearestInt(), juce::Justification::centredLeft, 1, 0.85f);
         return;
     }
 
@@ -820,10 +848,10 @@ void TransientStrip::paint (juce::Graphics& g)
 
     g.setColour (colour.withMultipliedAlpha (alpha));
     g.setFont (uiFont (15.0f, true));
-    g.drawText (verdict, inner.removeFromTop (19.0f), juce::Justification::centredLeft);
+    g.drawFittedText (verdict, inner.removeFromTop (19.0f).toNearestInt(), juce::Justification::centredLeft, 1, 0.75f);
     g.setColour (theme::dimText.withMultipliedAlpha (alpha));
-    g.setFont (uiFont (11.0f));
-    g.drawText (detail, inner.removeFromTop (14.0f), juce::Justification::centredLeft);
+    g.setFont (uiFont (11.5f));
+    g.drawFittedText (detail, inner.removeFromTop (15.0f).toNearestInt(), juce::Justification::centredLeft, 1, 0.75f);
 
     if (marker)
     {
@@ -962,10 +990,26 @@ void Card::paint (juce::Graphics& g)
     g.drawText (title, getLocalBounds().reduced (14, 8).removeFromTop (18), juce::Justification::centredLeft);
 }
 
+Card::Card (juce::String titleText) : title (std::move (titleText))
+{
+    viewport.setViewedComponent (&content, false);
+    viewport.setScrollBarsShown (true, false);
+    viewport.setScrollBarThickness (8);
+    addAndMakeVisible (viewport);
+}
+
 void Card::resized()
 {
+    // The content keeps the height it was designed for; shorter, the card scrolls
+    const auto area = getLocalBounds().reduced (14, 10).withTrimmedTop (22);
+    viewport.setBounds (area);
+    const int natural = contentHeightFor ? contentHeightFor (area.getWidth()) : designHeight - 42;
+    const bool scrolls = natural > area.getHeight();
+    const int wanted = juce::jmax (area.getHeight(), contentHeightFor && scrolls ? contentHeightFor (area.getWidth() - viewport.getScrollBarThickness() - 2) : natural);
+    content.setSize (area.getWidth() - (scrolls ? viewport.getScrollBarThickness() + 2 : 0), wanted);
+
     if (onLayout)
-        onLayout (getLocalBounds().reduced (14, 10).withTrimmedTop (22));
+        onLayout (content.getLocalBounds());
 }
 
 //==============================================================================
@@ -979,14 +1023,40 @@ juce::Colour ChainsView::colourFor (double penalty)
 void ChainsView::update (const ChainsInfo& newInfo)
 {
     info = newInfo;
+
+    // A line more or less (a value that wraps): the card lays itself out again
+    const int height = preferredHeight (juce::jmax (1, getWidth()));
+
+    if (height != lastHeight)
+    {
+        lastHeight = height;
+
+        if (onHeightChanged)
+            onHeightChanged();
+    }
+
     repaint();
+}
+
+int ChainsView::preferredHeight (int width) const
+{
+    // The same layout as painted, on a throw-away image: the height it ends at
+    juce::Image scratch (juce::Image::ARGB, 1, 1, true);
+    juce::Graphics g (scratch);
+    return (int) std::ceil (render (g, (float) width));
 }
 
 void ChainsView::paint (juce::Graphics& g)
 {
+    render (g, (float) getWidth());
+}
+
+float ChainsView::render (juce::Graphics& g, float totalWidth) const
+{
     const auto& t = info.translation;
-    auto area = getLocalBounds().toFloat();
-    const float rowHeight = 22.0f, cellHeight = 32.0f, labelWidth = 150.0f;
+    auto area = juce::Rectangle<float> (0.0f, 0.0f, totalWidth, 100000.0f);
+    const float cellHeight = 34.0f;
+    const juce::String none = juce::String::fromUTF8 ("\xe2\x80\x94");
 
     const auto cinema = [&t] (double delayMs, bool inverted) -> const ChainResult*
     {
@@ -1011,11 +1081,36 @@ void ChainsView::paint (juce::Graphics& g)
         return ! t.chains.empty() && t.chains.back().kind == ChainResult::Kind::stereo ? &t.chains.back() : nullptr;
     };
 
-    const auto heading = [&] (const juce::String& text)
+    // A paragraph: as many lines as it needs at this width
+    const auto paragraph = [&] (const juce::String& text, const juce::Font& font, juce::Colour colour, float width, juce::Justification just,
+                                juce::Rectangle<float> into)
     {
-        g.setColour (theme::dimText);
-        g.setFont (uiFont (12.0f, true));
-        g.drawText (text, area.removeFromTop (20.0f), juce::Justification::centredLeft);
+        const int lines = linesFor (font, text, width);
+        const float height = (float) lines * font.getHeight() * 1.15f + 2.0f;
+        g.setColour (colour);
+        g.setFont (font);
+        g.drawFittedText (text, into.withHeight (height).toNearestInt(), just, lines, 0.9f);
+        return height;
+    };
+
+    // The row labels: as wide as the widest of them
+    const juce::String rowLabels[] = { tr ("Cinema, sub in polarity"), tr ("Cinema, sub inverted"), tr ("Bass managed"), tr ("+ encoder LFE filter"),
+                                       tr ("Other system (not cinema)") };
+    float labelWidth = 0.0f;
+
+    for (const auto& label : rowLabels)
+        labelWidth = std::max (labelWidth, textWidth (uiFont (12.5f), label));
+
+    labelWidth = juce::jlimit (120.0f, 200.0f, labelWidth + 12.0f);
+
+    // A short dB text: one decimal under 10 dB, none above
+    const auto dbText = [] (double db)
+    {
+        if (db <= -PlaybackSimulator::changeLimitDb + 0.05)
+            return juce::String::fromUTF8 ("\xe2\x89\xa4-") + juce::String ((int) PlaybackSimulator::changeLimitDb);
+
+        const auto value = std::abs (db) >= 9.95 ? juce::String (juce::roundToInt (db)) : juce::String (db, 1);
+        return (db >= 0.0 ? "+" : "") + value;
     };
 
     const auto cell = [&] (juce::Rectangle<float> box, const ChainResult* chain)
@@ -1028,50 +1123,50 @@ void ChainsView::paint (juce::Graphics& g)
             g.fillRoundedRectangle (box, 3.0f);
             g.setColour (juce::Colour (0xff777777));
             g.setFont (uiFont (12.0f));
-            g.drawText (juce::String::fromUTF8 ("\xe2\x80\x94"), box, juce::Justification::centred);
+            g.drawText (none, box, juce::Justification::centred);
             return;
         }
-
-        const auto dbText = [] (double db)
-        {
-            return db <= -PlaybackSimulator::changeLimitDb + 0.05
-                     ? juce::String::fromUTF8 ("\xe2\x89\xa4-") + juce::String ((int) PlaybackSimulator::changeLimitDb)
-                     : (db >= 0.0 ? "+" : "") + juce::String (db, 1);
-        };
 
         g.setColour (colourFor (chain->penalty));
         g.fillRoundedRectangle (box, 3.0f);
 
         // The mean over 20-120 Hz, and under it the band that moves most down and most up
-        auto top = box.withHeight (box.getHeight() * 0.58f), bottom = box.withTrimmedTop (box.getHeight() * 0.52f);
+        const auto inner = box.reduced (3.0f, 2.0f);
+        auto top = inner.withHeight (inner.getHeight() * 0.56f), bottom = inner.withTrimmedTop (inner.getHeight() * 0.56f);
         g.setColour (juce::Colours::white);
-        g.setFont (uiFont (12.5f, true));
-        g.drawText (dbText (chain->changeDb) + " dB", top, juce::Justification::centredBottom);
-        g.setColour (juce::Colours::white.withAlpha (0.78f));
-        g.setFont (uiFont (10.0f));
-        g.drawText (dbText (chain->minChangeDb) + juce::String::fromUTF8 (" \xe2\x80\xa6 ") + dbText (chain->maxChangeDb), bottom,
-                    juce::Justification::centredTop);
+        g.setFont (uiFont (13.0f, true));
+        g.drawFittedText (dbText (chain->changeDb) + " dB", top.toNearestInt(), juce::Justification::centredBottom, 1, 0.75f);
+        g.setColour (juce::Colours::white.withAlpha (0.85f));
+        g.setFont (uiFont (11.0f));
+        g.drawFittedText (dbText (chain->minChangeDb) + " / " + dbText (chain->maxChangeDb), bottom.toNearestInt(), juce::Justification::centredTop, 1, 0.75f);
     };
 
+    // A table: column titles wrapped on up to two lines, then its rows
     const auto table = [&] (const juce::StringArray& columns, const juce::StringArray& rows,
                             const std::function<const ChainResult* (int row, int column)>& lookup,
                             const std::function<bool (int row, int column)>& exists = {})
     {
-        auto header = area.removeFromTop (18.0f);
-        header.removeFromLeft (labelWidth);
-        const float width = header.getWidth() / (float) columns.size();
-        g.setColour (theme::dimText);
-        g.setFont (uiFont (11.5f));
+        const float width = (area.getWidth() - labelWidth) / (float) columns.size();
+        const auto headFont = uiFont (11.5f);
+        int headLines = 1;
 
         for (const auto& name : columns)
-            g.drawText (name, header.removeFromLeft (width), juce::Justification::centred);
+            headLines = std::max (headLines, std::min (2, linesFor (headFont, name, width - 4.0f)));
+
+        auto header = area.removeFromTop ((float) headLines * 14.0f + 4.0f);
+        header.removeFromLeft (labelWidth);
+        g.setColour (theme::dimText);
+        g.setFont (headFont);
+
+        for (const auto& name : columns)
+            g.drawFittedText (name, header.removeFromLeft (width).reduced (2.0f, 0.0f).toNearestInt(), juce::Justification::centredBottom, 2, 0.8f);
 
         for (int r = 0; r < rows.size(); ++r)
         {
             auto row = area.removeFromTop (cellHeight);
             g.setColour (theme::text);
             g.setFont (uiFont (12.5f));
-            g.drawText (rows[r], row.removeFromLeft (labelWidth), juce::Justification::centredLeft);
+            g.drawFittedText (rows[r], row.removeFromLeft (labelWidth).withTrimmedRight (6.0f).toNearestInt(), juce::Justification::centredLeft, 2, 0.8f);
 
             for (int c = 0; c < columns.size(); ++c)
             {
@@ -1082,26 +1177,27 @@ void ChainsView::paint (juce::Graphics& g)
             }
         }
 
-        area.removeFromTop (8.0f);
+        area.removeFromTop (10.0f);
     };
 
-    heading (tr ("Bass on each playback system against the mix as approved (cinema, sub on time, in polarity), 20-120 Hz. "
-                 "In each box: the mean, then the band that moves most down and most up"));
+    area.removeFromTop (paragraph (tr ("Bass on each playback system against the mix as approved (cinema, sub on time, in polarity), 20-120 Hz. "
+                                       "In each box: the mean, then the band that moves most down and most up"),
+                                   uiFont (12.0f, true), theme::dimText, area.getWidth(), juce::Justification::topLeft, area));
+    area.removeFromTop (6.0f);
 
     const double delays[] = { -5.0, -2.5, 0.0, 2.5, 5.0 };
-    // The subwoofer nearer or further than it should be: metres first, the time it makes in brackets
+    // The subwoofer nearer or further than it should be: metres on the first line, the time it makes on the second
     juce::StringArray distances;
 
     for (double ms : delays)
         distances.add (std::abs (ms) < 1e-9 ? juce::String ("0 m")
                                             : (ms > 0.0 ? "+" : "-") + juce::String (std::abs (ms) * 0.001 * PlaybackSimulator::speedOfSound, 1)
-                                                + " m (" + (ms > 0.0 ? "+" : "-") + juce::String (std::abs (ms), 1) + " ms)");
+                                                + " m\n(" + (ms > 0.0 ? "+" : "-") + juce::String (std::abs (ms), 1) + " ms)");
 
-    table (distances, { tr ("Cinema, sub in polarity"), tr ("Cinema, sub inverted") },
-           [&] (int r, int c) { return cinema (delays[c], r == 1); });
+    table (distances, { rowLabels[0], rowLabels[1] }, [&] (int r, int c) { return cinema (delays[c], r == 1); });
 
     const double corners[] = { 60.0, 80.0, 100.0 };
-    table ({ "60 Hz", "80 Hz", "100 Hz", tr ("Stereo, no LFE") }, { tr ("Bass managed"), tr ("+ encoder LFE filter") },
+    table ({ "60 Hz", "80 Hz", "100 Hz", tr ("Stereo, no LFE") }, { rowLabels[2], rowLabels[3] },
            [&] (int r, int c) { return c < 3 ? home (corners[c], r == 1) : stereo(); },
            [] (int r, int c) { return c < 3 || r == 0; });
 
@@ -1116,74 +1212,87 @@ void ChainsView::paint (juce::Graphics& g)
             return nullptr;
         };
 
-        const auto frame = area.withHeight (18.0f + cellHeight).expanded (3.0f, 2.0f);
-        g.setColour (otherSystemColour.withAlpha (0.10f));
-        g.fillRoundedRectangle (frame, 4.0f);
-        g.setColour (otherSystemColour.withAlpha (0.7f));
-        g.drawRoundedRectangle (frame, 4.0f, 1.0f);
-
         juce::StringArray columns;
 
         for (int i = 0; i < PlaybackSimulator::numOtherSystems; ++i)
             columns.add (tr (PlaybackSimulator::otherSystemShortName (i)));
 
-        table (columns, { tr ("Other system (not cinema)") }, [&] (int, int c) { return other (c); });
+        // The frame first, as tall as the table will be
+        const float width = (area.getWidth() - labelWidth) / (float) columns.size();
+        int headLines = 1;
+
+        for (const auto& name : columns)
+            headLines = std::max (headLines, std::min (2, linesFor (uiFont (11.5f), name, width - 4.0f)));
+
+        const auto frame = juce::Rectangle<float> (area.getX() - 4.0f, area.getY() - 3.0f, area.getWidth() + 8.0f,
+                                                   (float) headLines * 14.0f + 4.0f + cellHeight + 6.0f);
+        g.setColour (otherSystemColour.withAlpha (0.10f));
+        g.fillRoundedRectangle (frame, 4.0f);
+        g.setColour (otherSystemColour.withAlpha (0.7f));
+        g.drawRoundedRectangle (frame, 4.0f, 1.0f);
+        table (columns, { rowLabels[4] }, [&] (int, int c) { return other (c); });
     }
 
+    // Read-outs: a label column, the value wrapped as needed
+    const juce::String readLabels[] = { tr ("Robustness"), tr ("  from interaction"), tr ("  from LFE dependence (audible)"), tr ("  surrounds and heights"),
+                                        tr ("LFE level dependence") };
+    float readWidth = 0.0f;
 
-    // Read-outs
+    for (const auto& label : readLabels)
+        readWidth = std::max (readWidth, textWidth (uiFont (12.5f), label));
+
+    readWidth = std::min (readWidth + 16.0f, area.getWidth() * 0.4f);
+
     const auto line = [&] (const juce::String& label, const juce::String& value, bool warn)
     {
-        auto row = area.removeFromTop (rowHeight);
+        const auto font = uiFont (12.5f, warn);
+        const float valueWidth = area.getWidth() - readWidth;
+        const float height = std::max (22.0f, (float) linesFor (font, value, valueWidth) * 16.0f + 6.0f);
+        auto row = area.removeFromTop (height);
         g.setColour (theme::dimText);
         g.setFont (uiFont (12.5f));
-        g.drawText (label, row.removeFromLeft (labelWidth + 40.0f), juce::Justification::centredLeft);
+        g.drawFittedText (label, row.removeFromLeft (readWidth).toNearestInt(), juce::Justification::centredLeft, 1, 0.8f);
         g.setColour (warn ? juce::Colour (0xffffb347) : theme::text);
-        g.setFont (uiFont (12.5f, warn));
-        g.drawText (value, row, juce::Justification::centredLeft);
+        g.setFont (font);
+        g.drawFittedText (value, row.toNearestInt(), juce::Justification::centredLeft, 4, 0.9f);
     };
 
-    const juce::String none = juce::String::fromUTF8 ("\xe2\x80\x94");
     juce::String worst;
 
     if (t.hasBass && ! t.worstRoom.empty() && t.interaction > 0.02)
-    {
-        worst = tr ("     worst: room ") + tr (juce::String (t.worstRoom)) + tr (" (room score ") + juce::String (juce::roundToInt (100.0 * (1.0 - t.interaction))) + ")";
-    }
+        worst = tr ("; worst: room ") + tr (juce::String (t.worstRoom)) + tr (" (room score ") + juce::String (juce::roundToInt (100.0 * (1.0 - t.interaction))) + ")";
     else if (t.hasBass && t.worstChain >= 0 && t.interaction > 0.02)
     {
         const auto& c = t.chains[(size_t) t.worstChain];
-        worst = tr ("     worst system: ") + tr (juce::String (c.name)) + " (" + (c.changeDb >= 0.0 ? "+" : "") + juce::String (c.changeDb, 1) + " dB)";
+        worst = tr ("; worst system: ") + tr (juce::String (c.name)) + " (" + (c.changeDb >= 0.0 ? "+" : "") + juce::String (c.changeDb, 1) + " dB)";
     }
 
-    line (tr ("Robustness"), t.hasBass ? juce::String (juce::roundToInt (t.robustness)) + tr (" / 100     interaction x LFE dependence") : none,
+    line (readLabels[0], t.hasBass ? juce::String (juce::roundToInt (t.robustness)) + tr (" / 100 (interaction x LFE dependence)") : none,
           t.hasBass && t.robustness < 50.0);
-
-    line (tr ("  from interaction"), t.hasBass ? juce::String (juce::roundToInt (100.0 * (1.0 - t.interaction))) + " / 100" + worst : none,
+    line (readLabels[1], t.hasBass ? juce::String (juce::roundToInt (100.0 * (1.0 - t.interaction))) + " / 100" + worst : none,
           t.hasBass && t.interaction > 0.5);
-
-    line (tr ("  from LFE dependence (audible)"), t.hasBass ? juce::String (juce::roundToInt (100.0 * (1.0 - t.dependence)))
-                                                 + tr (" / 100     LFE ") + (t.lfeBalanceDb >= 0.0 ? "+" : "") + juce::String (t.lfeBalanceDb, 1)
-                                                 + tr (" dB against the other channels, carries ") + juce::String (juce::roundToInt (100.0 * t.lfeShare))
-                                                 + tr (" % of the bass")
-                                             : none,
+    line (readLabels[2], t.hasBass ? juce::String (juce::roundToInt (100.0 * (1.0 - t.dependence)))
+                                       + tr (" / 100; LFE ") + (t.lfeBalanceDb >= 0.0 ? "+" : "") + juce::String (t.lfeBalanceDb, 1)
+                                       + tr (" dB against the other channels, carries ") + juce::String (juce::roundToInt (100.0 * t.lfeShare))
+                                       + tr (" % of the bass")
+                                   : none,
           t.hasBass && t.lfeBalanceDb > PlaybackSimulator::balanceWarningDb);
 
     // Surrounds and heights: their own speakers in a cinema, in the subwoofer once bass managed
-    line (tr ("  surrounds and heights"), t.hasBass ? (t.hasSurround ? (t.surroundBalanceDb >= 0.0 ? "+" : "") + juce::String (t.surroundBalanceDb, 1)
-                                                                    + tr (" dB against the screen, ") + juce::String (juce::roundToInt (100.0 * t.surroundShare))
-                                                                    + tr (" % of the bass; summed with the screen in bass managed systems")
-                                                               : tr ("no bass worth speaking of"))
-                                                : none,
+    line (readLabels[3], t.hasBass ? (t.hasSurround ? (t.surroundBalanceDb >= 0.0 ? "+" : "") + juce::String (t.surroundBalanceDb, 1)
+                                                          + tr (" dB against the screen, ") + juce::String (juce::roundToInt (100.0 * t.surroundShare))
+                                                          + tr (" % of the bass; summed with the screen in bass managed systems")
+                                                      : tr ("no bass worth speaking of"))
+                                   : none,
           false);
 
     // Level dependence: one box, the stronger its colour the more a subwoofer
     // set off its level would move the bass beyond what is expected
     {
-        auto row = area.removeFromTop (rowHeight + 2.0f);
+        auto row = area.removeFromTop (26.0f);
         g.setColour (theme::dimText);
         g.setFont (uiFont (12.5f));
-        g.drawText (tr ("LFE level dependence"), row.removeFromLeft (labelWidth + 40.0f), juce::Justification::centredLeft);
+        g.drawFittedText (readLabels[4], row.removeFromLeft (readWidth).toNearestInt(), juce::Justification::centredLeft, 1, 0.8f);
 
         const double severity = t.hasBass ? juce::jlimit (0.0, 1.0, t.levelDependence) : 0.0;
         const auto quiet = juce::Colour (0xff2a2a2a), lightOrange = juce::Colour (0xffffb347), orange = juce::Colour (0xffff8a00),
@@ -1195,7 +1304,7 @@ void ChainsView::paint (juce::Graphics& g)
                  : severity < 0.9 ? lightOrange.interpolatedWith (orange, (float) ((severity - 0.3) / 0.6)).interpolatedWith (red, (float) juce::jmax (0.0, (severity - 0.6) / 0.6))
                                   : red;
 
-        auto box = row.removeFromLeft (210.0f).reduced (1.5f);
+        auto box = row.removeFromLeft (std::min (240.0f, row.getWidth())).reduced (1.5f);
         g.setColour (fill);
         g.fillRoundedRectangle (box, 3.0f);
 
@@ -1215,73 +1324,74 @@ void ChainsView::paint (juce::Graphics& g)
 
         g.setColour (severity > 0.3 ? juce::Colours::white : theme::text);
         g.setFont (uiFont (12.5f, severity > 0.3));
-        g.drawText (text, box, juce::Justification::centred);
+        g.drawFittedText (text, box.toNearestInt(), juce::Justification::centred, 1, 0.8f);
 
-        // The explanation gets its own line, full width
-        auto noteRow = area.removeFromTop (18.0f);
-        noteRow.removeFromLeft (labelWidth + 40.0f);
-        g.setColour (theme::dimText);
-        g.setFont (uiFont (11.5f));
-        g.drawFittedText (note, noteRow.toNearestInt(), juce::Justification::centredLeft, 1);
+        // The explanation under it, as wide as the values
+        if (note.isNotEmpty())
+        {
+            auto noteArea = area.withTrimmedLeft (readWidth);
+            area.removeFromTop (paragraph (note, uiFont (11.5f), theme::dimText, noteArea.getWidth(), juce::Justification::topLeft, noteArea));
+        }
     }
 
     // Opposition of phase on the screen: its own corner. Cinema does not see it (each channel has its
     // own speaker); any sum does (fold-down, PA, phone, small speakers). It counts in the score only
     // through the other systems, when one is ticked in Room Sim.
     {
-        area.removeFromTop (4.0f);
-        auto block = area.removeFromTop (44.0f);
+        area.removeFromTop (8.0f);
+        const float top = area.getY();
+        auto inside = area.reduced (8.0f, 0.0f);
+        inside.removeFromTop (5.0f);
         const bool counted = info.otherSystemTicked;
         const double worstDb = t.hasBass ? t.antiphaseWorstDb : 0.0;
         const bool warn = t.hasBass && worstDb < -PlaybackSimulator::antiphaseWarningDb;
-        g.setColour (otherSystemColour.withAlpha (0.10f));
-        g.fillRoundedRectangle (block, 4.0f);
-        g.setColour ((warn ? juce::Colour (0xffffb347) : otherSystemColour).withAlpha (0.7f));
-        g.drawRoundedRectangle (block, 4.0f, 1.0f);
-        block = block.reduced (6.0f, 3.0f);
-
-        auto titleRow = block.removeFromTop (18.0f);
-        g.setColour (warn ? juce::Colour (0xffffb347) : theme::text);
-        g.setFont (uiFont (12.5f, true));
         const char* pairs[] = { "L / R", "L / C", "C / R", "screen / surrounds" };
-        juce::String value = juce::String::fromUTF8 ("\xe2\x80\x94");
+        juce::String value = none;
 
         if (t.hasBass)
             value = worstDb > -0.05 ? tr ("none")
                                     : juce::String (worstDb, 1) + tr (" dB at ") + juce::String (juce::roundToInt (t.antiphaseWorstHz)) + " Hz ("
                                         + (t.antiphasePair >= 0 ? tr (pairs[t.antiphasePair]) : juce::String()) + ")";
 
-        g.drawText (tr ("Screen channels in opposition of phase, summed: ") + value, titleRow.removeFromLeft (titleRow.getWidth() - 4.0f * 52.0f),
-                    juce::Justification::centredLeft);
+        inside.removeFromTop (paragraph (tr ("Screen channels in opposition of phase, summed: ") + value, uiFont (12.5f, true),
+                                         warn ? juce::Colour (0xffffb347) : theme::text, inside.getWidth(), juce::Justification::topLeft, inside));
+        inside.removeFromTop (3.0f);
 
-        // The four bands
+        // The four bands, each in its own box
+        auto bands = inside.removeFromTop (22.0f);
+        const float bandWidth = std::min (110.0f, bands.getWidth() / (float) ChainResult::numBands);
+
         for (int b = 0; b < ChainResult::numBands; ++b)
         {
-            auto box = titleRow.removeFromLeft (52.0f).reduced (1.5f, 0.5f);
+            auto box = bands.removeFromLeft (bandWidth).reduced (2.0f, 1.0f);
             const double db = t.hasBass ? t.antiphaseDb[(size_t) b] : 0.0;
             const float strength = (float) juce::jlimit (0.0, 1.0, -db / 12.0);
             g.setColour (juce::Colour (0xff2a2a2a).interpolatedWith (juce::Colour (0xff3a9be0), strength));
             g.fillRoundedRectangle (box, 3.0f);
-            g.setColour (strength > 0.3f ? juce::Colours::white : theme::dimText);
-            g.setFont (uiFont (10.0f));
-            g.drawText (juce::String (juce::roundToInt (PlaybackSimulator::bandCentreHz[b])) + " Hz " + juce::String (juce::roundToInt (db)), box,
-                        juce::Justification::centred);
+            g.setColour (strength > 0.3f ? juce::Colours::white : theme::text);
+            g.setFont (uiFont (11.5f));
+            g.drawFittedText (juce::String (juce::roundToInt (PlaybackSimulator::bandCentreHz[b])) + " Hz: " + dbText (db) + " dB", box.toNearestInt(),
+                              juce::Justification::centred, 1, 0.75f);
         }
 
-        g.setColour (theme::dimText);
-        g.setFont (uiFont (11.0f));
-        g.drawFittedText (counted ? tr ("Counted in the score: an other system is ticked in Room Sim. Not seen in cinema, where each channel has its own speaker.")
-                                  : tr ("Not counted in the score: tick an other system in Room Sim. Not seen in cinema, where each channel has its own speaker."),
-                          block.toNearestInt(), juce::Justification::centredLeft, 1);
+        inside.removeFromTop (4.0f);
+        inside.removeFromTop (paragraph (counted ? tr ("Counted in the score: an other system is ticked in Room Sim. Not seen in cinema, where each channel has its own speaker.")
+                                                 : tr ("Not counted in the score: tick an other system in Room Sim. Not seen in cinema, where each channel has its own speaker."),
+                                         uiFont (11.5f), theme::dimText, inside.getWidth(), juce::Justification::topLeft, inside));
+        inside.removeFromTop (5.0f);
+
+        const auto frame = juce::Rectangle<float> (area.getX(), top, area.getWidth(), inside.getY() - top);
+        g.setColour ((warn ? juce::Colour (0xffffb347) : otherSystemColour).withAlpha (0.7f));
+        g.drawRoundedRectangle (frame.reduced (0.5f), 4.0f, 1.0f);
+        area.setY (inside.getY());
     }
 
     // What this table is, and is not
-    area.removeFromTop (6.0f);
-    g.setColour (theme::dimText.withAlpha (0.8f));
-    g.setFont (uiFont (11.0f));
-    g.drawFittedText (tr ("Electrical models: delay, polarity, filters and level, plus the rooms ticked below (modal simulation, Room Sim tab). "
-                      "Real rooms are not boxes: a score of 100 does not protect against a given room's own faults."),
-                      area.removeFromTop (30.0f).toNearestInt(), juce::Justification::topLeft, 2);
+    area.removeFromTop (8.0f);
+    area.removeFromTop (paragraph (tr ("Electrical models: delay, polarity, filters and level, plus the rooms ticked below (modal simulation, Room Sim tab). "
+                                       "Real rooms are not boxes: a score of 100 does not protect against a given room's own faults."),
+                                   uiFont (11.5f), theme::dimText.withAlpha (0.85f), area.getWidth(), juce::Justification::topLeft, area));
+    return area.getY() + 4.0f;
 }
 
 //==============================================================================
@@ -1314,62 +1424,78 @@ void RoomSimView::mouseDown (const juce::MouseEvent& e)
             onToggle ((int) i);
 }
 
+int RoomSimView::preferredHeight (int width)
+{
+    juce::Image scratch (juce::Image::ARGB, 1, 1, true);
+    juce::Graphics g (scratch);
+    auto keep = rowAreas;
+    const int height = (int) std::ceil (render (g, (float) width));
+    rowAreas = keep;
+    return height;
+}
+
 void RoomSimView::paint (juce::Graphics& g)
 {
-    rowAreas.clear();
     g.fillAll (theme::plot);
-    auto area = getLocalBounds().toFloat().reduced (16.0f, 10.0f);
+    render (g, (float) getWidth());
+}
 
-    // Header: the bass robustness, and how to read the rooms
+float RoomSimView::render (juce::Graphics& g, float totalWidth)
+{
+    rowAreas.clear();
+    auto area = juce::Rectangle<float> (16.0f, 10.0f, totalWidth - 32.0f, 100000.0f);
+
+    // Header: the bass robustness, and how to read the rooms (the Soft / Medium / Strong selector sits on the right)
     {
-        auto top = area.removeFromTop (58.0f);
-        auto big = top.removeFromLeft (230.0f);
+        const auto font = uiFont (12.0f);
+        const juce::String text = tr ("Fifteen rooms, twenty seats each (rectangular rooms, modal sum). Each dot is a seat: what the LFE / screen "
+                                      "interaction does to its bass, against the mix as approved. The room's own colour is left out: a "
+                                      "decorrelated LFE puts every dot on 0. Ticked rooms count in the score (click a row). "
+                                      "Result = bass robustness x room score.")
+                                + " " + tr ("Below, in purple, the other systems: not cinema, electrical models of venues; their four bands in place of seats, "
+                                            "against the same channels with nothing cancelled.");
+        const float textWidthHere = std::max (200.0f, area.getWidth() - 210.0f - (float) levelSelectorWidth);
+        const float textHeight = (float) linesFor (font, text, textWidthHere) * font.getHeight() * 1.15f + 4.0f;
+        auto top = area.removeFromTop (std::max (62.0f, textHeight));
+        auto big = top.removeFromLeft (210.0f);
         g.setColour (theme::dimText);
-        g.setFont (uiFont (12.0f));
-        g.drawText (tr ("Bass robustness"), big.removeFromTop (16.0f), juce::Justification::centredLeft);
+        g.setFont (uiFont (12.5f));
+        g.drawText (tr ("Bass robustness"), big.removeFromTop (18.0f), juce::Justification::centredLeft);
         g.setColour (hasScore ? ChainsView::colourFor (1.0 - robustness / 100.0) : theme::dimText);
         g.setFont (uiFont (34.0f, true));
-        g.drawText (hasScore ? juce::String (juce::roundToInt (robustness)) : juce::String ("--"), big, juce::Justification::centredLeft);
+        g.drawText (hasScore ? juce::String (juce::roundToInt (robustness)) : juce::String ("--"), big.removeFromTop (40.0f), juce::Justification::centredLeft);
 
-        top.removeFromRight (230.0f);      // room for the Soft / Medium / Strong selector
         g.setColour (theme::dimText);
-        g.setFont (uiFont (11.5f));
-        g.drawFittedText (tr ("Fifteen rooms, twenty seats each (rectangular rooms, modal sum). Each dot is a seat: what the LFE / screen "
-                          "interaction does to its bass, against the mix as approved. The room's own colour is left out: a "
-                          "decorrelated LFE puts every dot on 0. Ticked rooms count in the score (click a row). "
-                          "Result = bass robustness x room score.")
-                          + " " + tr ("Below, in purple, the other systems: not cinema, electrical models of venues; their four bands in place of seats, "
-                                      "against the same channels with nothing cancelled."),
-                          top.toNearestInt(), juce::Justification::centredLeft, 4);
+        g.setFont (font);
+        g.drawFittedText (text, top.withWidth (textWidthHere).toNearestInt(), juce::Justification::topLeft, 20, 0.95f);
     }
 
-    area.removeFromTop (6.0f);
+    area.removeFromTop (8.0f);
 
     // Column titles
-    const float nameWidth = 250.0f, scoreWidth = 70.0f, resultWidth = 80.0f;
+    const float nameWidth = 260.0f, scoreWidth = 70.0f, resultWidth = 80.0f;
     {
-        auto head = area.removeFromTop (16.0f);
+        auto head = area.removeFromTop (30.0f);
         g.setColour (theme::dimText);
-        g.setFont (uiFont (11.0f));
-        g.drawText (tr ("Room"), head.removeFromLeft (nameWidth), juce::Justification::centredLeft);
-        g.drawText (tr ("Result"), head.removeFromRight (resultWidth), juce::Justification::centred);
-        g.drawText (tr ("Room"), head.removeFromRight (scoreWidth), juce::Justification::centred);
-        g.drawText ("-12 dB", head.removeFromLeft (60.0f), juce::Justification::centredLeft);
-        g.drawText ("+12 dB", head.removeFromRight (60.0f), juce::Justification::centredRight);
-        g.drawText (tr ("seats: bass change from the LFE / screen interaction"), head, juce::Justification::centred);
+        g.setFont (uiFont (11.5f));
+        g.drawText (tr ("Room"), head.removeFromLeft (nameWidth), juce::Justification::bottomLeft);
+        g.drawText (tr ("Result"), head.removeFromRight (resultWidth), juce::Justification::centredBottom);
+        g.drawText (tr ("Room"), head.removeFromRight (scoreWidth), juce::Justification::centredBottom);
+        g.drawText ("-12 dB", head.removeFromLeft (56.0f), juce::Justification::bottomLeft);
+        g.drawText ("+12 dB", head.removeFromRight (56.0f), juce::Justification::bottomRight);
+        g.drawFittedText (tr ("seats: bass change from the LFE / screen interaction"), head.toNearestInt(), juce::Justification::centredBottom, 2, 0.85f);
     }
 
     if (! result.hasBass || result.rooms.empty())
     {
         g.setColour (theme::dimText);
         g.setFont (uiFont (13.0f));
-        g.drawText (tr ("Waiting for bass"), area, juce::Justification::centred);
-        return;
+        g.drawText (tr ("Waiting for bass"), area.removeFromTop (60.0f), juce::Justification::centred);
+        return area.getY();
     }
 
     const auto numOthers = (size_t) std::count_if (result.rooms.begin(), result.rooms.end(), [] (const RoomResult& r) { return r.otherSystem; });
-    const float separator = numOthers > 0 ? 20.0f : 0.0f;
-    const float rowHeight = juce::jmin (46.0f, (area.getHeight() - separator) / (float) result.rooms.size());
+    const float rowHeight = 40.0f;
 
     for (size_t i = 0; i < result.rooms.size(); ++i)
     {
@@ -1378,25 +1504,37 @@ void RoomSimView::paint (juce::Graphics& g)
         // Where the other systems begin: a line, and what they are
         if (room.otherSystem && (i == 0 || ! result.rooms[i - 1].otherSystem))
         {
-            auto line = area.removeFromTop (separator);
+            area.removeFromTop (6.0f);
+            auto line = area.removeFromTop (24.0f);
+            const juce::String label = tr ("OTHER SYSTEMS - not cinema: venues, electrical model, screen channels summed");
+            const auto font = uiFont (12.0f, true);
+            const float w = std::min (line.getWidth(), textWidth (font, label) + 24.0f);
             g.setColour (otherSystemColour.withAlpha (0.6f));
             g.fillRect (line.getX(), line.getCentreY(), line.getWidth(), 1.0f);
-            auto label = line.withSizeKeepingCentre (juce::jmin (line.getWidth(), 520.0f), line.getHeight());
+            auto box = line.withSizeKeepingCentre (w, line.getHeight());
             g.setColour (theme::plot);
-            g.fillRect (label);
+            g.fillRect (box);
             g.setColour (otherSystemColour);
-            g.setFont (uiFont (11.5f, true));
-            g.drawText (tr ("OTHER SYSTEMS - not cinema: venues, electrical model, screen channels summed"), label, juce::Justification::centred);
+            g.setFont (font);
+            g.drawFittedText (label, box.toNearestInt(), juce::Justification::centred, 1, 0.8f);
         }
 
-        auto row = area.removeFromTop (rowHeight);
-        rowAreas.push_back (row);
+        // An other system's row has its description under it, full width
+        const juce::String description = room.otherSystem ? tr (juce::String (room.description)) : juce::String();
+        const auto descriptionFont = uiFont (11.5f);
+        const float descriptionHeight = room.otherSystem ? (float) linesFor (descriptionFont, description, area.getWidth() - 30.0f) * 15.0f + 4.0f : 0.0f;
+        auto whole = area.removeFromTop (rowHeight + descriptionHeight);
+        rowAreas.push_back (whole);
+        auto row = whole.removeFromTop (rowHeight);
         const bool counted = i < selected.size() && selected[i];
 
         if (room.otherSystem)
         {
             g.setColour (otherSystemColour.withAlpha (0.07f));
-            g.fillRect (row);
+            g.fillRect (row.getUnion (whole));
+            g.setColour (theme::dimText);
+            g.setFont (descriptionFont);
+            g.drawFittedText (description, whole.withTrimmedLeft (24.0f).withTrimmedRight (6.0f).toNearestInt(), juce::Justification::topLeft, 6, 0.95f);
         }
         else if (i % 2 == 0)
         {
@@ -1406,7 +1544,7 @@ void RoomSimView::paint (juce::Graphics& g)
 
         // Tick box: does this room count in the score?
         {
-            auto box = row.removeFromLeft (24.0f).withSizeKeepingCentre (13.0f, 13.0f);
+            auto box = row.removeFromLeft (24.0f).withSizeKeepingCentre (14.0f, 14.0f);
             g.setColour (counted ? (room.otherSystem ? otherSystemColour.darker (0.3f) : juce::Colour (0xff3a9be0)) : juce::Colour (0xff3a3a3a));
             g.fillRoundedRectangle (box, 3.0f);
 
@@ -1422,36 +1560,32 @@ void RoomSimView::paint (juce::Graphics& g)
         }
 
         // Name and size
-        auto name = row.removeFromLeft (nameWidth - 24.0f);
+        auto name = row.removeFromLeft (nameWidth - 24.0f).withTrimmedRight (8.0f);
 
         if (room.otherSystem)
         {
-            // The short name, and what the system does (in full in the tooltip of its tick box)
             const int which = (int) (i - (result.rooms.size() - numOthers));
-            g.setColour (counted ? otherSystemColour : otherSystemColour.withAlpha (0.6f));
-            g.setFont (uiFont (12.5f, counted));
-            g.drawText (tr ("Other system: ") + tr (PlaybackSimulator::otherSystemShortName (which)), name.removeFromTop (row.getHeight() * 0.55f),
-                        juce::Justification::bottomLeft);
-            g.setColour (theme::dimText);
-            g.setFont (uiFont (10.0f));
-            g.drawFittedText (tr (juce::String (room.description)), name.toNearestInt(), juce::Justification::topLeft, 1, 0.8f);
+            g.setColour (counted ? otherSystemColour : otherSystemColour.withAlpha (0.75f));
+            g.setFont (uiFont (13.0f, counted));
+            g.drawFittedText (tr ("Other system: ") + tr (PlaybackSimulator::otherSystemShortName (which)), name.toNearestInt(),
+                              juce::Justification::centredLeft, 2, 0.8f);
         }
         else
         {
             g.setColour (counted ? theme::text : theme::dimText);
-            g.setFont (uiFont (12.5f, counted));
-            g.drawText (tr (juce::String (room.spec.name)), name.removeFromTop (row.getHeight() * 0.55f), juce::Justification::bottomLeft);
+            g.setFont (uiFont (13.0f, counted));
+            g.drawFittedText (tr (juce::String (room.spec.name)), name.removeFromTop (name.getHeight() * 0.55f).toNearestInt(), juce::Justification::bottomLeft, 1, 0.8f);
             g.setColour (theme::dimText);
-            g.setFont (uiFont (10.0f));
-            g.drawText (juce::String (room.spec.length, 0) + " x " + juce::String (room.spec.width, 0) + " x " + juce::String (room.spec.height, 1)
-                          + " m,  RT60 " + juce::String (room.spec.rt60, 2) + " s",
-                        name, juce::Justification::topLeft);
+            g.setFont (uiFont (11.0f));
+            g.drawFittedText (juce::String (room.spec.length, 0) + " x " + juce::String (room.spec.width, 0) + " x " + juce::String (room.spec.height, 1)
+                                  + " m,  RT60 " + juce::String (room.spec.rt60, 2) + " s",
+                              name.toNearestInt(), juce::Justification::topLeft, 1, 0.8f);
         }
 
         // Result = robustness x room score, and the room score
         const double roomScore = i < shownRoom.size() ? shownRoom[i] : room.roomScore;
         const double combined = robustness * roomScore / 100.0;
-        auto resultBox = row.removeFromRight (resultWidth).reduced (6.0f, 3.0f);
+        auto resultBox = row.removeFromRight (resultWidth).reduced (6.0f, 5.0f);
         g.setColour (ChainsView::colourFor (1.0 - combined / 100.0));
         g.fillRoundedRectangle (resultBox, 4.0f);
         g.setColour (juce::Colours::white);
@@ -1460,12 +1594,12 @@ void RoomSimView::paint (juce::Graphics& g)
 
         auto scoreBox = row.removeFromRight (scoreWidth);
         g.setColour (theme::text);
-        g.setFont (uiFont (13.0f));
+        g.setFont (uiFont (13.5f));
         g.drawText (juce::String (juce::roundToInt (roomScore)), scoreBox, juce::Justification::centred);
 
         // Seats on a -12 .. +12 dB scale
         auto scale = row.reduced (6.0f, 0.0f);
-        const float mid = scale.getCentreX(), y = scale.getCentreY();
+        const float mid = scale.getCentreX(), y = scale.getCentreY() + (room.otherSystem ? 4.0f : 0.0f);
         const auto xFor = [&] (double db) { return mid + (float) juce::jlimit (-1.0, 1.0, db / 12.0) * scale.getWidth() / 2.0f; };
 
         g.setColour (juce::Colours::white.withAlpha (0.10f));
@@ -1485,10 +1619,10 @@ void RoomSimView::paint (juce::Graphics& g)
             if (room.otherSystem)
             {
                 // A band, not a seat: a square, with its frequency above it
-                g.fillRect (x - 3.5f, y - 3.5f, 7.0f, 7.0f);
-                g.setColour (otherSystemColour.withAlpha (0.8f));
-                g.setFont (uiFont (9.0f));
-                g.drawText (juce::String (juce::roundToInt (PlaybackSimulator::bandCentreHz[s])), juce::Rectangle<float> (x - 14.0f, y - 17.0f, 28.0f, 10.0f),
+                g.fillRect (x - 4.0f, y - 4.0f, 8.0f, 8.0f);
+                g.setColour (otherSystemColour);
+                g.setFont (uiFont (10.5f));
+                g.drawText (juce::String (juce::roundToInt (PlaybackSimulator::bandCentreHz[s])), juce::Rectangle<float> (x - 16.0f, y - 19.0f, 32.0f, 12.0f),
                             juce::Justification::centred);
             }
             else
@@ -1501,6 +1635,8 @@ void RoomSimView::paint (juce::Graphics& g)
         g.setColour (juce::Colours::white);
         g.fillRect (xFor (room.medianDb) - 1.0f, y - 8.0f, 2.0f, 16.0f);
     }
+
+    return area.getY() + 10.0f;
 }
 
 //==============================================================================
@@ -1582,8 +1718,8 @@ void HistoryStrip::paint (juce::Graphics& g)
     {
         const auto row = juce::Rectangle<float> (area.getX(), area.getY() + lane * (float) i, area.getWidth(), lane).reduced (0.0f, 1.0f);
         g.setColour (theme::dimText);
-        g.drawText (names[i], juce::Rectangle<float> (4.0f, row.getY() - 2.0f, area.getX() - 10.0f, row.getHeight() + 4.0f),
-                    juce::Justification::centredRight);
+        g.drawFittedText (names[i], juce::Rectangle<float> (4.0f, row.getY() - 2.0f, area.getX() - 10.0f, row.getHeight() + 4.0f).toNearestInt(),
+                          juce::Justification::centredRight, 1, 0.7f);
         g.setColour (juce::Colour (0xff1c1c1c));
         g.fillRect (row);
 

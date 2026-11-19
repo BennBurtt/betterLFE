@@ -105,7 +105,10 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
     addAndMakeVisible (transientStrip);
     addAndMakeVisible (correlation);
     addAndMakeVisible (history);
-    addChildComponent (roomView);
+    roomViewport.setViewedComponent (&roomView, false);
+    roomViewport.setScrollBarsShown (true, false);
+    roomViewport.setScrollBarThickness (10);
+    addChildComponent (roomViewport);
 
     roomButton.setClickingTogglesState (true);
     roomButton.setTooltip (tr ("Room Sim: the bass seat by seat in fifteen cinema rooms, from a live corridor room to a treated IMAX."));
@@ -117,7 +120,9 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
     proButton.setClickingTogglesState (true);
     proButton.setTooltip (tr ("Room Sim Pro: three rooms of your own, every speaker placed freely, with fill speakers. Its own score, not part of the global one."));
     proButton.onClick = [this] { showMode (proButton.getToggleState() ? 2 : 0); };
-    addAndMakeVisible (proButton);
+
+    if (roomProEnabled)
+        addAndMakeVisible (proButton);
 
     // Test: the built-in test signals, played as an input
     addChildComponent (testView);
@@ -128,6 +133,7 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
     testView.onPlay = [this] (int index) { analysis.playTest (index); };
     testView.onUseTestSource = [this] { useTestSource (true); };
     testView.onLoadRooms = [this] { proView.loadRooms (ProRooms::defaults()); };
+    testView.setRoomProShown (roomProEnabled);
 
     // Stage: the room's subwoofer / screen alignment, with a microphone
     addChildComponent (stageView);
@@ -205,7 +211,7 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
     if (options.openCard == "rooms")
         roomButton.setToggleState (true, juce::sendNotificationSync);
 
-    if (options.openCard == "roompro")
+    if (roomProEnabled && options.openCard == "roompro")
         proButton.setToggleState (true, juce::sendNotificationSync);
 
     lastTick = juce::Time::getMillisecondCounterHiRes() * 0.001;
@@ -424,14 +430,14 @@ void MainComponent::buildCards()
         auto& card = cards[(size_t) cardIndex];
 
         for (auto* child : children)
-            card.addAndMakeVisible (child);
+            card.add (*child);
 
         card.onLayout = std::move (layout);
-        card.setSize (width, height);
+        card.setDesignSize (width, height);
         addChildComponent (card);
     };
 
-    populate (sourceCard, 360, 226, { &formatLabel, &formatBox, &deviceLabel, &deviceBox, &statusLabel, &lfeGainToggle },
+    populate (sourceCard, 400, 250, { &formatLabel, &formatBox, &deviceLabel, &deviceBox, &statusLabel, &lfeGainToggle },
               [this] (juce::Rectangle<int> r)
               {
                   formatLabel.setBounds (r.removeFromTop (20));
@@ -440,26 +446,26 @@ void MainComponent::buildCards()
                   deviceLabel.setBounds (r.removeFromTop (20));
                   deviceBox.setBounds (r.removeFromTop (26));
                   r.removeFromTop (4);
-                  statusLabel.setBounds (r.removeFromTop (30));
-                  lfeGainToggle.setBounds (r.removeFromTop (26));
+                  statusLabel.setBounds (r.removeFromTop (36));
+                  lfeGainToggle.setBounds (r.removeFromTop (34));
               });
 
-    populate (spectrumCard, 330, 352, { &rangeLabel, &rangeBox, &peakHoldToggle, &tiltToggle, &inertia, &integration,
+    populate (spectrumCard, 380, 380, { &rangeLabel, &rangeBox, &peakHoldToggle, &tiltToggle, &inertia, &integration,
                                         &fpsLabel, &fpsBox, &windowLabel, &windowBox },
               [this] (juce::Rectangle<int> r)
               {
                   rangeLabel.setBounds (r.removeFromTop (20));
                   rangeBox.setBounds (r.removeFromTop (26));
                   r.removeFromTop (6);
-                  peakHoldToggle.setBounds (r.removeFromTop (24));
-                  tiltToggle.setBounds (r.removeFromTop (24));
+                  peakHoldToggle.setBounds (r.removeFromTop (32));
+                  tiltToggle.setBounds (r.removeFromTop (32));
                   r.removeFromTop (6);
                   inertia.setBounds (r.removeFromTop (46));
                   r.removeFromTop (4);
                   integration.setBounds (r.removeFromTop (46));
                   r.removeFromTop (8);
                   auto combos = r.removeFromTop (46);
-                  auto fps = combos.removeFromLeft (100);
+                  auto fps = combos.removeFromLeft (150);
                   fpsLabel.setBounds (fps.removeFromTop (20));
                   fpsBox.setBounds (fps.withTrimmedRight (6));
                   windowLabel.setBounds (combos.removeFromTop (20));
@@ -467,23 +473,23 @@ void MainComponent::buildCards()
                   r.removeFromTop (8);
               });
 
-    populate (alertCard, 320, 210, { &decay, &alertModeBox, &levelWeightToggle, &scoreSpeed },
+    populate (alertCard, 380, 230, { &decay, &alertModeBox, &levelWeightToggle, &scoreSpeed },
               [this] (juce::Rectangle<int> r)
               {
                   decay.setBounds (r.removeFromTop (46));
                   r.removeFromTop (8);
                   alertModeBox.setBounds (r.removeFromTop (26));
                   r.removeFromTop (4);
-                  levelWeightToggle.setBounds (r.removeFromTop (24));
+                  levelWeightToggle.setBounds (r.removeFromTop (32));
                   r.removeFromTop (8);
                   scoreSpeed.setBounds (r.removeFromTop (46));
               });
 
-    populate (transientsCard, 380, 452, { &transientToggle, &tAttack, &tHoldProfile, &tRelease, &tSensitivity, &tSearch, &tMatch, &tHold,
+    populate (transientsCard, 420, 470, { &transientToggle, &tAttack, &tHoldProfile, &tRelease, &tSensitivity, &tSearch, &tMatch, &tHold,
                                           &transientDefaultsButton },
               [this] (juce::Rectangle<int> r)
               {
-                  transientToggle.setBounds (r.removeFromTop (26));
+                  transientToggle.setBounds (r.removeFromTop (32));
                   r.removeFromTop (6);
 
                   for (auto* slider : { &tAttack, &tHoldProfile, &tRelease, &tSensitivity, &tSearch, &tMatch, &tHold })
@@ -492,7 +498,7 @@ void MainComponent::buildCards()
                       r.removeFromTop (4);
                   }
 
-                  transientDefaultsButton.setBounds (r.removeFromTop (24).removeFromRight (90));
+                  transientDefaultsButton.setBounds (r.removeFromTop (26).removeFromRight (juce::roundToInt (textWidth (uiFont (13.5f), transientDefaultsButton.getButtonText()) + 30.0f)));
               });
 
     // Rooms of the Room Sim that count in the score
@@ -531,28 +537,41 @@ void MainComponent::buildCards()
     roomView.onToggle = [this] (int room) { setRoomSelected (room, ! roomSelected[(size_t) room]); };
     roomView.setSelection (roomSelected);
 
-    populate (chainsCard, 600, 688, { &chainsView, &roomTicksLabel },
+    populate (chainsCard, 820, 760, { &chainsView, &roomTicksLabel },
               [this] (juce::Rectangle<int> r)
               {
-                  // The fifteen rooms, five a row, then the other systems, four a row
+                  // The table as tall as it needs, then the fifteen rooms, five a row, then the other systems, four a row
                   const int rooms = (int) RoomSimulator::defaultRooms().size(), others = (int) roomTicks.size() - rooms;
                   const int otherRows = (others + 3) / 4;
-                  auto ticks = r.removeFromBottom ((3 + otherRows) * 24);
-                  roomTicksLabel.setBounds (r.removeFromBottom (22));
-                  chainsView.setBounds (r);
+                  chainsView.setBounds (r.removeFromTop (chainsView.preferredHeight (r.getWidth())));
+                  r.removeFromTop (10);
+                  roomTicksLabel.setBounds (r.removeFromTop (22));
+                  auto ticks = r.removeFromTop ((3 + otherRows) * 26);
                   const int width = ticks.getWidth() / 5, otherWidth = ticks.getWidth() / 4;
 
                   for (int i = 0; i < (int) roomTicks.size(); ++i)
                   {
                       if (i < rooms)
-                          roomTicks[(size_t) i]->setBounds (ticks.getX() + width * (i % 5), ticks.getY() + 24 * (i / 5), width, 24);
+                          roomTicks[(size_t) i]->setBounds (ticks.getX() + width * (i % 5), ticks.getY() + 26 * (i / 5), width, 26);
                       else
-                          roomTicks[(size_t) i]->setBounds (ticks.getX() + otherWidth * ((i - rooms) % 4), ticks.getY() + 24 * (3 + (i - rooms) / 4), otherWidth, 24);
+                          roomTicks[(size_t) i]->setBounds (ticks.getX() + otherWidth * ((i - rooms) % 4), ticks.getY() + 26 * (3 + (i - rooms) / 4), otherWidth, 26);
                   }
               });
 
     for (auto& tick : roomTicks)
-        cards[(size_t) chainsCard].addAndMakeVisible (tick.get());
+        cards[(size_t) chainsCard].add (*tick);
+
+    // The card is as tall as the table (its text wraps), the label and the ticks
+    cards[(size_t) chainsCard].contentHeightFor = [this] (int width)
+    {
+        const int others = (int) roomTicks.size() - (int) RoomSimulator::defaultRooms().size();
+        return chainsView.preferredHeight (width) + 10 + 22 + (3 + (others + 3) / 4) * 26 + 4;
+    };
+    chainsView.onHeightChanged = [this]
+    {
+        positionCards();
+        cards[(size_t) chainsCard].resized();
+    };
 
     // Dev panel
     {
@@ -564,7 +583,8 @@ void MainComponent::buildCards()
         dWorstShare.format = [] (double v) { return juce::String (juce::roundToInt (100.0 * v)) + " %"; };
         dInfraLo.format = dInfraHi.format = hz;
         const juce::String sectionTitles[] = { tr ("Tolerances (Soft, Medium, Strong)"), tr ("Cinema subwoofer off its place"), tr ("LFE dependence"),
-                                               tr ("Infra-bass"), tr ("Rooms (Room Sim and Room Sim Pro)") };
+                                               tr ("Infra-bass"),
+                                               roomProEnabled ? tr ("Rooms (Room Sim and Room Sim Pro)") : tr ("Rooms (Room Sim)") };
 
         for (size_t i = 0; i < devSections.size(); ++i)
         {
@@ -643,19 +663,20 @@ void MainComponent::buildCards()
         auto& card = cards[(size_t) devCard];
 
         for (auto* slider : devSliders())
-            card.addAndMakeVisible (slider);
+            card.add (*slider);
 
-        card.addAndMakeVisible (devDefaultsButton);
-        card.addAndMakeVisible (devLoudness);
+        card.add (devDefaultsButton);
+        card.add (devLoudness);
 
         for (auto& section : devSections)
-            card.addAndMakeVisible (section);
+            card.add (section);
 
         card.onLayout = [this] (juce::Rectangle<int> r)
         {
             // Two columns of titled groups, then the table of the bass playing now
             auto bottom = r.removeFromBottom (100);
-            devDefaultsButton.setBounds (bottom.removeFromRight (100).removeFromBottom (26).withTrimmedLeft (10));
+            devDefaultsButton.setBounds (bottom.removeFromRight (juce::roundToInt (textWidth (uiFont (13.5f), devDefaultsButton.getButtonText()) + 40.0f))
+                                             .removeFromBottom (26).withTrimmedLeft (10));
             devLoudness.setBounds (bottom.withTrimmedRight (12));
             r.removeFromBottom (8);
             auto left = r.removeFromLeft (r.getWidth() / 2).withTrimmedRight (14);
@@ -678,9 +699,15 @@ void MainComponent::buildCards()
             group (left, 1, { &dLate, &dEarly });
             group (left, 2, { &dCeiling, &dLevelWeight, &dLevelRed });
             group (right, 3, { &dInfraWeight, &dInfraLo, &dInfraHi });
-            group (right, 4, { &dWorstWeight, &dWorstShare, &dCoverage, &dDips });
+            // Coverage is Room Sim Pro's: not shown while it is set aside
+            dCoverage.setVisible (roomProEnabled);
+
+            if (roomProEnabled)
+                group (right, 4, { &dWorstWeight, &dWorstShare, &dCoverage, &dDips });
+            else
+                group (right, 4, { &dWorstWeight, &dWorstShare, &dDips });
         };
-        card.setSize (760, 590);
+        card.setDesignSize (780, 610);
         addChildComponent (card);
     }
 
@@ -711,13 +738,16 @@ void MainComponent::showCard (int index)
 
 void MainComponent::positionCards()
 {
-    // Each card hangs under its button, kept inside the window
+    // Each card hangs under its button, kept inside the window; too tall for it, it scrolls
     for (int i = 0; i < numCards; ++i)
     {
         auto& card = cards[(size_t) i];
         const auto button = cardButtons[(size_t) i].getBounds();
-        const int x = juce::jlimit (8, juce::jmax (8, getWidth() - card.getWidth() - 8), button.getX());
-        card.setTopLeftPosition (x, button.getBottom() + 6);
+        const int top = button.getBottom() + 6;
+        const int width = juce::jmin (card.getDesignWidth(), getWidth() - 16);
+        const int height = juce::jmax (120, juce::jmin (card.getDesignHeight(), getHeight() - top - 8));
+        const int x = juce::jlimit (8, juce::jmax (8, getWidth() - width - 8), button.getX());
+        card.setBounds (x, top, width, height);
         card.toFront (false);
     }
 }
@@ -726,6 +756,9 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
 {
     // Option-Z / Option-Shift-Z: undo and redo in Room Sim Pro; Cmd-S / Cmd-O: save and load the rooms, from any view
     const auto c = juce::CharacterFunctions::toLowerCase ((juce::juce_wchar) key.getKeyCode());
+
+    if (! roomProEnabled)
+        return false;
 
     if (proMode || (key.getModifiers().isCommandDown() && (c == 's' || c == 'o')))
         return proView.keyPressed (key);
@@ -761,15 +794,16 @@ void LoudnessTable::paint (juce::Graphics& g)
     // A header row, then one row per band
     const juce::String headers[] = { tr ("Band"), tr ("Level"), tr ("Loudness"), tr ("dB to double it") };
     const char* bands[] = { "20-30 Hz", "30-60 Hz", "60-90 Hz", "90-120 Hz" };
-    const float columnWidth = area.getWidth() / 5.0f, rowHeight = (area.getHeight() - 2.0f) / 3.0f;
+    // The first column a little wider (its names are longer); text wraps on two lines rather than being cut
+    const float firstWidth = area.getWidth() * 0.24f, columnWidth = (area.getWidth() - firstWidth) / 4.0f, rowHeight = (area.getHeight() - 2.0f) / 3.0f;
 
     const auto cell = [&] (int row, int column, const juce::String& text, bool header)
     {
         g.setColour (header ? theme::dimText : theme::text);
-        g.setFont (uiFont (header ? 11.0f : 12.0f, ! header));
-        const auto r = juce::Rectangle<float> (area.getX() + columnWidth * (float) column, area.getY() + rowHeight * (float) row,
-                                               columnWidth, rowHeight);
-        g.drawText (text, r, column == 0 ? juce::Justification::centredLeft : juce::Justification::centred);
+        g.setFont (uiFont (header ? 11.5f : 12.0f, ! header));
+        const float x = column == 0 ? area.getX() : area.getX() + firstWidth + columnWidth * (float) (column - 1);
+        const auto r = juce::Rectangle<float> (x, area.getY() + rowHeight * (float) row, column == 0 ? firstWidth : columnWidth, rowHeight).reduced (2.0f, 0.0f);
+        g.drawFittedText (text, r.toNearestInt(), column == 0 ? juce::Justification::centredLeft : juce::Justification::centred, 2, 0.75f);
     };
 
     // Transposed: bands across, quantities down, so that four bands fit on one line
@@ -855,34 +889,59 @@ void MainComponent::resized()
     languageFlag.toFront (false);
 
     auto bar = area.removeFromTop (barHeight).reduced (10, 6);
-    const int widths[numCards] = { 90, 90, 104, 100, 140, 60 };
-    resetButton.setBounds (bar.removeFromRight (80));
-    bar.removeFromRight (6);
-    listeningButton.setBounds (bar.removeFromRight (170));
 
-    for (int i = 0; i < numCards; ++i)
+    // The bar: each button as wide as its text, the whole squeezed (text shrinking) when the window is narrow
     {
-        if (i == chainsCard)
-            bar.removeFromLeft (14);
+        struct Item { juce::Component* button; juce::String text; float gapBefore; };
+        std::vector<Item> left, right;
 
-        cardButtons[(size_t) i].setBounds (bar.removeFromLeft (widths[i]));
-        bar.removeFromLeft (6);
+        for (int i = 0; i < numCards; ++i)
+            left.push_back ({ &cardButtons[(size_t) i], cardButtons[(size_t) i].getButtonText(), i == 0 ? 0.0f : (i == chainsCard ? 14.0f : 6.0f) });
+
+        left.push_back ({ &roomButton, roomButton.getButtonText(), 14.0f });
+
+        if (roomProEnabled)
+            left.push_back ({ &proButton, proButton.getButtonText(), 6.0f });
+
+        for (auto* b : { &testButton, &logButton, &stageButton })
+            left.push_back ({ b, b->getButtonText(), 6.0f });
+
+        right.push_back ({ &listeningButton, listeningButton.getButtonText(), 0.0f });
+        right.push_back ({ &resetButton, resetButton.getButtonText(), 6.0f });
+
+        const auto font = uiFont (13.5f);
+        float wanted = 14.0f;       // between the two groups
+
+        for (auto* group : { &left, &right })
+            for (const auto& item : *group)
+                wanted += item.gapBefore + textWidth (font, item.text) + 22.0f;
+
+        const float scale = juce::jlimit (0.55f, 1.0f, (float) bar.getWidth() / wanted);
+        float x = (float) bar.getX();
+
+        for (const auto& item : left)
+        {
+            x += item.gapBefore * scale;
+            const float w = (textWidth (font, item.text) + 22.0f) * scale;
+            item.button->setBounds (juce::roundToInt (x), bar.getY(), juce::roundToInt (w), bar.getHeight());
+            x += w;
+        }
+
+        float xr = (float) bar.getRight();
+
+        for (auto it = right.rbegin(); it != right.rend(); ++it)
+        {
+            const float w = (textWidth (font, it->text) + 22.0f) * scale;
+            xr -= w;
+            it->button->setBounds (juce::roundToInt (xr), bar.getY(), juce::roundToInt (w), bar.getHeight());
+            xr -= it->gapBefore * scale;
+        }
     }
 
-    bar.removeFromLeft (14);
-    roomButton.setBounds (bar.removeFromLeft (100));
-    bar.removeFromLeft (6);
-    proButton.setBounds (bar.removeFromLeft (120));
-    bar.removeFromLeft (6);
-    testButton.setBounds (bar.removeFromLeft (70));
-    bar.removeFromLeft (6);
-    logButton.setBounds (bar.removeFromLeft (60));
-    bar.removeFromLeft (6);
-    stageButton.setBounds (bar.removeFromLeft (70));
-
     history.setBounds (area.removeFromBottom (48));
-    roomView.setBounds (area);
-    roomView.setVisible (roomMode);
+    roomViewport.setBounds (area);
+    roomViewport.setVisible (roomMode);
+    layoutRoomView();
     proView.setBounds (area);
     proView.setVisible (proMode);
     testView.setBounds (area);
@@ -995,7 +1054,7 @@ void MainComponent::useTestSource (bool on)
 void MainComponent::showMode (int mode)
 {
     roomMode = mode == 1;
-    proMode = mode == 2;
+    proMode = roomProEnabled && mode == 2;
     testMode = mode == 3;
     logMode = mode == 4;
     stageMode = mode == 5;
@@ -1012,6 +1071,21 @@ void MainComponent::showMode (int mode)
         proView.grabKeyboardFocus();
 
     resized();
+}
+
+void MainComponent::layoutRoomView()
+{
+    const int width = roomViewport.getWidth();
+    int height = roomView.preferredHeight (width);
+    const bool scrolls = height > roomViewport.getHeight();
+
+    if (scrolls)
+        height = roomView.preferredHeight (width - roomViewport.getScrollBarThickness());
+
+    const int w = width - (scrolls ? roomViewport.getScrollBarThickness() : 0), h = juce::jmax (height, roomViewport.getHeight());
+
+    if (roomView.getWidth() != w || roomView.getHeight() != h)
+        roomView.setSize (w, h);
 }
 
 void MainComponent::refreshStageDevices()
@@ -1422,6 +1496,7 @@ void MainComponent::setListeningLevel (double dbC)
     listeningDbC = juce::jlimit (60.0, 100.0, std::round (dbC));
     listeningButton.setButtonText (tr ("Listening ") + juce::String ((int) listeningDbC) + " dB(C)");
     simulator.tuning.listeningLevelDbC = listeningDbC;
+    resized();      // the button's width follows its text
 }
 
 void MainComponent::showListeningMenu()
@@ -1777,7 +1852,10 @@ void MainComponent::timerCallback()
         spectrum.setScore ((double) displayedScore);
 
         if (roomMode)
+        {
             roomView.update (roomResult, (double) displayedScore, t.hasBass && displayedScore >= 0);
+            layoutRoomView();      // as tall as its rows (a row more or less, a description that wraps)
+        }
         spectrum.setOverlap ({ { t.overlap[0].amount, t.overlap[1].amount, t.overlap[2].amount } });
 
         // History: the strongest value of each indicator over the column

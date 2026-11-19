@@ -753,6 +753,10 @@ fait passer le score du même mix de 100 à 0.
 
 ## 3 ter. Room Sim Pro : trois salles à soi
 
+> **Mis de côté pour l'instant.** L'onglet, ses menus (Fichier > salles,
+> Édition), ses signaux de test et son réglage Dev sont masqués. Le code est
+> gardé tel quel et testé ; il reviendra plus tard.
+
 Onglet « Room Sim Pro » (exclusif avec Room Sim). Le but : sortir de
 l'implantation cinéma standard et tester le mix dans des salles construites à
 la main (exposition, défilé, galerie, tente, église, salon, régie de studio), enceintes

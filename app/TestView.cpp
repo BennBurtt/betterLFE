@@ -33,6 +33,13 @@ TestView::TestView()
     addAndMakeVisible (roomsButton);
 }
 
+void TestView::setRoomProShown (bool shown)
+{
+    roomProShown = shown;
+    roomsButton.setVisible (shown);
+    resized();
+}
+
 void TestView::setState (bool testSourceOn, int now, double seconds)
 {
     const bool changed = testSourceOn != sourceOn || now != playing;
@@ -53,28 +60,37 @@ void TestView::resized()
     auto area = getLocalBounds().reduced (16, 10);
     auto top = area.removeFromTop (64);
     auto buttons = top.removeFromBottom (28);
-    roomsButton.setBounds (buttons.removeFromRight (260));
+    const auto fit = [] (juce::TextButton& b) { return juce::roundToInt (textWidth (uiFont (13.5f), b.getButtonText()) + 30.0f); };
+
+    if (roomProShown)
+    {
+        roomsButton.setBounds (buttons.removeFromRight (fit (roomsButton)));
+        buttons.removeFromRight (8);
+    }
+
+    stopButton.setBounds (buttons.removeFromRight (fit (stopButton)));
     buttons.removeFromRight (8);
-    stopButton.setBounds (buttons.removeFromRight (90));
-    buttons.removeFromRight (8);
-    useButton.setBounds (buttons.removeFromRight (240));
+    useButton.setBounds (buttons.removeFromRight (fit (useButton)));
     area.removeFromTop (8);
     viewport.setBounds (area);
-    list.setSize (area.getWidth() - viewport.getScrollBarThickness(), list.preferredHeight());
+
+    // The width first: the rows' heights follow from it
+    list.setSize (area.getWidth() - viewport.getScrollBarThickness(), list.getHeight());
+    list.setSize (list.getWidth(), list.preferredHeight());
 }
 
 void TestView::paint (juce::Graphics& g)
 {
     g.fillAll (theme::plot);
-    auto area = getLocalBounds().reduced (16, 10).removeFromTop (36);
+    auto area = getLocalBounds().reduced (16, 10).removeFromTop (36).withTrimmedRight (levelSelectorWidth);
     g.setColour (theme::text);
     g.setFont (uiFont (15.0f, true));
     g.drawText (tr ("Test signals"), area.removeFromTop (18), juce::Justification::centredLeft);
-    g.setFont (uiFont (11.5f));
+    g.setFont (uiFont (12.0f));
     g.setColour (sourceOn ? juce::Colour (0xff7ed957) : juce::Colour (0xffffb347));
-    g.drawText (sourceOn ? tr ("Input: the test signals. Click a signal to play it; it loops. Level Strong, LFE +10 dB checked, as measured.")
-                         : tr ("To hear them: Source > input device > \"SubGUARD test signals\" (or the button below)."),
-                area, juce::Justification::centredLeft);
+    g.drawFittedText (sourceOn ? tr ("Input: the test signals. Click a signal to play it; it loops. Level Strong, LFE +10 dB checked, as measured.")
+                               : tr ("To hear them: Source > input device > \"SubGUARD test signals\" (or the button below)."),
+                      area, juce::Justification::centredLeft, 1, 0.8f);
 }
 
 //==============================================================================
@@ -84,15 +100,18 @@ std::vector<TestView::List::Row> TestView::List::layout() const
     const auto& scenes = TestSignals::all();
     int y = 0;
 
-    for (int group = 0; group < 2; ++group)
+    for (int group = 0; group < (owner.roomProShown ? 2 : 1); ++group)
     {
         y += headerHeight;
 
         for (size_t i = 0; i < scenes.size(); ++i)
             if (scenes[i].roomSimPro == (group == 1))
             {
-                rows.push_back ({ (int) i, juce::Rectangle<int> (0, y, getWidth(), rowHeight - 4) });
-                y += rowHeight;
+                // As tall as its text: the name line, then what to look for, wrapped
+                const int lines = linesFor (uiFont (12.0f), lookForOf (scenes[i]), (float) getWidth() - 20.0f);
+                const int height = juce::jmax (rowHeight, 30 + lines * 15 + 8);
+                rows.push_back ({ (int) i, juce::Rectangle<int> (0, y, getWidth(), height - 4) });
+                y += height;
             }
     }
 
@@ -101,8 +120,8 @@ std::vector<TestView::List::Row> TestView::List::layout() const
 
 int TestView::List::preferredHeight() const
 {
-    const auto& scenes = TestSignals::all();
-    return 2 * headerHeight + (int) scenes.size() * rowHeight + 8;
+    const auto rows = layout();
+    return (rows.empty() ? headerHeight : rows.back().bounds.getBottom() + 4) + 8;
 }
 
 void TestView::List::paint (juce::Graphics& g)
@@ -118,10 +137,22 @@ void TestView::List::paint (juce::Graphics& g)
 
     g.setColour (theme::text);
     g.setFont (uiFont (13.0f, true));
-    g.drawText (headers[0], 0, 0, getWidth(), headerHeight - 6, juce::Justification::bottomLeft);
-    g.drawText (headers[1], 0, headerHeight + analysisRows * rowHeight, getWidth(), headerHeight - 6, juce::Justification::bottomLeft);
+    const auto rows = layout();
+    g.drawFittedText (headers[0], 0, 0, getWidth(), headerHeight - 6, juce::Justification::bottomLeft, 1, 0.8f);
 
-    for (const auto& row : layout())
+    if (owner.roomProShown && (size_t) analysisRows < rows.size())
+        g.drawFittedText (headers[1], 0, rows[(size_t) analysisRows].bounds.getY() - headerHeight, getWidth(), headerHeight - 6,
+                          juce::Justification::bottomLeft, 1, 0.8f);
+
+    // The file names in one column, as wide as the longest
+    float fileWidth = 0.0f;
+
+    for (const auto& scene : scenes)
+        fileWidth = std::max (fileWidth, textWidth (uiFont (11.5f, true), juce::String::fromUTF8 ("\xe2\x96\xb6 ") + juce::String (scene.file)));
+
+    fileWidth = std::min (fileWidth + 14.0f, (float) getWidth() * 0.4f);
+
+    for (const auto& row : rows)
     {
         const auto& scene = scenes[(size_t) row.scene];
         const bool isPlaying = row.scene == owner.playing;
@@ -140,17 +171,18 @@ void TestView::List::paint (juce::Graphics& g)
         }
 
         auto text = row.bounds.reduced (10, 5);
-        auto first = text.removeFromTop (18);
+        auto first = text.removeFromTop (20);
         g.setColour (isPlaying ? juce::Colour (0xff7ec8ff) : theme::dimText);
-        g.setFont (uiFont (11.0f, true));
-        g.drawText (isPlaying ? juce::String::fromUTF8 ("\xe2\x96\xb6 ") + juce::String (scene.file) : juce::String (scene.file),
-                    first.removeFromLeft (260), juce::Justification::centredLeft);
+        g.setFont (uiFont (11.5f, true));
+        g.drawFittedText (isPlaying ? juce::String::fromUTF8 ("\xe2\x96\xb6 ") + juce::String (scene.file) : juce::String (scene.file),
+                          first.removeFromLeft ((int) fileWidth), juce::Justification::centredLeft, 1, 0.8f);
         g.setColour (theme::text);
-        g.setFont (uiFont (12.5f, true));
-        g.drawText (titleOf (scene), first, juce::Justification::centredLeft);
+        g.setFont (uiFont (13.0f, true));
+        g.drawFittedText (titleOf (scene), first, juce::Justification::centredLeft, 1, 0.8f);
+        text.removeFromTop (3);
         g.setColour (theme::dimText);
-        g.setFont (uiFont (11.5f));
-        g.drawFittedText (lookForOf (scene), text, juce::Justification::topLeft, 2, 1.0f);
+        g.setFont (uiFont (12.0f));
+        g.drawFittedText (lookForOf (scene), text, juce::Justification::topLeft, 12, 0.95f);
     }
 }
 

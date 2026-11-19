@@ -1,5 +1,8 @@
 # Signaux de test Room Sim Pro
 
+> **Room Sim Pro est mis de côté pour l'instant** : son onglet et ces signaux
+> ne sont pas affichés dans l'app. Ce document reste valable pour son retour.
+
 Quatorze signaux. Chacun isole **une seule chose**, pour voir ce que font les
 deux lentilles de Room Sim Pro. Ils sont **dans l'app** : rien à télécharger.
 
