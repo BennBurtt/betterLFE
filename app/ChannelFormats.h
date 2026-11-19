@@ -2,6 +2,8 @@
 
 #include <array>
 #include <cstring>
+#include <initializer_list>
+#include <utility>
 #include <vector>
 
 namespace subguard
@@ -25,6 +27,47 @@ struct ChannelFormat
     std::array<int, 4> analysisIndices() const
     {
         return { { indexOf ("L"), indexOf ("C"), indexOf ("R"), indexOf ("LFE") } };
+    }
+
+    /** The four surround groups of the header: 0 wide, 1 side, 2 rear, 3 top (heights); -1 for L, C, R, LFE. */
+    static int surroundGroupOf (const char* label)
+    {
+        const auto is = [label] (std::initializer_list<const char*> names)
+        {
+            for (const char* n : names)
+                if (std::strcmp (label, n) == 0)
+                    return true;
+
+            return false;
+        };
+
+        if (is ({ "L", "C", "R", "LFE" }))                                                   return -1;
+        if (is ({ "Lw", "Rw" }))                                                             return 0;
+        if (is ({ "Ls", "Rs", "Lss", "Rss" }))                                               return 1;
+        if (is ({ "Lb", "Rb", "Lr", "Rr", "Lsr", "Rsr", "Lrs", "Rrs", "Cs", "Bs" }))       return 2;
+        return 3;       // Ltf, Rtf, Ltr, Rtr, Ltm, Rtm, Ts...: the heights
+    }
+
+    /** Positions of the surround and height channels, each with its group (surroundGroupOf). */
+    std::vector<std::pair<int, int>> surroundGroups() const
+    {
+        std::vector<std::pair<int, int>> out;
+
+        for (size_t i = 0; i < channels.size(); ++i)
+            if (const int group = surroundGroupOf (channels[i]); group >= 0)
+                out.push_back ({ (int) i, group });
+
+        return out;
+    }
+
+    /** Whether the format has a channel in this surround group. */
+    bool hasSurroundGroup (int group) const
+    {
+        for (const auto& c : surroundGroups())
+            if (c.second == group)
+                return true;
+
+        return false;
     }
 
     /** Positions of every other channel (surrounds and heights): summed into S for the analysis. */

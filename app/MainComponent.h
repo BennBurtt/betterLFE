@@ -276,11 +276,14 @@ private:
     std::vector<Inertia> chainInertia;                  // two per playback system: dB and penalty
     std::array<std::vector<Inertia>, 3> curveInertia;   // correlation curves
     HistoryStrip::Sample historySample;
-    std::array<double, 3> transientFlash { { 0.0, 0.0, 0.0 } };
+    // Per speaker group of the header (LR, centre, wide, side, rear, top)
+    std::array<double, HeaderBar::numGroups> groupFlash {}, groupRecent {}, groupDrive {};
+    double surroundLamp = 0.0, surroundLampAge = 0.0;       // the surrounds' (S) interaction with the LFE, for their lamps
+    double surroundAlert (const Analysis&, const AlertTracker::Options&) const;
 
     // How hard each screen channel plays, for the cones: this frame's peak
     // against the loudest of the last few seconds, so that it shows at any level
-    std::array<double, 3> framePeak { { 0.0, 0.0, 0.0 } }, recentPeak { { 0.0, 0.0, 0.0 } }, coneDrive { { 0.0, 0.0, 0.0 } };
+    std::array<double, 3> framePeak { { 0.0, 0.0, 0.0 } };
     double bassFramePeak = 0.0, bassRecentPeak = 0.0, bassDrive = 0.0;
     double waveClock = 0.0, waveMin = 0.0, waveMax = 0.0, waveSumSquares = 0.0;
     long long waveCount = 0;

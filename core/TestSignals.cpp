@@ -136,7 +136,7 @@ namespace
             { "12_transients_lfe_12ms_late", { "Kicks au centre, LFE 12 ms en retard", "Bandeau Transients : « LFE late 12.0 ms »." } },
             { "13_transients_lfe_6ms_early", { "Kicks au centre, LFE 6 ms en avance", "Bandeau Transients : « LFE early 6.0 ms »." } },
             { "14_transients_inverted", { "Kicks au centre, LFE au même instant, polarité inversée", "Bandeau Transients : « Aligned, polarity inverted »." } },
-            { "15_transients_very_quiet", { "Comme le 12, 60 dB plus bas", "« LFE late 12.0 ms », comme à plein niveau." } },
+            { "15_transients_very_quiet", { "Comme le 12, 60 dB plus bas", "« LFE late 12.0 ms », comme à plein niveau. La Phase Alert s'allume comme au 12 (elle ne dépend pas du niveau), mais le score reste près de 100 : à ce niveau, ce grave ne s'entend pas (la raison s'affiche sous le score)." } },
             { "16_transients_low_boom_under_bed", { "Booms à 28 Hz au centre sous un fond 60-180 Hz plus fort ; boom du LFE 8 ms en retard", "« LFE late » vers 8 à 10 ms avec un ± large, ou « timing not measurable »." } },
             { "17_level_calibration", { "Sinusoïdes : 40 Hz à -20 dBFS dans le LFE, 80 Hz à -20 dBFS au centre, 8 Hz à -30 dBFS dans le LFE", "Au curseur : LFE -20,0 dB à 40 Hz, LCR -23,0 dB à 80 Hz, LFE -30,0 dB à 8 Hz." } },
             { "18_silence", { "Silence numérique", "Score « -- », rien ne bouge." } },
@@ -309,7 +309,8 @@ const std::vector<TestScene>& TestSignals::all()
         hits ("14_transients_inverted", "Kicks in the centre channel, the LFE hits at the same instant with flipped polarity",
               "Transients strip: 'Aligned, polarity inverted'.", 0.0, -1.0, 1.0, false);
         hits ("15_transients_very_quiet", "Same as file 12, 60 dB lower (peaks around -68 dBFS)",
-              "Transients strip: 'LFE late 12.0 ms', exactly as at full level. Set the level range to -120 dB to see the curves.",
+              "Transients strip: 'LFE late 12.0 ms', exactly as at full level. The Phase Alert lights as for file 12 (it does not depend on the level), "
+              "but the score stays near 100: at this level the bass is not heard (the reason shows under the score). Set the level range to -120 dB to see the curves.",
               0.012, 1.0, 0.001, false);
         hits ("16_transients_low_boom_under_bed", "28 Hz booms in the centre under a louder 60-180 Hz bed; the LFE boom is 8 ms late",
               "Transients strip: 'LFE late' around 8-10 ms with a wide +/-, or 'timing not measurable': a single low frequency is hard to time.",

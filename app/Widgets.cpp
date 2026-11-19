@@ -84,10 +84,24 @@ namespace
 }
 
 //==============================================================================
-SpeakerIndicator::SpeakerIndicator (juce::String labelText)
-    : label (std::move (labelText))
+SpeakerIndicator::SpeakerIndicator (juce::String labelText, bool isPair)
+    : label (std::move (labelText)), pair (isPair)
 {
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
+}
+
+void SpeakerIndicator::setAvailable (bool on)
+{
+    if (on == available)
+        return;
+
+    available = on;
+    setMouseCursor (on ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+
+    if (! on)
+        solo = muted = false;
+
+    repaint();
 }
 
 void SpeakerIndicator::setLevel (double newLevel)
@@ -132,7 +146,7 @@ void SpeakerIndicator::setMoving (bool shouldMove)
 
 void SpeakerIndicator::mouseDown (const juce::MouseEvent& e)
 {
-    if (! e.mods.isLeftButtonDown())
+    if (! e.mods.isLeftButtonDown() || ! available)
         return;
 
     // Click: solo. Option-click: mute.
@@ -148,7 +162,7 @@ void SpeakerIndicator::mouseDown (const juce::MouseEvent& e)
 void SpeakerIndicator::paint (juce::Graphics& g)
 {
     g.setOpacity (1.0f);
-    g.beginTransparencyLayer (dimmed ? 0.4f : 1.0f);
+    g.beginTransparencyLayer (! available ? 0.15f : (dimmed ? 0.4f : 1.0f));
 
     const float wAvail = (float) getWidth(), hAvail = (float) getHeight();
     const float aspect = 0.65f;
@@ -164,11 +178,17 @@ void SpeakerIndicator::paint (juce::Graphics& g)
     const float push = (moving && ! dimmed) ? (float) drive : 0.0f; // the channel playing: the cabinet swells a little, the cone more
 
     const float cx = r.getCentreX();
-    const float cabH = r.getHeight() * 0.60f * (1.0f + 0.035f * push), cabW = cabH * 0.55f;
-    const float cabX = cx - cabW / 2.0f, cabY = r.getY() + r.getHeight() * 0.05f - r.getHeight() * 0.012f * push;
-
     const juce::Colour edge = lit ? juce::Colour (255, 255, 255) : juce::Colour (205, 205, 205);
     const float line = juce::jmax (1.2f, drawW * 0.022f);
+
+    // One cabinet, or two side by side for a pair (a little smaller)
+    const float size = pair ? 0.78f : 1.0f;
+    const float cabH = r.getHeight() * 0.60f * size * (1.0f + 0.035f * push), cabW = cabH * 0.55f;
+    const float cabY = r.getY() + r.getHeight() * (0.05f + (1.0f - size) * 0.45f) - r.getHeight() * 0.012f * push;
+
+  for (const float centreX : pair ? std::initializer_list<float> { cx - cabW * 0.62f, cx + cabW * 0.62f } : std::initializer_list<float> { cx })
+  {
+    const float cabX = centreX - cabW / 2.0f;
     const juce::Rectangle<float> cabinet (cabX, cabY, cabW, cabH);
 
     if (lit)
@@ -190,7 +210,7 @@ void SpeakerIndicator::paint (juce::Graphics& g)
     // Tweeter and woofer
     const auto driver = [&] (float centreY, float radius, juce::Colour fill)
     {
-        const juce::Rectangle<float> c (cx - radius, centreY - radius, 2.0f * radius, 2.0f * radius);
+        const juce::Rectangle<float> c (centreX - radius, centreY - radius, 2.0f * radius, 2.0f * radius);
         g.setColour (fill);
         g.fillEllipse (c);
         g.setColour (edge);
@@ -204,8 +224,9 @@ void SpeakerIndicator::paint (juce::Graphics& g)
     {
         const float cap = cabW * (0.05f + 0.07f * push);
         g.setColour (edge.withAlpha (0.35f + 0.45f * push));
-        g.fillEllipse (cx - cap, cabY + cabH * 0.68f - cap, 2.0f * cap, 2.0f * cap);
+        g.fillEllipse (centreX - cap, cabY + cabH * 0.68f - cap, 2.0f * cap, 2.0f * cap);
     }
+  }
 
     // Alert lamp under the cabinet: an arc of fixed size that lights up, like a bulb
     const float arcW = r.getHeight() * 0.60f * 0.55f * 2.1f, arcH = r.getHeight() * 0.22f;
@@ -236,9 +257,10 @@ void SpeakerIndicator::paint (juce::Graphics& g)
 
     // Label
     g.setColour (lit ? juce::Colours::white : juce::Colour (235, 235, 235));
-    g.setFont (uiFont (juce::jmax (11.0f, r.getHeight() * 0.19f), true));
-    g.drawText (label, juce::Rectangle<float> (cx - arcW / 2.0f, r.getY() + r.getHeight() * 0.66f, arcW, r.getHeight() * 0.30f),
-                juce::Justification::centred, false);
+    g.setFont (uiFont (juce::jmax (11.0f, r.getHeight() * (label.length() > 3 ? 0.15f : 0.19f)), true));
+    const float labelWidth = std::max (arcW, (float) getWidth() - 4.0f);
+    g.drawFittedText (label, juce::Rectangle<float> (cx - labelWidth / 2.0f, r.getY() + r.getHeight() * 0.66f, labelWidth, r.getHeight() * 0.30f).toNearestInt(),
+                      juce::Justification::centred, 1, 0.6f);
 
     g.endTransparencyLayer();
 }
@@ -246,9 +268,8 @@ void SpeakerIndicator::paint (juce::Graphics& g)
 //==============================================================================
 HeaderBar::HeaderBar()
 {
-    addAndMakeVisible (left);
-    addAndMakeVisible (centre);
-    addAndMakeVisible (right);
+    for (int g = 0; g < numGroups; ++g)
+        addAndMakeVisible (group (g));
 }
 
 void HeaderBar::setAnimationEnabled (bool shouldAnimate)
@@ -257,7 +278,7 @@ void HeaderBar::setAnimationEnabled (bool shouldAnimate)
 
     // One switch for everything that moves: the background and the speakers.
     // The alert lamps are not part of it.
-    for (auto* speaker : { &left, &centre, &right })
+    for (auto* speaker : { &lr, &centre, &wide, &side, &rear, &top })
         speaker->setMoving (animated);
 
     repaint();
@@ -281,11 +302,12 @@ void HeaderBar::advance (double seconds)
 void HeaderBar::resized()
 {
     auto area = getLocalBounds().reduced (20);
-    const int cell = area.getWidth() / 4;
-    area.removeFromLeft (cell);     // logo
-    left.setBounds (area.removeFromLeft (cell));
-    centre.setBounds (area.removeFromLeft (cell));
-    right.setBounds (area);
+    // The logo on the left, then the six speaker groups
+    area.removeFromLeft (juce::jmin (area.getWidth() / 4, juce::roundToInt ((float) area.getHeight() * 2.6f)));
+    const int cell = area.getWidth() / numGroups;
+
+    for (int g = 0; g < numGroups; ++g)
+        group (g).setBounds (g == numGroups - 1 ? area : area.removeFromLeft (cell));
 }
 
 void HeaderBar::paint (juce::Graphics& g)
@@ -341,8 +363,8 @@ void HeaderBar::paint (juce::Graphics& g)
     {
         juce::Path wave;
         const double speed = (k == 0 ? 0.55 : -0.38), length = (k == 0 ? 2.2 : 3.4);
-        const float rest = h * (k == 0 ? 0.90f : 0.82f), top = h * (k == 0 ? 0.42f : 0.30f);
-        const float base = rest + (top - rest) * hit, swing = h * (0.06f + 0.03f * loud + 0.16f * hit);
+        const float rest = h * (k == 0 ? 0.90f : 0.82f), peakY = h * (k == 0 ? 0.42f : 0.30f);
+        const float base = rest + (peakY - rest) * hit, swing = h * (0.06f + 0.03f * loud + 0.16f * hit);
 
         for (int step = 0; step * 6.0f <= w + 6.0f; ++step)
         {
@@ -364,7 +386,8 @@ void HeaderBar::paint (juce::Graphics& g)
     g.fillRect (0.0f, h - 1.0f, w, 1.0f);
 
     // Logo, or the name when no logo image was built in
-    const auto logoArea = getLocalBounds().reduced (20).removeFromLeft ((getWidth() - 40) / 4).toFloat();
+    const auto inner = getLocalBounds().reduced (20);
+    const auto logoArea = inner.withWidth (juce::jmin (inner.getWidth() / 4, juce::roundToInt ((float) inner.getHeight() * 2.6f))).toFloat();
 
     if (logo.isValid())
     {
@@ -521,8 +544,29 @@ void SpectrumPlot::paint (juce::Graphics& g)
         g.drawText (score < 0.0 ? juce::String ("--") : juce::String (juce::roundToInt (score)),
                     box.removeFromTop (size), juce::Justification::centred, false);
         g.setColour (colour.withAlpha (0.32f));
-        g.setFont (uiFont (juce::jmax (11.0f, size * 0.11f), true));
+        const auto labelFont = uiFont (juce::jmax (11.0f, size * 0.11f), true);
+        g.setFont (labelFont);
         g.drawText (tr ("ROBUSTNESS"), box, juce::Justification::centredTop, false);
+
+        // Why: under the score, readable over the curves (on a dark plate)
+        if (score >= 0.0 && ! scoreReasons.empty())
+        {
+            const auto font = uiFont (juce::jlimit (12.5f, 16.0f, size * 0.085f), true);
+            float y = box.getY() + labelFont.getHeight() + 6.0f;
+
+            for (const auto& [text, reasonColour] : scoreReasons)
+            {
+                const float width = std::min (area.getWidth() - 40.0f, textWidth (font, text) + 24.0f);
+                const int lines = linesFor (font, text, width - 20.0f);
+                const auto plate = juce::Rectangle<float> (area.getCentreX() - width / 2.0f, y, width, (float) lines * font.getHeight() * 1.2f + 8.0f);
+                g.setColour (theme::plot.withAlpha (0.82f));
+                g.fillRoundedRectangle (plate, 5.0f);
+                g.setColour (reasonColour);
+                g.setFont (font);
+                g.drawFittedText (text, plate.reduced (10.0f, 4.0f).toNearestInt(), juce::Justification::centred, lines, 0.9f);
+                y = plate.getBottom() + 4.0f;
+            }
+        }
     }
 
     // Grid

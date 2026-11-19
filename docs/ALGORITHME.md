@@ -411,6 +411,42 @@ résultat de la suite de tests ne change.
 surrounds (Ls contre Rs) est déjà faite avant l'analyse : elle n'est pas vue
 comme telle, seulement son résultat.
 
+**Le bandeau des enceintes.** Six groupes : LR, CENTER, WIDE, SIDE, REAR et
+TOP. Les paires sont liées : un clic les met en solo ensemble, un Option-clic
+les coupe ensemble. Couper LR coupe L et R dans l'analyse ; couper un groupe
+de surrounds le retire de la somme S. Un groupe absent du format est grisé.
+
+La lampe de LR est la plus forte des lampes de L et de R. Les quatre groupes
+de surrounds partagent une même lampe, celle de S face au LFE de 20 à
+120 Hz : corrélation, ou interaction pondérée par le niveau, au même seuil
+que la Phase Alert, avec le même seuil de hasard. S étant une somme, mettre un
+groupe en solo donne sa propre interaction. Sur une attaque fautive du LFE,
+seules les enceintes qui portent l'attaque (à moins de 20 dB de la plus
+forte) s'allument.
+
+**Sous le score : pourquoi.** Une ou deux lignes donnent ce qui coûte le plus
+au score :
+
+- la dépendance au LFE, avec la part du grave qu'il porte et ce qu'un repli
+  sans LFE perd ;
+- l'interaction LFE / écran, avec le pire système ;
+- la dépendance au niveau du sub ;
+- ce que retirent les salles ou other systems cochés.
+
+Seuls les termes qui coûtent 8 % ou plus sont affichés. Si le grave est à
+peine audible au niveau d'écoute (moins de 30 % des auditeurs l'entendent),
+c'est ce qui est dit. Le score reste alors près de 100 alors que la Phase
+Alert s'allume, puisqu'elle ne dépend pas du niveau. Exemples avec le LFE pris
+tel qu'enregistré (case « LFE +10 dB » décochée) :
+
+| Test | Score | Explication |
+|---|---|---|
+| 15 (le 12, 60 dB plus bas) | 99 à 100 | grave à peine audible |
+| 17 (sinusoïdes de calibrage) | 52 | le 40 Hz n'existe que dans le LFE (dépendance 0,48) |
+| 19 (musique, kick du LFE 12 ms en retard) | environ 40 | interaction 0,57, puis dépendance |
+
+Avec le LFE à +10 dB, comme mesuré dans les fichiers de test : 100, 13 et 2.
+
 ### 3.5 Note d'un système
 
 Pour chaque système et chaque bande (20–30, 30–60, 60–90, 90–120 Hz) :

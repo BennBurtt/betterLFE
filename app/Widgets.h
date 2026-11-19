@@ -46,7 +46,12 @@ class SpeakerIndicator : public juce::Component,
                          public juce::SettableTooltipClient
 {
 public:
-    explicit SpeakerIndicator (juce::String labelText);
+    /** `pair`: a pair of speakers (L and R, the two sides...), drawn as two cabinets and soloed or muted together. */
+    explicit SpeakerIndicator (juce::String labelText, bool pair = false);
+
+    /** False when the channel format has no such speakers: drawn faint, clicks ignored. */
+    void setAvailable (bool);
+    bool isAvailable() const    { return available; }
 
     /** 0..1: how strongly the alert lamp under the speaker is lit. */
     void setLevel (double newLevel);
@@ -72,7 +77,7 @@ public:
 private:
     juce::String label;
     double level = 0.0, drive = 0.0;
-    bool solo = false, muted = false, dimmed = false, moving = true;
+    bool solo = false, muted = false, dimmed = false, moving = true, pair = false, available = true;
 };
 
 //==============================================================================
@@ -92,7 +97,14 @@ public:
     void advance (double seconds);
     void setLogo (const juce::Image& image)   { logo = image; }
 
-    SpeakerIndicator left { "L" }, centre { "C" }, right { "R" };
+    // The speaker groups: L and R, the centre, then the surrounds by group (pairs soloed and muted together)
+    enum Group { groupLR, groupCentre, groupWide, groupSide, groupRear, groupTop, numGroups };
+    SpeakerIndicator lr { "LR", true }, centre { "CENTER" }, wide { "WIDE", true }, side { "SIDE", true }, rear { "REAR", true }, top { "TOP", true };
+    SpeakerIndicator& group (int g)
+    {
+        SpeakerIndicator* all[] = { &lr, &centre, &wide, &side, &rear, &top };
+        return *all[juce::jlimit (0, numGroups - 1, g)];
+    }
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -135,6 +147,10 @@ public:
 
     /** Robustness score drawn large behind the curves; negative: nothing to score. */
     void setScore (double score);
+    std::vector<std::pair<juce::String, juce::Colour>> scoreReasons;
+
+    /** Why the score is what it is: one or two short lines under it, each with its colour. */
+    void setScoreReasons (std::vector<std::pair<juce::String, juce::Colour>> reasons)   { scoreReasons = std::move (reasons); }
 
     /** LFE / screen overlap per band (30-60, 60-90, 90-120 Hz), 0..1: thin marks at the bottom. */
     void setOverlap (const std::array<double, 3>& amounts);

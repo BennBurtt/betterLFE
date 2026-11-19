@@ -171,10 +171,13 @@ MainComponent::MainComponent (const LaunchOptions& launchOptions)
     setWantsKeyboardFocus (true);
     buildCards();
 
-    for (auto* speaker : { &header.left, &header.centre, &header.right })
+    for (int g = 0; g < HeaderBar::numGroups; ++g)
     {
-        speaker->onToggle = [this] { updateSpeakers(); };
-        speaker->setTooltip (tr ("Click: solo. Option-click: mute."));
+        auto& speaker = header.group (g);
+        speaker.onToggle = [this] { updateSpeakers(); };
+        speaker.setTooltip (g <= HeaderBar::groupCentre
+                                ? tr ("Click: solo. Option-click: mute.")
+                                : tr ("Click: solo. Option-click: mute. The surrounds and heights are analysed summed: solo a group to see its own interaction with the LFE."));
     }
 
     loadState();
@@ -971,7 +974,8 @@ void MainComponent::resized()
 void MainComponent::applyFormat()
 {
     input.setChannelIndices (format().analysisIndices());
-    input.setSurroundIndices (format().surroundIndices());
+    input.setSurroundIndices (format().surroundGroups());
+    updateSpeakers();       // which groups this format has
 }
 
 void MainComponent::openDevices()
@@ -1071,6 +1075,41 @@ void MainComponent::showMode (int mode)
         proView.grabKeyboardFocus();
 
     resized();
+}
+
+double MainComponent::surroundAlert (const Analysis& a, const AlertTracker::Options& o) const
+{
+    // Surrounds and heights (summed) against the LFE over 20-120 Hz, as the Phase Alert judges a
+    // screen channel: the correlation (or the level-weighted interaction), what chance could give left out
+    const auto& m = a.matrix;
+    const auto n = a.grid.size();
+
+    if (m.pS.size() != n || m.cSLfe.size() != n)
+        return 0.0;
+
+    const double gain2 = std::pow (10.0, engineSettings.lfeGainDb / 10.0);
+    double cross = 0.0, ps = 0.0, pl = 0.0, sigma = 0.0, weight = 0.0;
+
+    for (size_t g = 0; g < n; ++g)
+        if (a.grid[g] >= 20.0 && a.grid[g] <= 120.0)
+        {
+            cross += a.grid[g] * m.cSLfe[g].real() * std::sqrt (gain2);
+            ps += a.grid[g] * m.pS[g];
+            pl += a.grid[g] * m.pLfe[g] * gain2;
+            sigma += a.grid[g] * m.sigma[g];
+            weight += a.grid[g];
+        }
+
+    if (weight <= 0.0 || ps <= 1e-30 || pl <= 1e-30)
+        return 0.0;
+
+    const double s = o.levelWeighted ? 2.0 * cross / (ps + pl) : cross / std::sqrt (ps * pl);
+
+    if (o.outOfPhaseOnly && s > 0.0)
+        return 0.0;
+
+    const double thr = juce::jlimit (0.0, 0.99, juce::jmax (o.threshold, AlertTracker::alertSigmas * sigma / weight));
+    return juce::jlimit (0.0, 1.0, AlertTracker::alertGain * (std::abs (s) - thr) / (1.0 - thr));
 }
 
 void MainComponent::layoutRoomView()
@@ -1561,16 +1600,36 @@ void MainComponent::setRoomSelected (int room, bool on)
 
 void MainComponent::updateSpeakers()
 {
-    // A soloed speaker leaves the others out; a muted one is out whatever happens
-    SpeakerIndicator* speakers[] = { &header.left, &header.centre, &header.right };
-    const bool anySolo = header.left.isSolo() || header.centre.isSolo() || header.right.isSolo();
+    // The groups this format has; a soloed group leaves the others out, a muted one is out whatever happens.
+    // Pairs go together: muting LR mutes L and R.
+    const auto& f = format();
 
-    for (size_t c = 0; c < 3; ++c)
+    for (int g = HeaderBar::groupWide; g < HeaderBar::numGroups; ++g)
+        header.group (g).setAvailable (f.hasSurroundGroup (g - HeaderBar::groupWide));
+
+    bool anySolo = false;
+
+    for (int g = 0; g < HeaderBar::numGroups; ++g)
+        anySolo = anySolo || (header.group (g).isAvailable() && header.group (g).isSolo());
+
+    std::array<bool, HeaderBar::numGroups> out {};
+
+    for (int g = 0; g < HeaderBar::numGroups; ++g)
     {
-        const bool out = speakers[c]->isMuted() || (anySolo && ! speakers[c]->isSolo());
-        speakers[c]->setDimmed (out);
-        engineSettings.mute[c] = out;
+        auto& speaker = header.group (g);
+        out[(size_t) g] = ! speaker.isAvailable() || speaker.isMuted() || (anySolo && ! speaker.isSolo());
+        speaker.setDimmed (out[(size_t) g] && speaker.isAvailable());
     }
+
+    engineSettings.mute[0] = engineSettings.mute[2] = out[HeaderBar::groupLR];
+    engineSettings.mute[1] = out[HeaderBar::groupCentre];
+    unsigned mask = 0;
+
+    for (int k = 0; k < AudioInput::numSurroundGroups; ++k)
+        if (out[(size_t) (HeaderBar::groupWide + k)])
+            mask |= 1u << k;
+
+    input.setSurroundMute (mask);
 }
 
 void MainComponent::timerCallback()
@@ -1697,14 +1756,22 @@ void MainComponent::timerCallback()
     header.advance (dt);
 
     {
-        SpeakerIndicator* cones[] = { &header.left, &header.centre, &header.right };
+        // How hard each group plays: L and R together, the centre, each surround group (live input only)
+        std::array<double, HeaderBar::numGroups> peak {};
+        peak[HeaderBar::groupLR] = juce::jmax (framePeak[0], framePeak[2]);
+        peak[HeaderBar::groupCentre] = framePeak[1];
 
-        for (size_t c = 0; c < 3; ++c)
+        for (int k = 0; k < AudioInput::numSurroundGroups; ++k)
+            peak[(size_t) (HeaderBar::groupWide + k)] = input.takeGroupPeak (k);
+
+        for (int g = 0; g < HeaderBar::numGroups; ++g)
         {
-            recentPeak[c] = juce::jmax (framePeak[c], recentPeak[c] * std::exp (-dt / 3.0));
-            const double target = recentPeak[c] > 1e-6 ? framePeak[c] / recentPeak[c] : 0.0;     // under -120 dBFS: still
-            coneDrive[c] += (target > coneDrive[c] ? 1.0 - std::exp (-dt / 0.015) : 1.0 - std::exp (-dt / 0.12)) * (target - coneDrive[c]);
-            cones[c]->setDrive (coneDrive[c]);
+            auto& recent = groupRecent[(size_t) g];
+            auto& drive = groupDrive[(size_t) g];
+            recent = juce::jmax (peak[(size_t) g], recent * std::exp (-dt / 3.0));
+            const double target = recent > 1e-6 ? peak[(size_t) g] / recent : 0.0;     // under -120 dBFS: still
+            drive += (target > drive ? 1.0 - std::exp (-dt / 0.015) : 1.0 - std::exp (-dt / 0.12)) * (target - drive);
+            header.group (g).setDrive (drive);
         }
     }
 
@@ -1723,6 +1790,21 @@ void MainComponent::timerCallback()
             snapshot.autoReset = false;
 
         alerts.update (measured, alerting, dt);
+
+        // The surrounds' lamp: risen at once, held, then decaying like the others
+        {
+            const double target = surroundAlert (measured, alerting);
+
+            if (target >= surroundLamp * 0.999 && target > 0.0)
+            {
+                surroundLamp += 0.7 * (target - surroundLamp);
+                surroundLampAge = 0.0;
+            }
+            else if ((surroundLampAge += dt) > AlertTracker::holdSeconds)
+            {
+                surroundLamp += juce::jmin (1.0, dt / AlertTracker::speakerDecaySeconds) * (target - surroundLamp);
+            }
+        }
 
         // Spectrum as displayed: the measured one, smoothed by the Inertia slider (10 to 600 ms)
         {
@@ -1851,6 +1933,68 @@ void MainComponent::timerCallback()
 
         spectrum.setScore ((double) displayedScore);
 
+        // Why: the term that costs the most (one or two), or a bass too quiet to judge
+        {
+            std::vector<std::pair<juce::String, juce::Colour>> reasons;
+
+            if (t.hasBass && displayedScore >= 0)
+            {
+                double heard = 0.0;
+
+                for (double v : t.bandAudible)
+                    heard = juce::jmax (heard, v);
+
+                const auto colourFor = [] (double loss)
+                {
+                    return loss >= 0.5 ? juce::Colour (0xffff6b5b) : loss >= 0.2 ? juce::Colour (0xffffa24a) : juce::Colour (0xffffd166);
+                };
+
+                if (heard < 0.3)
+                {
+                    reasons.push_back ({ tr ("Bass barely heard at ") + juce::String ((int) listeningDbC)
+                                             + tr (" dB(C): little to judge. The Phase Alert shows the phase whatever the level."),
+                                         theme::text });
+                }
+                else
+                {
+                    struct Factor { double loss; juce::String text; };
+                    std::vector<Factor> factors;
+                    const auto percent = [] (double v) { return juce::String (juce::roundToInt (100.0 * v)) + " %"; };
+
+                    factors.push_back ({ t.dependence, tr ("Bass leans on the LFE: it carries ") + percent (t.lfeShare)
+                                                           + tr (" of the bass; a fold-down without the LFE loses ")
+                                                           + juce::String (juce::jmax (0.0, -t.downmixChangeDb), 1) + " dB" });
+
+                    juce::String worst;
+
+                    if (! t.worstRoom.empty())
+                        worst = tr ("room ") + tr (juce::String (t.worstRoom));
+                    else if (t.worstChain >= 0 && (size_t) t.worstChain < t.chains.size())
+                        worst = tr (juce::String (t.chains[(size_t) t.worstChain].name)) + " ("
+                                + (t.chains[(size_t) t.worstChain].changeDb >= 0.0 ? "+" : "") + juce::String (t.chains[(size_t) t.worstChain].changeDb, 1) + " dB)";
+
+                    factors.push_back ({ t.interaction, tr ("LFE and screen interfere") + (worst.isNotEmpty() ? tr (": worst on ") + worst : juce::String()) });
+                    factors.push_back ({ simulator.tuning.levelDependenceWeight * t.levelDependence,
+                                         tr ("A subwoofer set off its level moves the bass (mean ") + juce::String (t.levelMeanDb, 1) + " dB)" });
+
+                    // What the rooms or other systems ticked take off, beyond the playback systems
+                    const double fromSystems = 100.0 * (1.0 - t.interaction) * (1.0 - t.dependence)
+                                               * (1.0 - simulator.tuning.levelDependenceWeight * t.levelDependence);
+
+                    if (fromSystems - t.robustness > 5.0)
+                        factors.push_back ({ (fromSystems - t.robustness) / 100.0, tr ("The rooms or other systems ticked in Room Sim lower it") });
+
+                    std::sort (factors.begin(), factors.end(), [] (const Factor& x, const Factor& y) { return x.loss > y.loss; });
+
+                    for (const auto& f : factors)
+                        if (f.loss >= 0.08 && reasons.size() < 2)
+                            reasons.push_back ({ f.text, colourFor (f.loss) });
+                }
+            }
+
+            spectrum.setScoreReasons (std::move (reasons));
+        }
+
         if (roomMode)
         {
             roomView.update (roomResult, (double) displayedScore, t.hasBass && displayedScore >= 0);
@@ -1899,10 +2043,17 @@ void MainComponent::timerCallback()
     {
         transientStrip.show (event);
 
-        // The reference is the downmix: every screen channel lights up on a fault
+        // A fault lights the screen speakers that carry the attack (within 20 dB of the loudest), not the silent ones
         if (transientStrip.isFault (event))
-            for (auto& flash : transientFlash)
-                flash = 1.0;
+        {
+            const double loudest = juce::jmax (framePeak[0], framePeak[1], framePeak[2]);
+
+            if (juce::jmax (framePeak[0], framePeak[2]) >= 0.1 * loudest && loudest > 0.0)
+                groupFlash[HeaderBar::groupLR] = 1.0;
+
+            if (framePeak[1] >= 0.1 * loudest && loudest > 0.0)
+                groupFlash[HeaderBar::groupCentre] = 1.0;
+        }
     }
 
     {
@@ -1913,12 +2064,17 @@ void MainComponent::timerCallback()
     }
     snapshot.events.clear();        // each event is shown once
     transientStrip.advance (dt);
-    SpeakerIndicator* speakers[] = { &header.left, &header.centre, &header.right };
-
-    for (size_t c = 0; c < 3; ++c)
+    // The lamps: L and R share one (the stronger), the surround groups share the surrounds' (they are analysed summed)
     {
-        transientFlash[c] = juce::jmax (0.0, transientFlash[c] - dt / 0.6);
-        speakers[c]->setLevel (juce::jmax (alerts.speakerLevel[c], transientFlash[c]));
+        const double lamps[HeaderBar::numGroups] = { juce::jmax (alerts.speakerLevel[0], alerts.speakerLevel[2]), alerts.speakerLevel[1],
+                                                     surroundLamp, surroundLamp, surroundLamp, surroundLamp };
+
+        for (int g = 0; g < HeaderBar::numGroups; ++g)
+        {
+            auto& flash = groupFlash[(size_t) g];
+            flash = juce::jmax (0.0, flash - dt / 0.6);
+            header.group (g).setLevel (juce::jmax (lamps[g], flash));
+        }
     }
 
     if (options.snapshotFile != juce::File() && ++framesShown == snapshotFrames)
