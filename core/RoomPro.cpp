@@ -2155,6 +2155,63 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
         return out;
     };
 
+    // How long the modes heard at a set of points ring, per band, for the L C R and the LFE speakers
+    const auto decayAt = [&] (const std::vector<Point>& points)
+    {
+        // Each mode's excitation by the speakers of each part, calibrated: sum of (scale x gain x psi)^2
+        std::vector<double> lcrExcitation (numModes, 0.0), lfeExcitation (numModes, 0.0);
+
+        for (size_t sp = 0; sp < sources.size(); ++sp)
+        {
+            const int g = sources[sp].group;
+            const double level = scale[g] * sources[sp].gain;
+            auto& excitation = g <= ProRoom::groupR ? lcrExcitation : lfeExcitation;
+
+            for (size_t k = 0; k < numModes; ++k)
+                excitation[k] += level * level * atSource[sp][k] * atSource[sp][k];
+        }
+
+        const auto bandOf = [] (double hz)
+        {
+            if (hz >= RoomResult::layerEdgesHz[0] && hz < RoomSimulator::bandLoHz)
+                return 0;
+
+            for (int b = 0; b < ChainResult::numBands; ++b)
+                if (hz >= PlaybackSimulator::bandLimits[b] && hz < PlaybackSimulator::bandLimits[b + 1])
+                    return b + 1;
+
+            return -1;
+        };
+
+        std::vector<RoomPaths::Decay> out (points.size());
+
+        for (size_t k = 0; k < numModes; ++k)
+        {
+            const int band = bandOf (modes[k].hz);
+
+            if (band < 0 || modes[k].damping <= 0.0)
+                continue;
+
+            const double omega2 = 4.0 * pi * pi * modes[k].hz * modes[k].hz;
+            const double seconds = std::log (1000.0) / modes[k].damping;
+            const double energy = 1.0 / (modes[k].damping * omega2);
+
+            for (size_t i = 0; i < points.size(); ++i)
+            {
+                const double psi = shape (r, modes[k], points[i]) * modes[k].scale;
+                const double here = psi * psi * energy;
+                auto& d = out[i];
+                d.lcrSum[(size_t) band] += here * lcrExcitation[k] * seconds;
+                d.lcrWeight[(size_t) band] += here * lcrExcitation[k];
+                d.lfeSum[(size_t) band] += here * lfeExcitation[k] * seconds;
+                d.lfeWeight[(size_t) band] += here * lfeExcitation[k];
+            }
+        }
+
+        return out;
+    };
+
+    paths.decay = decayAt (seats);
     paths.p.resize (actual.size());
     paths.pRef.resize (actual.size());
     paths.pAlone.resize (actual.size());
@@ -2229,6 +2286,8 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
 
             paths.probes = (int) probes.size();
             paths.probePositions = probes;
+            const auto probeDecay = decayAt (probes);
+            paths.decay.insert (paths.decay.end(), probeDecay.begin(), probeDecay.end());
         }
     }
 
@@ -2267,6 +2326,8 @@ RoomPaths ProRoomModel::prepare (const ProRoom& room, const std::vector<double>&
             }
         }
 
+        const auto gridDecay = decayAt (nodes);
+        paths.decay.insert (paths.decay.end(), gridDecay.begin(), gridDecay.end());
         paths.gridPoints = (int) nodes.size();
         paths.gridColumns = columns;
         paths.gridRows = rows;

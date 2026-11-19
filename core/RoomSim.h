@@ -135,6 +135,17 @@ struct RoomResult
     std::array<std::array<double, numLayers>, numParts> approvedLayerPhon {};
     std::array<double, numLayers> layerHeard {};
     std::vector<double> seatHeard;
+
+    // Room Sim Pro: how long the bass rings at each seat (indicator, not in the
+    // scores). The decay of the modes heard there (60 dB, energy-weighted, L C R
+    // and LFE speakers in the mix's proportions), in the band where it is worst
+    // against the threshold over which modal effects are heard on music
+    // (Fazenda, Stephenson & Goldberg 2015): ratio >= 1 heard on music; under the
+    // single-tone threshold (absolute ratio < 1) not heard at all; between,
+    // acceptable for music. NaN where the mix has no bass heard.
+    std::vector<double> seatDecaySeconds, seatDecayHz, seatDecayRatio, seatDecayAbsoluteRatio;
+    std::array<std::vector<double>, numLayers> seatLayerDecayRatio, gridLayerDecayRatio;
+    int decayAudibleSeats = 0;
 };
 
 /** A room's calibrated paths, per seat and grid point, as averages over the band of that point.
@@ -172,6 +183,17 @@ struct RoomPaths
     // and the distance give each speaker, without the interference between
     // speakers. Empty in Room Sim (one speaker per channel: the same as p).
     std::vector<ChannelMatrix> pAlone;
+
+    // Room Sim Pro: how long the modes heard at each point ring (seats, then the
+    // extra points, then the grid), per band (0: infra 10-20 Hz, then the rating
+    // bands 20-30, 30-60, 60-90, 90-120 Hz): sums over the modes of w T and of w,
+    // T the 60 dB decay of the mode (6.91 / its damping, = 2.2 Q / f) and w its
+    // energy there (|excitation|^2 psi(x)^2 / (damping omega^2), the energy of a
+    // mode's response summed over frequency), for the speakers of L C R and for
+    // those of the LFE. Empty in Room Sim.
+    static constexpr int numDecayBands = 5;
+    struct Decay { std::array<double, numDecayBands> lcrSum {}, lcrWeight {}, lfeSum {}, lfeWeight {}; };
+    std::vector<Decay> decay;
 
     // false (Room Sim): the room score is the interference between L C R and
     // the LFE only; the colour each path gets from the room is left out.
@@ -228,6 +250,15 @@ public:
 
     static RoomResult rate (const RoomPaths&, const Analysis&, const Translation&, const PlaybackSimulator::Tuning&,
                             PlaybackSimulator::Level, double lfeGainDb);
+
+    /** How much smaller a dip counts than a peak of the same size (dB), at a frequency: the difference
+        between the published detection thresholds of a broad dip and a broad peak. */
+    static double dipAllowanceDb (double hz);
+
+    /** Decay of a room mode (60 dB, seconds) under which it is not heard (single decaying tones), and over
+        which it is heard on music (Fazenda, Stephenson & Goldberg 2015). */
+    static double modalDecayThreshold (double hz);
+    static double musicDecayThreshold (double hz);
 
     /** Mode shape and modal denominators, for other room models. */
     struct Mode { double omega2, damping, scale; int nx, ny, nz; };

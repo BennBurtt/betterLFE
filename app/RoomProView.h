@@ -12,6 +12,7 @@
 #include "../core/RoomPro.h"
 
 #include <array>
+#include <limits>
 #include <deque>
 #include <optional>
 #include <functional>
@@ -38,8 +39,14 @@ juce::Colour bassChangeColour (double db);
 /** Colour of a loudness (phon, 0 to 100): dark grey for nothing heard, then blue, cyan, green, yellow, orange, red, magenta. */
 juce::Colour loudnessColour (double phon);
 
-/** A colour scale with its ticks and caption: loudness (0..100 phon, the mix's value marked) or change (-9..+9 dB). */
-void drawScale (juce::Graphics&, juce::Rectangle<float> area, bool absolute, double mixValue, const juce::String& caption);
+/** Colour of how long the bass rings: grey under the single-tone threshold (not heard), towards yellow up to the
+    music threshold (acceptable), orange to red over it (heard on music). ratio: decay / music threshold;
+    absoluteRatio: decay / single-tone threshold (NaN: judged from the ratio alone). */
+juce::Colour ringColour (double ratio, double absoluteRatio = std::numeric_limits<double>::quiet_NaN());
+
+/** A colour scale with its ticks and caption. mode 0: change (-9..+9 dB); 1: loudness (0..100 phon, the mix's
+    value marked); 2: ringing (decay against the music threshold). */
+void drawScale (juce::Graphics&, juce::Rectangle<float> area, int mode, double mixValue, const juce::String& caption);
 
 /** A room drawn in 3D: walls, screen, speakers, and the heads coloured by the lens shown (the bass level, or the
     interference, against the approved mix). Drag to turn, wheel to zoom, double-click to reset. */
@@ -51,16 +58,18 @@ public:
     void setRoom (const ProRoom& r, const std::vector<double>& seatPenalties, const std::vector<double>& seatValues = {},
                   bool absolute = false, double mixValue = 0.0, const std::vector<double>& fade = {});
 
-    /** For the head under the mouse: its loudness and level by part, and the three causes of its change. */
+    /** For the head under the mouse: its loudness and level by part, the three causes of its change, how long it rings. */
     struct Details
     {
         std::array<std::vector<double>, RoomResult::numParts> phon, partDb;
         std::array<double, RoomResult::numParts> mixPhon {};
         std::array<std::vector<double>, RoomResult::numCauses> causeDb;
+        std::vector<double> ringSeconds, ringHz, ringRatio, ringAbsolute;
         juce::String scoreName;                     // the score shown, e.g. "coverage score"
         bool operator== (const Details& o) const
         {
             return phon == o.phon && partDb == o.partDb && causeDb == o.causeDb && scoreName == o.scoreName
+                     && ringSeconds == o.ringSeconds && ringRatio == o.ringRatio
                      && std::equal (mixPhon.begin(), mixPhon.end(), o.mixPhon.begin(), [] (double x, double y) { return same (x, y); });
         }
     };
@@ -68,6 +77,17 @@ public:
     void setDetails (const Details& d)              { if (! (d == details)) { details = d; repaint(); } }
 
     void setCaption (const juce::String& text)      { if (text != caption) { caption = text; repaint(); } }
+
+    /** Heads coloured by how long the bass rings there (values: decay / music threshold), with the single-tone ratios. */
+    void setRinging (bool on, const std::vector<double>& absoluteRatios = {})
+    {
+        if (on != ringing || absoluteRatios != ringAbsolute)
+        {
+            ringing = on;
+            ringAbsolute = absoluteRatios;
+            repaint();
+        }
+    }
 
     /** The worst point found between the seats (extra points), drawn when there is one below every seat. */
     void setWorstSpot (std::optional<std::array<double, 3>> spot, double score)
@@ -123,9 +143,9 @@ private:
     std::vector<juce::Point<float>> seatPoints;     // where each seat was drawn
     std::vector<double> heard, felt;
     Details details;
-    bool absolute = false;
+    bool absolute = false, ringing = false;
     double mixValue = 0.0;
-    std::vector<double> fades;
+    std::vector<double> fades, ringAbsolute;
     juce::String caption;
     int hovered = -1;
     std::shared_ptr<ProCamera> camera = std::make_shared<ProCamera>();
@@ -156,6 +176,7 @@ private:
     ProRoom room;
     bool hasData = false;
     int lens = RoomResult::coverageLens, which = 0;
+    bool ringing = false;                           // the Why lens, Ringing filter
     std::array<double, RoomResult::numLayers> neutral {}, fade {};
     double mixValue = 0.0;
     int columns = 0, rows = 0;
@@ -318,7 +339,8 @@ private:
     int lens = RoomResult::coverageLens, part = RoomResult::allParts, cause = RoomResult::speakersCause;
     std::array<juce::TextButton, RoomResult::numLenses> lensButtons;
     std::array<juce::TextButton, RoomResult::numParts> partButtons;
-    std::array<juce::TextButton, RoomResult::numCauses> causeButtons;
+    static constexpr int ringCause = RoomResult::numCauses;        // the fourth filter of the Why lens: how long it rings
+    std::array<juce::TextButton, RoomResult::numCauses + 1> causeButtons;
     int shownRating() const;        // the score that goes with what is shown
     juce::Rectangle<int> lensRow;
     bool hasBass = false, ready = false;

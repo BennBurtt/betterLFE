@@ -231,7 +231,9 @@ void Room3DView::paint (juce::Graphics& g)
         const bool hasValue = rated && i < changes.size() && ! std::isnan (changes[i]);
         auto colour = juce::Colour (0xff4a4a4a);
 
-        if (hasValue)
+        if (hasValue && ringing)
+            colour = ringColour (changes[i], i < ringAbsolute.size() ? ringAbsolute[i] : std::nan (""));
+        else if (hasValue)
             colour = absolute ? loudnessColour (changes[i])
                               : juce::Colour (0xff8a8a8a).interpolatedWith (bassChangeColour (changes[i]),
                                                                            i < fades.size() ? (float) juce::jlimit (0.0, 1.0, fades[i]) : 1.0f);
@@ -313,7 +315,7 @@ void Room3DView::paint (juce::Graphics& g)
 
     // The heads' colour scale, as in the layered view
     auto legend = getLocalBounds().reduced (10, 8).removeFromBottom (36).removeFromRight (300).toFloat();
-    drawScale (g, legend, absolute, mixValue, caption);
+    drawScale (g, legend, ringing ? 2 : (absolute ? 1 : 0), mixValue, caption);
 
     // The head under the mouse: every number says what it is and against what
     if (hovered >= 0 && hovered < (int) seatPoints.size() && rated)
@@ -336,6 +338,17 @@ void Room3DView::paint (juce::Graphics& g)
 
         if (h < felt.size())
             lines.add (tr ("Felt under 40 Hz: ") + juce::String (juce::roundToInt (felt[h])) + " dB SPL");
+
+        // How long it rings, against the music threshold at that frequency (Fazenda et al. 2015)
+        const double ring = value (details.ringSeconds), ringAt = value (details.ringHz), ratio = value (details.ringRatio),
+                     single = value (details.ringAbsolute);
+
+        if (! std::isnan (ring) && ! std::isnan (ratio))
+        {
+            const juce::String verdict = ratio >= 1.0 ? tr ("heard on music") : (single < 1.0 ? tr ("not heard") : tr ("acceptable for music"));
+            lines.add (tr ("Rings ") + juce::String (ring, 2) + tr (" s at ") + juce::String (juce::roundToInt (ringAt)) + tr (" Hz (music threshold ")
+                       + juce::String (ring / ratio, 2) + " s): " + verdict);
+        }
 
         float width = 0.0f;
 
@@ -486,22 +499,55 @@ juce::Colour loudnessColour (double phon)
     return juce::Colour (stops[std::size (stops) - 1].argb);
 }
 
-void drawScale (juce::Graphics& g, juce::Rectangle<float> area, bool absolute, double mixValue, const juce::String& caption)
+juce::Colour ringColour (double ratio, double absoluteRatio)
 {
-    // A loudness scale 0..100 phon with the mix's own value marked, or a change scale -9..+9 dB
+    const juce::Colour grey (0xff8a8a8a), yellow (0xffffd400), orange (0xffff6c00), red (0xffff1414);
+
+    if (std::isnan (ratio))
+        return juce::Colour (0xff4a4a4a);
+
+    if (! std::isnan (absoluteRatio) && absoluteRatio < 1.0)
+        return grey;                                        // under the single-tone threshold: not heard
+
+    if (ratio < 1.0)
+    {
+        // Between the two thresholds: acceptable for music, greyer the closer to the single-tone one
+        const double t = std::isnan (absoluteRatio) ? (ratio - 0.6) / 0.4 : (absoluteRatio - 1.0) / std::max (1e-6, absoluteRatio / ratio - 1.0);
+        return grey.interpolatedWith (yellow, (float) juce::jlimit (0.0, 1.0, t));
+    }
+
+    // Over the music threshold: heard on music, red from twice as long
+    const double t = juce::jlimit (0.0, 1.0, ratio - 1.0);
+    return t < 0.5 ? yellow.interpolatedWith (orange, (float) (2.0 * t)) : orange.interpolatedWith (red, (float) (2.0 * t - 1.0));
+}
+
+void drawScale (juce::Graphics& g, juce::Rectangle<float> area, int mode, double mixValue, const juce::String& caption)
+{
+    // A change scale -9..+9 dB, a loudness scale 0..100 phon with the mix's own value marked, or a ringing scale
+    const bool absolute = mode == 1, ringing = mode == 2;
     auto bar = area.removeFromTop (10.0f);
 
     for (int x = 0; x < (int) bar.getWidth(); ++x)
     {
         const double t = x / (double) bar.getWidth();
-        g.setColour (absolute ? loudnessColour (100.0 * t) : bassChangeColour (-9.0 + 18.0 * t));
+        g.setColour (ringing ? ringColour (2.0 * t) : absolute ? loudnessColour (100.0 * t) : bassChangeColour (-9.0 + 18.0 * t));
         g.fillRect (bar.getX() + (float) x, bar.getY(), 1.0f, bar.getHeight());
     }
 
     g.setColour (theme::dimText);
     g.setFont (uiFont (10.0f));
 
-    if (absolute)
+    if (ringing)
+    {
+        // Decay against the music threshold: 1 is where modal effects start to be heard on music
+        g.drawText (tr ("not heard"), juce::Rectangle<float> (bar.getX(), bar.getBottom() + 1.0f, 90.0f, 12.0f), juce::Justification::centredLeft);
+        g.drawText (tr ("music threshold"), juce::Rectangle<float> (bar.getCentreX() - 50.0f, bar.getBottom() + 1.0f, 100.0f, 12.0f),
+                    juce::Justification::centred);
+        g.drawText (tr ("x2"), juce::Rectangle<float> (bar.getRight() - 40.0f, bar.getBottom() + 1.0f, 40.0f, 12.0f), juce::Justification::centredRight);
+        g.setColour (juce::Colours::white);
+        g.fillRect (bar.getCentreX() - 1.0f, bar.getY() - 3.0f, 2.0f, bar.getHeight() + 6.0f);
+    }
+    else if (absolute)
     {
         for (int tick : { 0, 20, 40, 60, 80, 100 })
             g.drawText (juce::String (tick), juce::Rectangle<float> (bar.getX() + bar.getWidth() * (float) tick / 100.0f - 16.0f,
@@ -577,10 +623,13 @@ void RoomLayerView::setData (const ProRoom& r, const RoomPaths* paths, const Roo
 {
     room = r;
     lens = juce::jlimit (0, RoomResult::numLenses - 1, lensShown);
-    which = juce::jlimit (0, 2, shown);
+    which = juce::jlimit (0, lens == RoomResult::coverageLens ? RoomResult::numParts - 1 : RoomResult::numCauses, shown);
+    ringing = lens == RoomResult::causesLens && which == RoomResult::numCauses;
+    const int part = juce::jmin (which, RoomResult::numParts - 1), cause = juce::jmin (which, RoomResult::numCauses - 1);
     hasData = paths != nullptr && result != nullptr && paths->gridPoints > 0
-                && (int) result->gridLayerPhon[(size_t) which][0].size() == paths->gridPoints
-                && (int) result->gridCauseLayerDb[(size_t) which][0].size() == paths->gridPoints;
+                && (int) result->gridLayerPhon[(size_t) part][0].size() == paths->gridPoints
+                && (int) result->gridCauseLayerDb[(size_t) cause][0].size() == paths->gridPoints
+                && (int) result->gridLayerDecayRatio[0].size() == paths->gridPoints;
 
     if (hasData)
     {
@@ -589,11 +638,11 @@ void RoomLayerView::setData (const ProRoom& r, const RoomPaths* paths, const Roo
         index = paths->gridIndex;
         nodes = paths->gridPositions;
         const bool loudness = lens == RoomResult::coverageLens;
-        layers = loudness ? result->gridLayerPhon[(size_t) which] : result->gridCauseLayerDb[(size_t) which];
-        seatLayers = loudness ? result->seatLayerPhon[(size_t) which] : result->seatCauseLayerDb[(size_t) which];
-        neutral = loudness ? result->approvedLayerPhon[(size_t) which] : std::array<double, RoomResult::numLayers> {};
+        layers = ringing ? result->gridLayerDecayRatio : loudness ? result->gridLayerPhon[(size_t) part] : result->gridCauseLayerDb[(size_t) cause];
+        seatLayers = ringing ? result->seatLayerDecayRatio : loudness ? result->seatLayerPhon[(size_t) part] : result->seatCauseLayerDb[(size_t) cause];
+        neutral = loudness ? result->approvedLayerPhon[(size_t) part] : std::array<double, RoomResult::numLayers> {};
         fade = result->layerHeard;
-        mixValue = result->approvedPhon[(size_t) which];
+        mixValue = result->approvedPhon[(size_t) part];
         seats = r.seatPositions();
     }
 
@@ -607,9 +656,9 @@ void RoomLayerView::paint (juce::Graphics& g)
     const juce::String partNames[] = { tr ("all of it"), "L C R", "LFE" };
     const juce::String causeNames[] = { tr ("the room"), tr ("the speakers"), tr ("the mix") };
     const bool loudness = lens == RoomResult::coverageLens;
-    const juce::String caption = loudness
-                                   ? tr ("Loudness of the bass (phon; infra: dB above the threshold)") + " (" + partNames[which] + ")"
-                                   : tr ("What changes the bass against the approved mix: ") + causeNames[which];
+    const juce::String caption = ringing ? tr ("How long the bass rings, against the threshold heard on music (Fazenda et al. 2015)")
+                               : loudness ? tr ("Loudness of the bass (phon; infra: dB above the threshold)") + " (" + partNames[juce::jmin (which, 2)] + ")"
+                                          : tr ("What changes the bass against the approved mix: ") + causeNames[juce::jmin (which, 2)];
     g.setColour (theme::dimText);
     g.setFont (uiFont (10.5f));
     g.drawText (caption + ". " + tr ("Drag to turn, wheel to zoom, double-click to reset."),
@@ -627,9 +676,13 @@ void RoomLayerView::paint (juce::Graphics& g)
 
     // Loudness: the height is the gap to the mix's own loudness in that layer, the colour the loudness itself.
     // Causes: the change in dB; both fade to grey and flat as the mix's bass in that layer is less likely heard.
-    const auto heightOf = [&] (int l, double v) { return loudness ? lift (v - neutral[(size_t) l]) : lift (v * fade[(size_t) l]); };
+    // Ringing: flat layers, coloured by the decay against the music threshold
+    const auto heightOf = [&] (int l, double v) { return ringing ? 0.0 : loudness ? lift (v - neutral[(size_t) l]) : lift (v * fade[(size_t) l]); };
     const auto colourOf = [&] (int l, double v)
     {
+        if (ringing)
+            return ringColour (v);
+
         return loudness ? loudnessColour (v)
                         : juce::Colour (0xff8a8a8a).interpolatedWith (bassChangeColour (v), (float) juce::jlimit (0.0, 1.0, fade[(size_t) l]));
     };
@@ -688,7 +741,7 @@ void RoomLayerView::paint (juce::Graphics& g)
                 if (k < 0 || std::isnan (values[(size_t) k]))
                     return false;
 
-                db = juce::jlimit (loudness ? 0.0 : -24.0, loudness ? 120.0 : 24.0, values[(size_t) k]);
+                db = ringing ? values[(size_t) k] : juce::jlimit (loudness ? 0.0 : -24.0, loudness ? 120.0 : 24.0, values[(size_t) k]);
                 return true;
             };
 
@@ -886,6 +939,8 @@ void RoomLayerView::paint (juce::Graphics& g)
 
             if (std::isnan (v))
                 text << "--";
+            else if (ringing)
+                text << "x" << juce::String (v, 2);
             else if (loudness)
                 text << juce::String (juce::roundToInt (v)) << (l == 0 ? tr (" dB SL") : tr (" phon")) << " (" << tr ("mix ")
                      << juce::String (juce::roundToInt (neutral[(size_t) l])) << ")";
@@ -899,8 +954,9 @@ void RoomLayerView::paint (juce::Graphics& g)
     }
 
     // Legend: the loudness scale with the mix marked, or a dip on the left, 0 dB (grey) in the middle, a boost on the right
-    drawScale (g, getLocalBounds().reduced (10, 8).removeFromBottom (36).removeFromRight (300).toFloat(), loudness, mixValue,
-               loudness ? tr ("Neutral plane: the mix's own loudness") : tr ("Grey and flat where the mix's bass is not heard"));
+    drawScale (g, getLocalBounds().reduced (10, 8).removeFromBottom (36).removeFromRight (300).toFloat(), ringing ? 2 : (loudness ? 1 : 0), mixValue,
+               ringing ? tr ("Decay of the modes heard there, worst band of the layer")
+                       : loudness ? tr ("Neutral plane: the mix's own loudness") : tr ("Grey and flat where the mix's bass is not heard"));
 }
 
 void RoomLayerView::mouseDown (const juce::MouseEvent&)
@@ -1700,13 +1756,16 @@ RoomProView::RoomProView()
             tr ("All the bass heard."),
             tr ("L C R alone, through every speaker that plays them (Lc / Rc fills included): a hole here comes from L C R or the fills."),
             tr ("The LFE alone, through the subwoofers and the LFE fills: a hole here comes from them.") };
-        const juce::String causeNames[] = { tr ("Room"), tr ("Speakers"), tr ("Mix") };
+        const juce::String causeNames[] = { tr ("Room"), tr ("Speakers"), tr ("Mix"), tr ("Ringing") };
         const juce::String causeTips[] = {
             tr ("What each speaker gives there on its own: modes, distance, materials. Placing the speakers or the audience changes it."),
             tr ("The interference between speakers: subwoofer against subwoofer, fill against the speaker it repeats, L against R, "
                 "two L C R sets. Placement, delay and polarity in the venue change it."),
             tr ("The interference between the LFE and L C R that the mix makes, against the approved mix. The LFE's delay, "
-                "polarity, level and low-pass in the mix change it.") };
+                "polarity, level and low-pass in the mix change it."),
+            tr ("How long the bass rings at each seat: the decay of the room modes heard there, against the thresholds of "
+                "Fazenda, Stephenson & Goldberg (2015). Grey: not heard; yellow: acceptable for music; orange to red: heard on music. "
+                "Absorption in the bass shortens it. Not in the scores.") };
 
         const auto style = [] (juce::TextButton& b, int group)
         {
@@ -1747,13 +1806,13 @@ RoomProView::RoomProView()
             addAndMakeVisible (b);
         }
 
-        for (int i = 0; i < RoomResult::numCauses; ++i)
+        for (int i = 0; i < (int) causeButtons.size(); ++i)
         {
             auto& b = causeButtons[(size_t) i];
             b.setButtonText (causeNames[i]);
             b.setTooltip (causeTips[i]);
             style (b, 7103);
-            b.setConnectedEdges (edges (i, RoomResult::numCauses));
+            b.setConnectedEdges (edges (i, (int) causeButtons.size()));
             b.setToggleState (i == cause, juce::dontSendNotification);
             b.onClick = [this, i] { if (causeButtons[(size_t) i].getToggleState()) { cause = i; showSelected(); repaint(); } };
             addAndMakeVisible (b);
@@ -1830,7 +1889,7 @@ void RoomProView::selectRoom (int index)
 
 int RoomProView::shownRating() const
 {
-    if (lens == RoomResult::coverageLens || cause == RoomResult::roomCause)
+    if (lens == RoomResult::coverageLens || cause == RoomResult::roomCause || cause == ringCause)
         return RoomResult::coverageRating;
 
     return cause == RoomResult::speakersCause ? RoomResult::speakersRating : RoomResult::mixRating;
@@ -1848,23 +1907,32 @@ void RoomProView::showSelected()
     const juce::String headCaptions[] = { tr ("Heads: the change caused by the room, against the approved mix"),
                                           tr ("Heads: the change caused by the speakers, against the approved mix"),
                                           tr ("Heads: the change caused by the mix, against the approved mix") };
-    view3d.setCaption (loudness ? tr ("Heads: how loud their bass is (phon)") : headCaptions[cause]);
+    const bool ringingShown = ! loudness && cause == ringCause;
+    view3d.setCaption (loudness ? tr ("Heads: how loud their bass is (phon)")
+                                : ringingShown ? tr ("Heads: how long the bass rings, against the music threshold") : headCaptions[cause]);
 
     if (! rated)
     {
         view3d.setRoom (room, {}, {}, loudness);
+        view3d.setRinging (false);
         view3d.setWorstSpot (std::nullopt, 100.0);
         layerView.setData (room, nullptr, nullptr, lens, loudness ? part : cause);
         return;
     }
 
-    view3d.setRoom (room, res.seatRatingPenalty[(size_t) rating], loudness ? res.seatPhon[(size_t) part] : res.seatCauseDb[(size_t) cause],
+    view3d.setRoom (room, res.seatRatingPenalty[(size_t) rating],
+                    loudness ? res.seatPhon[(size_t) part] : ringingShown ? res.seatDecayRatio : res.seatCauseDb[(size_t) cause],
                     loudness, res.approvedPhon[(size_t) part], res.seatHeard);
+    view3d.setRinging (ringingShown, res.seatDecayAbsoluteRatio);
     Room3DView::Details details;
     details.phon = res.seatPhon;
     details.partDb = res.seatPartDb;
     details.mixPhon = res.approvedPhon;
     details.causeDb = res.seatCauseDb;
+    details.ringSeconds = res.seatDecaySeconds;
+    details.ringHz = res.seatDecayHz;
+    details.ringRatio = res.seatDecayRatio;
+    details.ringAbsolute = res.seatDecayAbsoluteRatio;
     const juce::String scoreNames[] = { tr ("coverage score"), tr ("placement score"), tr ("mix score") };
     details.scoreName = scoreNames[rating];
     view3d.setDetails (details);
@@ -2051,7 +2119,12 @@ void RoomProView::paint (juce::Graphics& g)
         const auto& res = results[(size_t) i];
         const int rating = shownRating();
         const bool loudness = lens == RoomResult::coverageLens;
-        auto values = loudness ? res.seatPhon[(size_t) part] : res.seatCauseDb[(size_t) cause];
+        const bool ringingShown = ! loudness && cause == ringCause;
+        auto values = loudness ? res.seatPhon[(size_t) part] : ringingShown ? res.seatDecayRatio : res.seatCauseDb[(size_t) cause];
+
+        if (ringingShown)
+            for (auto& v : values)
+                v = std::isnan (v) ? v : 12.0 * std::log2 (v);      // twice the music threshold: the right end of the line
 
         if (loudness)
             for (auto& v : values)
@@ -2106,7 +2179,9 @@ void RoomProView::paint (juce::Graphics& g)
         g.setFont (uiFont (9.5f));
         const int worst = res.ratingWorstProbe[(size_t) rating];
         g.setColour (show && worst >= 0 ? juce::Colour (0xffff5ad2) : theme::dimText);
-        g.drawText (show ? "P10 " + juce::String (juce::roundToInt (res.ratingP10[(size_t) rating])) + "   " + tr ("worst ")
+        g.drawText (show && ringingShown ? tr ("heard ringing: ") + juce::String (res.decayAudibleSeats) + " / " + juce::String ((int) res.seatDecayRatio.size())
+                                           + tr (" seats")
+                    : show ? "P10 " + juce::String (juce::roundToInt (res.ratingP10[(size_t) rating])) + "   " + tr ("worst ")
                              + juce::String (juce::roundToInt (res.ratingWorstPointScore[(size_t) rating]))
                          : juce::String (computing ? tr ("computing...") : juce::String()),
                     scores, juce::Justification::centred);
@@ -2151,7 +2226,7 @@ void RoomProView::resized()
 
         for (auto& b : causeButtons)
         {
-            b.setBounds (row.removeFromLeft (84));
+            b.setBounds (row.removeFromLeft (90));
             b.setVisible (lens == RoomResult::causesLens);
         }
     }

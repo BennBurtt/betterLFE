@@ -347,6 +347,29 @@ namespace
             { "Heads: the interference against the approved mix", "Têtes : l'interférence face au mix validé" },
             { "Coverage", "Répartition" }, { "Interference", "Interférences" }, { "interference ", "interférence " },
             { "Who gets bass, how much", "Qui a du grave, et combien" }, { "Why", "Pourquoi" },
+            // Dips against peaks, ringing
+            { "Dips against peaks, allowance:", "Creux face aux pics, marge :" },
+            { "Room Sim and Room Sim Pro: a dip is heard less than a peak of the same size. 1: dips get the published "
+              "difference (Bharitkar, Robinson & Poulain 2016; Toole & Olive), about 2.6 dB more below 63 Hz, "
+              "2.2 dB at 125 Hz; 0: dips count as peaks.",
+              "Room Sim et Room Sim Pro : un creux s'entend moins qu'un pic de même taille. 1 : les creux reçoivent l'écart publié "
+              "(Bharitkar, Robinson et Poulain 2016 ; Toole et Olive), environ 2,6 dB de plus sous 63 Hz, 2,2 dB à 125 Hz ; "
+              "0 : un creux compte comme un pic." },
+            { "Ringing", "Résonance" },
+            { "How long the bass rings at each seat: the decay of the room modes heard there, against the thresholds of "
+              "Fazenda, Stephenson & Goldberg (2015). Grey: not heard; yellow: acceptable for music; orange to red: heard on music. "
+              "Absorption in the bass shortens it. Not in the scores.",
+              "Combien de temps le grave résonne à chaque place : la décroissance des modes qu'on y entend, face aux seuils de "
+              "Fazenda, Stephenson et Goldberg (2015). Gris : inaudible ; jaune : acceptable pour la musique ; orange à rouge : "
+              "audible sur de la musique. De l'absorption dans le grave la raccourcit. N'entre pas dans les notes." },
+            { "not heard", "inaudible" }, { "music threshold", "seuil musique" }, { "x2", "x2" },
+            { "heard on music", "audible sur de la musique" }, { "acceptable for music", "acceptable pour la musique" },
+            { "Rings ", "Résonne " }, { " s at ", " s à " }, { " Hz (music threshold ", " Hz (seuil musique " },
+            { "Heads: how long the bass rings, against the music threshold", "Têtes : durée de résonance du grave, face au seuil musique" },
+            { "How long the bass rings, against the threshold heard on music (Fazenda et al. 2015)",
+              "Durée de résonance du grave, face au seuil audible sur de la musique (Fazenda et coll. 2015)" },
+            { "Decay of the modes heard there, worst band of the layer", "Décroissance des modes entendus, pire bande de la couche" },
+            { "heard ringing: ", "résonance audible : " },
             // Test tab
             { "Test", "Test" }, { "Test signals", "Signaux de test" }, { "SubGUARD test signals", "Signaux de test SubGUARD" },
             { "The built-in test signals: choose \"SubGUARD test signals\" as the input device, then click a signal.",

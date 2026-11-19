@@ -1081,6 +1081,51 @@ diamètre : le tour de tête moyen d'ANSUR II (armée américaine, 2012 ;
 personnes), hommes et femmes à parts égales, divisé par π. C'est un repère
 visuel, sans effet sur le calcul.
 
+**Creux contre pics.** Un creux s'entend moins qu'un pic de même taille
+(Bücklein 1981 [43]). Dans une salle de cinéma à 85 dBC, avec un bruit rose,
+il faut un creux large (Q = 1) de 3,4 dB à 63 Hz, 3,0 dB à 125 Hz, 2,4 dB à
+250 Hz et 1,8 dB à 500 Hz pour qu'on l'entende ; un creux étroit doit être
+bien plus profond (Q = 10 : 12,8 / 9,3 / 6,5 / 4,8 dB ; Q = 30 : 21 / 15,7 /
+13 / 10,6 dB) (Bharitkar, Robinson et Poulain, Dolby, 2016, fig. 7, lue à
+±0,5 dB [44]). Un pic large s'entend dès moins de 0,8 dB (Toole et Olive,
+repris par Mateljan et coll. 2007 [45]). Dans la note des salles (Room Sim
+et Room Sim Pro), un creux compte donc comme un écart plus petit de la
+différence entre ces deux seuils : 2,6 dB jusqu'à 63 Hz (la valeur de 63 Hz
+est gardée plus bas, ce qui compte les creux plutôt trop que pas assez),
+2,2 dB à 125 Hz, entre les deux sur une échelle logarithmique. Cela vaut pour
+la répartition (le niveau face au mix validé) comme pour les causes
+« enceintes » et « mix ». On prend le seuil d'un creux large (Q = 1) : nos
+bandes, de 10 à 30 Hz de large, sont des creux larges, les trous étroits y
+sont déjà moyennés. Limite : ces seuils sont mesurés sur un son tenu ; sur
+des attaques, un creux étroit redevient aussi audible qu'un pic (Olive et
+coll. 1997). Réglage Dev « Creux face aux pics, marge » : 1 = l'écart publié,
+0 = un creux compte comme un pic. Vérifié : multiplexe, LFE identique à
+l'écran, des places qui perdent du grave : répartition 35 sans la marge, 60
+avec ; P09 (des bosses) inchangé.
+
+**Résonance par place.** Un mode s'entend aussi par sa durée : sa
+décroissance de 60 dB, `T = 6,91 / δ = 2,2 Q / f` (δ : amortissement du mode).
+À chaque place et dans chaque bande, la durée entendue est la moyenne des T
+des modes, pondérée par leur énergie à cet endroit,
+`w = |excitation|² ψ(x)² / (δ ω²)` (l'énergie de la réponse d'un mode,
+sommée sur les fréquences), pour les enceintes LCR et pour celles du LFE,
+dans les proportions du mix dans la bande. Seuils de Fazenda, Stephenson et
+Goldberg (JASA 2015 [46]) : sous le seuil des sons isolés (0,9 s à 32 Hz,
+0,3 s à 63 Hz, 0,27 s à 100 Hz, 0,18 s à 150 Hz, 0,17 s à 200 Hz), le mode
+ne s'entend pas ; au-dessus du seuil sur de la musique (0,51 s à 63 Hz,
+0,30 s à 125 Hz, 0,12 s à 250 Hz), il s'entend. Sous 63 Hz, le seuil sur
+musique n'a pas été mesuré : on prend au moins celui des sons isolés et au
+moins la valeur de 63 Hz. Avec de la musique, un mode de Q inférieur à 16
+n'est pas détecté (Fazenda, Avis et Davies 2003 [47], Avis et coll. 2007).
+Chaque place reçoit sa pire bande (durée, fréquence, rapport au seuil). La
+lentille « Pourquoi » a un quatrième filtre, **Résonance** : têtes grises
+(inaudible), jaunes (acceptable pour la musique), orange à rouges (audible,
+rouge à deux fois le seuil) ; couches à plat, colorées de même ; la carte
+donne le nombre de places où la résonance s'entend. C'est un indicateur : il
+n'entre pas dans les notes. Vérifié : un seul RT60 pour tous les modes donne
+cette durée à chaque place ; RT60 2 s : 20 places sur 20 au-dessus du seuil
+sur musique ; 0,2 s : aucune.
+
 **Rien dans le mix.** Une bande où le mix a moins d'un millionième de son
 grave, infra compris, ne compte pas : un mix d'infra seul n'a entre 20 et
 120 Hz que la fuite de la fenêtre d'analyse, et ses causes sont alors
@@ -1386,6 +1431,24 @@ du son) : bruit blanc ou rose, aucune ; grondement grave (sous 90 Hz), 1 à 3.
 42. C. C. Gordon et coll., *2012 Anthropometric Survey of U.S. Army
     Personnel (ANSUR II)*, Natick, 2014 ; données publiques (Penn State
     OpenLab).
+43. R. Bücklein, « The audibility of frequency response irregularities »,
+    *JAES* 29(3), 126–131 (1981).
+44. S. Bharitkar, C. Robinson, A. Poulain, « Equalization of spectral dips
+    using detection thresholds », AES 140th Convention, Paris, 2016,
+    paper 9493.
+45. I. Mateljan, H. Weber, A. Doric, « Detection of audible resonances »,
+    3rd Congress of the Alps Adria Acoustics Association, Graz, 2007 (d'après
+    F. E. Toole, S. E. Olive, « The modification of timbre by resonances »,
+    *JAES* 36(3), 1988) ; S. E. Olive et coll., « The detection thresholds of
+    resonances at low frequencies », *JAES* 45(3), 1997.
+46. B. M. Fazenda, M. Stephenson, A. Goldberg, « Perceptual thresholds for
+    the effects of room modes as a function of modal decay », *JASA* 137(3),
+    1088–1098 (2015).
+47. B. M. Fazenda, M. R. Avis, W. J. Davies, « Difference limen for the
+    Q-factor of room modes », AES 115th Convention, 2003, paper 5905 ;
+    M. R. Avis, B. M. Fazenda, W. J. Davies, « Thresholds of detection for
+    changes to the Q factor of low-frequency modes in listening
+    environments », *JAES* 55(7/8), 2007.
 
 
 ## Niveau du LFE et réglages

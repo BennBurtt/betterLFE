@@ -1828,7 +1828,8 @@ static void testRooms()
     for (const auto& r : shared.rooms)
         thinner += r.medianDb < -0.5;
 
-    check (meanShared < 85.0 && thinner >= 12,
+    // (the seats mostly lose bass: dips, which count less than peaks; 86 instead of under 85 before)
+    check (meanShared < 90.0 && thinner >= 12,
            "LFE identical to the screen and as loud: in most rooms the seats lose the in-phase gain heard on the stage", meanShared);
     check (shared.rooms[0].combinedScore <= sim.compute (sharedAnalysis).robustness + 1e-9, "room result = robustness x room score", 0.0);
 
@@ -2530,6 +2531,51 @@ static void testRoomPro()
         check (jbl.omniShare (40.0) > 0.9 && std::abs (jbl.omniShare (160.0) - 0.5) < 1e-9 && genelec.omniShare (60.0) > 0.9
                  && std::abs (genelec.omniShare (343.0 / (3.14159265358979 * 0.357)) - 0.7) < 1e-6,
                "speaker models: omnidirectional in the deep bass, -3 dB at 90 degrees at ka = 1 (width model)", jbl.omniShare (160.0));
+    }
+
+    // Dips against peaks: a dip counts as a smaller change, by the published difference of the thresholds
+    {
+        check (std::abs (RoomSimulator::dipAllowanceDb (40.0) - 2.6) < 1e-9 && std::abs (RoomSimulator::dipAllowanceDb (125.0) - 2.2) < 1e-9
+                 && RoomSimulator::dipAllowanceDb (90.0) < 2.6 && RoomSimulator::dipAllowanceDb (90.0) > 2.2,
+               "dip allowance: 2.6 dB up to 63 Hz, 2.2 dB at 125 Hz, in between on a log scale", RoomSimulator::dipAllowanceDb (90.0));
+
+        auto room = ProRoom::fromSpec (RoomSimulator::defaultRooms()[6]);
+        const auto paths = ProRoomModel::prepare (room, sharedAnalysis.grid);
+        auto even = sim.tuning;
+        even.dipAllowance = 0.0;
+        const auto asPeaks = RoomSimulator::rate (paths, sharedAnalysis, sharedT, even, PlaybackSimulator::Level::strong, 10.0);
+        const auto asDips = RoomSimulator::rate (paths, sharedAnalysis, sharedT, sim.tuning, PlaybackSimulator::Level::strong, 10.0);
+        std::printf ("  LFE identical to the screen, multiplex: coverage %.1f with dips counted as peaks, %.1f with the dip allowance\n",
+                     asPeaks.ratingScore[RoomResult::coverageRating], asDips.ratingScore[RoomResult::coverageRating]);
+        check (asDips.ratingScore[RoomResult::coverageRating] > asPeaks.ratingScore[RoomResult::coverageRating],
+               "with the dip allowance, a room that mostly loses bass scores higher", asDips.ratingScore[RoomResult::coverageRating]);
+    }
+
+    // How long the bass rings at each seat: with one RT60 for every mode, every seat rings as long
+    {
+        auto room = ProRoom::fromSpec (RoomSimulator::defaultRooms()[6]);
+        room.acoustics = 0;
+        const auto ringFor = [&] (double rt60)
+        {
+            room.rt60 = rt60;
+            return RoomSimulator::rate (ProRoomModel::prepare (room, sharedAnalysis.grid), sharedAnalysis, sharedT, sim.tuning,
+                                        PlaybackSimulator::Level::strong, 10.0);
+        };
+
+        const auto dry = ringFor (0.2), live = ringFor (2.0);
+        double worstGap = 0.0;
+
+        for (double v : live.seatDecaySeconds)
+            worstGap = std::max (worstGap, std::isnan (v) ? 99.0 : std::abs (v - 2.0));
+
+        std::printf ("  ringing: RT60 2 s -> %d of %zu seats over the music threshold; RT60 0.2 s -> %d\n",
+                     live.decayAudibleSeats, live.seatDecaySeconds.size(), dry.decayAudibleSeats);
+        check (worstGap < 1e-6, "one RT60 for every mode: every seat rings that long", worstGap);
+        check (live.decayAudibleSeats == (int) live.seatDecaySeconds.size() && dry.decayAudibleSeats == 0,
+               "a live room rings over the music threshold at every seat, a dry one at none", (double) live.decayAudibleSeats);
+        check (std::abs (RoomSimulator::musicDecayThreshold (63.0) - 0.51) < 1e-9 && std::abs (RoomSimulator::modalDecayThreshold (32.0) - 0.9) < 1e-9
+                 && RoomSimulator::musicDecayThreshold (40.0) >= RoomSimulator::modalDecayThreshold (40.0),
+               "decay thresholds of Fazenda et al. 2015; under 63 Hz, music at least the single-tone threshold", RoomSimulator::musicDecayThreshold (40.0));
     }
 
     // Why a seat gets what it gets: room, speakers and mix add up to the whole change

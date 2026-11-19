@@ -247,6 +247,12 @@ public:
         // the interaction: seat penalty = 1 - (1 - interaction) (1 - w x coverage)
         double coverageWeight = 0.5;
 
+        // Room Sim and Room Sim Pro: a dip is heard less than a peak of the same
+        // size. A dip of a band counts as a change smaller by this share of the
+        // published difference between the two detection thresholds (see
+        // RoomSimulator::dipAllowanceDb). 0: dips count as peaks.
+        double dipAllowance = 1.0;
+
         // Listening level: the sound pressure level, in dB(C), that a screen
         // channel gives with the reference signal at -20 dBFS RMS. 85 is the
         // cinema calibration (SMPTE RP 200); dubbing stages and smaller

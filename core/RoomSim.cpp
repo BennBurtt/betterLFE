@@ -306,6 +306,67 @@ double RoomSimulator::roomScoreOf (const std::vector<double>& seatPenalty, const
     return 100.0 * (1.0 - ((1.0 - w) * mean + w * worstMean));
 }
 
+double RoomSimulator::dipAllowanceDb (double hz)
+{
+    // Detection thresholds of a broad dip (Q = 1) in a cinema at 85 dBC with pink
+    // noise: 3.4, 3.0, 2.4 and 1.8 dB at 63, 125, 250 and 500 Hz (Bharitkar,
+    // Robinson & Poulain, AES 2016, fig. 7); a broad peak is heard from less
+    // than 0.8 dB (Toole & Olive 1988, as given by Mateljan et al. 2007). Below
+    // 63 Hz, the 63 Hz value is kept: their dips grow harder to hear lower down,
+    // so this errs on counting dips too much rather than too little.
+    static const double points[][2] = { { 63.0, 3.4 - 0.8 }, { 125.0, 3.0 - 0.8 }, { 250.0, 2.4 - 0.8 }, { 500.0, 1.8 - 0.8 } };
+
+    if (hz <= points[0][0])
+        return points[0][1];
+
+    for (size_t i = 1; i < std::size (points); ++i)
+        if (hz <= points[i][0])
+        {
+            const double t = std::log (hz / points[i - 1][0]) / std::log (points[i][0] / points[i - 1][0]);
+            return points[i - 1][1] + t * (points[i][1] - points[i - 1][1]);
+        }
+
+    return points[std::size (points) - 1][1];
+}
+
+namespace
+{
+    double interpolatedSeconds (const double (*points)[2], size_t count, double hz)
+    {
+        if (hz <= points[0][0])
+            return points[0][1];
+
+        for (size_t i = 1; i < count; ++i)
+            if (hz <= points[i][0])
+            {
+                const double t = std::log (hz / points[i - 1][0]) / std::log (points[i][0] / points[i - 1][0]);
+                return points[i - 1][1] + t * (points[i][1] - points[i - 1][1]);
+            }
+
+        return points[count - 1][1];
+    }
+}
+
+double RoomSimulator::modalDecayThreshold (double hz)
+{
+    // Fazenda, Stephenson & Goldberg (JASA 2015): shortest audible decay of a
+    // mode (60 dB), single decaying tones at 85 dB: 0.9 s at 32 Hz, 0.3 s at
+    // 63 Hz, 0.27 at 100, 0.18 at 150, 0.17 at 200 Hz. Under it, inaudible.
+    static const double points[][2] = { { 32.0, 0.9 }, { 63.0, 0.3 }, { 100.0, 0.27 }, { 150.0, 0.18 }, { 200.0, 0.17 } };
+    return interpolatedSeconds (points, std::size (points), hz);
+}
+
+double RoomSimulator::musicDecayThreshold (double hz)
+{
+    // The same with music in a modal room: 0.51 s at 63 Hz, 0.30 s at 125 Hz,
+    // 0.12 s at 250 Hz; above it, modal effects are audible on music. Not
+    // measured under 63 Hz: there it is at least the single-tone threshold
+    // (music masks more), and at least the 63 Hz value.
+    static const double points[][2] = { { 63.0, 0.51 }, { 125.0, 0.30 }, { 250.0, 0.12 } };
+    const double music = interpolatedSeconds (points, std::size (points), hz);
+    return hz < 63.0 ? std::max (music, modalDecayThreshold (hz)) : music;
+}
+
 RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const Translation& t, const PlaybackSimulator::Tuning& tuning,
                                 PlaybackSimulator::Level level, double lfeGainDb)
 {
@@ -470,6 +531,12 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
     for (auto& v : r.probeRatingPenalty)        v.assign ((size_t) room.probes, 0.0);
     r.seatHeard.assign ((size_t) room.seats, 0.0);
 
+    for (auto* v : { &r.seatDecaySeconds, &r.seatDecayHz, &r.seatDecayRatio, &r.seatDecayAbsoluteRatio })
+        v->assign ((size_t) room.seats, nothing);
+
+    for (auto& v : r.seatLayerDecayRatio)   v.assign ((size_t) room.seats, nothing);
+    for (auto& v : r.gridLayerDecayRatio)   v.assign ((size_t) room.gridPoints, nothing);
+
     r.seatBassDb.assign ((size_t) room.seats, 0.0);
     r.seatLevelDb.clear();
     r.seatHeardPhon.assign ((size_t) room.seats, 0.0);
@@ -600,8 +667,72 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
         out[RoomResult::mixCause] = limitedDb ((heard / (lcrLfe + 1e-60)) / (approvedHeard / (approvedLcrLfe + 1e-60) + 1e-30));
     };
 
+    // How long the bass rings at a point, band by band (0: infra, then the rating bands):
+    // the modes' decay weighted by their energy there, L C R and LFE speakers in the
+    // mix's proportions; only where the mix has bass that is heard
+    constexpr int numDecayBands = RoomPaths::numDecayBands;
+    const bool hasDecay = room.decay.size() == (size_t) (room.seats + room.probes + room.gridPoints);
+    double decayHz[numDecayBands] = { 14.0 }, lcrShare[numDecayBands] = {}, lfeShare[numDecayBands] = {};
+    bool decayCounts[numDecayBands] = {};
+
+    for (int b = 0; b < numBands; ++b)
+        decayHz[b + 1] = PlaybackSimulator::bandCentreHz[b];
+
+    {
+        const double lcrParts[numDecayBands] = { approvedLcrLayer[0], approvedLcr[0], approvedLcr[1], approvedLcr[2], approvedLcr[3] };
+        const double lfeParts[numDecayBands] = { approvedLfeLayer[0], approvedLfe[0], approvedLfe[1], approvedLfe[2], approvedLfe[3] };
+
+        for (int d = 0; d < numDecayBands; ++d)
+        {
+            const double total = lcrParts[d] + lfeParts[d];
+            lcrShare[d] = total > 0.0 ? lcrParts[d] / total : 0.0;
+            lfeShare[d] = total > 0.0 ? lfeParts[d] / total : 0.0;
+            const bool inMix = (d == 0 ? approvedLayerPower[0] : approvedPower[d - 1]) > partFloor;
+            const double heard = d == 0 ? r.layerHeard[0] : audible (d - 1, t.bandSplDb[(size_t) (d - 1)]);
+            decayCounts[d] = hasDecay && inMix && heard > 0.5;
+        }
+    }
+
+    const auto decayOf = [&] (int point, int d)
+    {
+        const auto& x = room.decay[(size_t) point];
+        const double weight = lcrShare[d] * x.lcrWeight[(size_t) d] + lfeShare[d] * x.lfeWeight[(size_t) d];
+        return weight > 0.0 ? (lcrShare[d] * x.lcrSum[(size_t) d] + lfeShare[d] * x.lfeSum[(size_t) d]) / weight : nothing;
+    };
+
+    const int layerOfDecay[numDecayBands] = { 0, 1, 1, 2, 2 };
+
     for (int seat = 0; seat < room.seats + room.probes + room.gridPoints; ++seat)
     {
+        // How long it rings here: each band against the music threshold, the worst one per layer and overall
+        double decayRatio[numLayers] = { nothing, nothing, nothing };
+        double worstRatio = nothing, worstAbsolute = nothing, worstSeconds = nothing, worstHz = nothing;
+
+        for (int d = 0; d < numDecayBands; ++d)
+        {
+            if (! decayCounts[d])
+                continue;
+
+            const double seconds = decayOf (seat, d);
+
+            if (std::isnan (seconds))
+                continue;
+
+            const double ratio = seconds / musicDecayThreshold (decayHz[d]);
+            const int l = layerOfDecay[d];
+
+            if (std::isnan (decayRatio[l]) || ratio > decayRatio[l])
+                decayRatio[l] = ratio;
+
+            if (std::isnan (worstRatio) || ratio > worstRatio)
+            {
+                worstRatio = ratio;
+                worstAbsolute = seconds / modalDecayThreshold (decayHz[d]);
+                worstSeconds = seconds;
+                worstHz = decayHz[d];
+            }
+        }
+
         double actual[numBands] = {}, inPower[numBands] = {}, lcrBand[numBands] = {}, lfeBand[numBands] = {}, aloneBand[numBands] = {};
         double actualLayer[numLayers] = {}, inPowerLayer[numLayers] = {}, lcrLayer[numLayers] = {}, lfeLayer[numLayers] = {};
         double aloneLayer[numLayers] = {}, felt = 0.0;
@@ -690,6 +821,7 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
 
             for (int l = 0; l < numLayers; ++l)
             {
+                r.gridLayerDecayRatio[(size_t) l][k] = decayRatio[l];
                 r.gridLayerDb[(size_t) l][k] = causeDb[RoomResult::mixCause][l];
 
                 for (int c = 0; c < numCauses; ++c)
@@ -717,7 +849,12 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
 
             const double doubling = PlaybackSimulator::iso226Spl (20.0, 30.0) - PlaybackSimulator::iso226Spl (20.0, 20.0);
             const double allowed = std::min (toleranceDb, doubling - 0.5);
-            const auto rateDb = [&] (double db) { return std::clamp ((std::abs (db) - allowed) / (doubling - allowed), 0.0, 1.0); };
+            const double dipShift = std::clamp (tuning.dipAllowance, 0.0, 1.0) * dipAllowanceDb (15.0);
+            const auto rateDb = [&] (double db)
+            {
+                const double size = db < 0.0 ? std::max (0.0, -db - dipShift) : db;    // a dip counts as a smaller change
+                return std::clamp ((size - allowed) / (doubling - allowed), 0.0, 1.0);
+            };
             infraRated[RoomResult::coverageRating] = rateDb (limitedDb (actualLayer[0] / (approvedLayer[0] + 1e-60)));
             infraRated[RoomResult::speakersRating] = rateDb (causeDb[RoomResult::speakersCause][0]);
             infraRated[RoomResult::mixRating] = rateDb (causeDb[RoomResult::mixCause][0]);
@@ -756,7 +893,14 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
             const double heard = audible (b, spl);
             const double doubling = doublingAt (b, spl);
             const double allowed = std::min (toleranceDb, doubling - 0.5);
-            const auto rateDb = [&] (double db) { return std::clamp ((std::abs (db) - allowed) / (doubling - allowed), 0.0, 1.0); };
+            // A dip is heard less than a peak of the same size: it counts as a change smaller by the
+            // published difference between their detection thresholds at this frequency
+            const double dipShift = std::clamp (tuning.dipAllowance, 0.0, 1.0) * dipAllowanceDb (PlaybackSimulator::bandCentreHz[b]);
+            const auto rateDb = [&] (double db)
+            {
+                const double size = db < 0.0 ? std::max (0.0, -db - dipShift) : db;
+                return std::clamp ((size - allowed) / (doubling - allowed), 0.0, 1.0);
+            };
 
             rated[RoomResult::coverageRating][b] = rateDb (limitedDb (actual[b] / (approved[b] + 1e-60)));
             rated[RoomResult::speakersRating][b] = rateDb (c[RoomResult::speakersCause]);
@@ -792,6 +936,14 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
             r.seatPenalty[k] = seatPenalty;
             r.seatChangeDb[k] = seatChange;
             r.seatHeard[k] = heardAtAll;
+            r.seatDecaySeconds[k] = worstSeconds;
+            r.seatDecayHz[k] = worstHz;
+            r.seatDecayRatio[k] = worstRatio;
+            r.seatDecayAbsoluteRatio[k] = worstAbsolute;
+            r.decayAudibleSeats += worstRatio >= 1.0 ? 1 : 0;
+
+            for (int l = 0; l < numLayers; ++l)
+                r.seatLayerDecayRatio[(size_t) l][k] = decayRatio[l];
 
             for (int q = 0; q < numRatings; ++q)
                 r.seatRatingPenalty[(size_t) q][k] = penalties[q] * heardAtAll;
