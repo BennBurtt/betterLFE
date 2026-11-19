@@ -5,15 +5,22 @@
 //
 // Files are 48 kHz, 24-bit WAV, channel order L R C LFE Ls Rs (the "5.1 ITU"
 // format of the app). The surrounds are silent.
+//
+// A second set, in <output folder>/room-sim-pro, isolates one thing at a time
+// for Room Sim Pro (bass in one channel, the LFE related or not to C, a quiet
+// mix, one layer only), each rated in the three default Room Sim Pro rooms so
+// that what the two lenses show is known.
 
 #include "../core/AlertTracker.h"
 #include "../core/LfeEngine.h"
 #include "../core/PlaybackSim.h"
+#include "../core/RoomPro.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <random>
@@ -288,6 +295,137 @@ namespace
 
         return r;
     }
+
+    //==========================================================================
+    // Room Sim Pro: the final analysis of a file, rated in the default rooms
+    Analysis finalAnalysis (const std::vector<float>& interleaved6)
+    {
+        LfeEngine engine (sampleRate);
+        Settings settings;
+        const size_t frames = interleaved6.size() / 6, block = 800;
+        std::vector<float> four (block * 4);
+
+        for (size_t pos = 0; pos + block <= frames; pos += block)
+        {
+            for (size_t i = 0; i < block; ++i)
+            {
+                const float* in = &interleaved6[(pos + i) * 6];
+                four[i * 4 + chL] = in[0];
+                four[i * 4 + chR] = in[1];
+                four[i * 4 + chC] = in[2];
+                four[i * 4 + chLFE] = in[3];
+            }
+
+            engine.push (four.data(), (int) block);
+            engine.analyze (settings);
+        }
+
+        return engine.result();
+    }
+
+    std::string signedDb (double v)
+    {
+        char text[32];
+        std::snprintf (text, sizeof (text), std::isnan (v) ? "--" : "%+.1f dB", v);
+        return text;
+    }
+
+    /** What Room Sim Pro shows for a room: the loudness lens and the three causes, in words and numbers. */
+    std::string describe (const RoomResult& r)
+    {
+        const auto range = [] (const std::vector<double>& v, double& lo, double& hi, double& mean)
+        {
+            lo = 1e9; hi = -1e9; mean = 0.0;
+            int n = 0;
+
+            for (double x : v)
+                if (! std::isnan (x))
+                {
+                    lo = std::min (lo, x);
+                    hi = std::max (hi, x);
+                    mean += x;
+                    ++n;
+                }
+
+            mean = n > 0 ? mean / n : std::nan ("");
+            return n > 0;
+        };
+
+        std::string out;
+        char line[400];
+        double lo, hi, mean;
+
+        // Lens 1: loudness, all / L C R / LFE
+        const char* parts[] = { "All", "L C R alone", "LFE alone" };
+
+        for (int p = 0; p < RoomResult::numParts; ++p)
+        {
+            if (r.approvedPhon[(size_t) p] <= 0.0 || ! range (r.seatPhon[(size_t) p], lo, hi, mean))
+            {
+                std::snprintf (line, sizeof (line), "      lens 1, %-12s nothing in the mix (mix 0 phon): heads dark grey\n", parts[p]);
+            }
+            else
+            {
+                std::snprintf (line, sizeof (line), "      lens 1, %-12s mix %.0f phon; heads %.0f to %.0f phon (mean %.0f)\n", parts[p],
+                               r.approvedPhon[(size_t) p], lo, hi, mean);
+            }
+
+            out += line;
+        }
+
+        // Lens 2: the three causes, mean and extremes over the seats
+        const char* causes[] = { "Room", "Speakers", "Mix" };
+
+        for (int c = 0; c < RoomResult::numCauses; ++c)
+        {
+            if (! range (r.seatCauseDb[(size_t) c], lo, hi, mean))
+                std::snprintf (line, sizeof (line), "      lens 2, %-9s --\n", causes[c]);
+            else
+                std::snprintf (line, sizeof (line), "      lens 2, %-9s seats %s to %s (mean %s)%s\n", causes[c], signedDb (lo).c_str(),
+                               signedDb (hi).c_str(), signedDb (mean).c_str(),
+                               std::max (std::abs (lo), std::abs (hi)) < 0.5 ? ": all grey" : "");
+
+            out += line;
+        }
+
+        // The layered view, lens 1: the mix's own loudness in each layer
+        std::snprintf (line, sizeof (line), "      layers (mix): infra %.0f dB above the threshold, very low %.0f phon, low %.0f phon\n",
+                       r.approvedLayerPhon[RoomResult::allParts][0], r.approvedLayerPhon[RoomResult::allParts][1],
+                       r.approvedLayerPhon[RoomResult::allParts][2]);
+        out += line;
+
+        std::snprintf (line, sizeof (line), "      scores: coverage %.0f, placement %.0f, mix %.0f; bass heard: %.0f %% likely\n",
+                       std::max (0.0, r.ratingScore[RoomResult::coverageRating]) + 0.0, std::max (0.0, r.ratingScore[RoomResult::speakersRating]) + 0.0,
+                       std::max (0.0, r.ratingScore[RoomResult::mixRating]) + 0.0,
+                       100.0 * (r.seatHeard.empty() ? 0.0 : *std::max_element (r.seatHeard.begin(), r.seatHeard.end())));
+        out += line;
+        return out;
+    }
+
+    /** A second-order low-pass or high-pass (Butterworth, bilinear), for band-limited test signals. */
+    struct TestFilter
+    {
+        double b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0, x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+
+        static TestFilter make (double hz, bool high)
+        {
+            TestFilter f;
+            const double k = std::tan (pi * hz / sampleRate), q = std::sqrt (0.5), norm = 1.0 / (1.0 + k / q + k * k);
+            f.b0 = high ? norm : k * k * norm;
+            f.b1 = high ? -2.0 * norm : 2.0 * f.b0;
+            f.b2 = f.b0;
+            f.a1 = 2.0 * (k * k - 1.0) * norm;
+            f.a2 = (1.0 - k / q + k * k) * norm;
+            return f;
+        }
+
+        double process (double x)
+        {
+            const double y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+            x2 = x1; x1 = x; y2 = y1; y1 = y;
+            return y;
+        }
+    };
 }
 
 //==============================================================================
@@ -556,5 +694,157 @@ int main (int argc, char** argv)
 
     std::fclose (readme);
     std::printf ("\n%zu files and README.txt written to %s\n", scenes.size(), folder.c_str());
+
+    //==========================================================================
+    // Room Sim Pro: one thing at a time
+    std::vector<Scene> pro;
+
+    const auto addPro = [&pro] (std::string file, std::string title, std::string lookFor, std::function<std::function<Frame (double)>()> make)
+    {
+        pro.push_back ({ std::move (file), std::move (title), std::move (lookFor), 20.0, std::move (make) });
+    };
+
+    // A delay line, for an LFE that copies the centre late
+    const auto delayed = [] (double seconds)
+    {
+        auto line = std::make_shared<std::vector<double>> ((size_t) std::max (1.0, seconds * sampleRate), 0.0);
+        auto pos = std::make_shared<size_t> (0);
+        return [line, pos] (double v)
+        {
+            const double out = (*line)[*pos];
+            (*line)[*pos] = v;
+            *pos = (*pos + 1) % line->size();
+            return out;
+        };
+    };
+
+    addPro ("P01_bass_L_only", "Bass in L only (15-180 Hz noise), nothing else",
+            "Lens 1, L C R: the heads near the L speaker are the loudest. Lens 1, LFE: nothing (dark grey). "
+            "Lens 2, Mix: all grey (no LFE, so no LFE / L C R interference). Lens 2, Speakers: grey (one speaker alone).",
+            [bed] { auto l = bed (1); return [=] (double) { return Frame { l->next(), 0, 0, 0 }; }; });
+    addPro ("P02_bass_C_only", "Bass in C only", "As P01, the C speaker the loudest place. Compare with P01 and P03: the bass follows its speaker.",
+            [bed] { auto c = bed (2); return [=] (double) { return Frame { 0, 0, c->next(), 0 }; }; });
+    addPro ("P03_bass_R_only", "Bass in R only", "As P01, mirrored: the heads near R get the most.",
+            [bed] { auto r = bed (3); return [=] (double) { return Frame { 0, r->next(), 0, 0 }; }; });
+    addPro ("P04_bass_LR_same", "The same bass in L and R (a mono bass as a phantom centre)",
+            "Lens 2, Speakers: in the approved mix L and R add exactly in step; in the room they arrive at different times, "
+            "so they add less: the heads go blue. Mix: grey (no LFE). This is the venue, not the mix.",
+            [bed] { auto m = bed (5); return [=] (double) { const double v = m->next(); return Frame { 0.7 * v, 0.7 * v, 0, 0 }; }; });
+    addPro ("P05_bass_LR_unrelated", "Different bass in L and in R (two unrelated noises)",
+            "Lens 2, Speakers: grey, unlike P04: two unrelated signals cannot interfere. Lens 1 shows each side louder near its speaker.",
+            [bed] { auto l = bed (1), r = bed (3); return [=] (double) { return Frame { 0.7 * l->next(), 0.7 * r->next(), 0, 0 }; }; });
+    addPro ("P06_lfe_only", "All the bass in the LFE, the screen channels silent",
+            "Lens 1, LFE: where the subwoofers reach. Lens 1, L C R: nothing. Lens 2, Speakers: the two subwoofers against each other. Mix: grey.",
+            [bed] { auto x = bed (4); return [=] (double) { return Frame { 0, 0, 0, asHeard * x->next() }; }; });
+    addPro ("P07_C_and_lfe_unrelated", "C and LFE as loud, unrelated to each other",
+            "Lens 2, Mix: all grey: an LFE that shares nothing with C cannot add to it or cancel it. Lens 1: both parts lit.",
+            [bed] { auto c = bed (2), x = bed (4); return [=] (double) { return Frame { 0, 0, c->next(), asHeard * x->next() }; }; });
+    addPro ("P08_lfe_copy_of_C", "The LFE is a copy of C, 6 dB below it when heard",
+            "Lens 2, Mix: in the approved mix C and the LFE add exactly in step; in the room the subwoofers and C arrive at "
+            "different times, so they add less: the heads go blue (a loss caused by the mix). This is what the mixing assistant will work on.",
+            [bed] { auto c = bed (2); return [=] (double) { const double v = c->next(); return Frame { 0, 0, v, 0.5 * asHeard * v }; }; });
+    addPro ("P09_lfe_copy_of_C_inverted", "The LFE is a copy of C with its polarity flipped, 6 dB below it",
+            "Lens 2, Mix: in the approved mix the inverted LFE takes bass away from C; in the room it takes away less: "
+            "the heads go red (the room undoes part of the cancellation). The opposite of P08.",
+            [bed] { auto c = bed (2); return [=] (double) { const double v = c->next(); return Frame { 0, 0, v, -0.5 * asHeard * v }; }; });
+    addPro ("P10_lfe_copy_of_C_5ms_late", "The LFE is a copy of C, 5 ms late",
+            "In the approved mix, 5 ms late cancels C around 100 Hz (half a period). In the room the cancellation is partly undone: "
+            "lens 2, Mix goes red, and lens 1 shows heads louder than the mix. The layered view: the low layer moves more than the very low one.",
+            [bed, delayed] { auto c = bed (2); auto late = delayed (0.005);
+                             return [=] (double) { const double v = c->next(); return Frame { 0, 0, v, asHeard * late (v) }; }; });
+    addPro ("P11_inaudible_bass", "Bass in C and an unrelated LFE, 60 dB down (about -86 dBFS)",
+            "Lens 1: every head dark grey, 0 phon, as the mix itself. Lens 2: grey and flat: nobody hears this bass, so nothing is shown, "
+            "and the scores stay at 100.",
+            [bed] { auto c = bed (2, 0.00005), x = bed (4, 0.00005); return [=] (double) { return Frame { 0, 0, c->next(), asHeard * x->next() }; }; });
+    addPro ("P12_very_low_only", "Bass in C between 20 and 60 Hz only",
+            "Layered view: only the middle layer (very low, 20-60 Hz) moves; the low layer says 'nothing in the mix'.",
+            [bed] { auto c = bed (2, 0.25); auto f = std::make_shared<std::array<TestFilter, 4>>();
+                    for (auto& x : *f) x = TestFilter::make (45.0, false);
+                    return [=] (double) { double v = c->next(); for (auto& x : *f) v = x.process (v); return Frame { 0, 0, v, 0 }; }; });
+    addPro ("P13_low_only", "Bass in C between 60 and 120 Hz only",
+            "Layered view: only the top layer (low, 60-120 Hz) moves.",
+            [bed] { auto c = bed (2, 0.12); auto f = std::make_shared<std::array<TestFilter, 5>>();
+                    for (size_t i = 0; i < 4; ++i) (*f)[i] = TestFilter::make (75.0, true);
+                    (*f)[4] = TestFilter::make (110.0, false);
+                    return [=] (double) { double v = c->next(); for (auto& x : *f) v = x.process (v); return Frame { 0, 0, v, 0 }; }; });
+    addPro ("P14_infra_only", "A 12 Hz tone in the LFE (-12 dBFS), nothing else",
+            "Layered view: only the bottom layer (infra) moves; lens 1 gives it in dB above the threshold of feeling (not in phon).",
+            [] { return [] (double t) { return Frame { 0, 0, 0, t < 0.0 ? 0.0 : 0.25 * std::sin (2.0 * pi * 12.0 * t) }; }; });
+
+    const std::string proFolder = folder + "/room-sim-pro";
+    std::filesystem::create_directories (proFolder);
+    FILE* proReadme = std::fopen ((proFolder + "/README.txt").c_str(), "w");
+
+    if (proReadme == nullptr)
+    {
+        std::fprintf (stderr, "cannot write into %s\n", proFolder.c_str());
+        return 1;
+    }
+
+    std::fprintf (proReadme, "SubGUARD - Room Sim Pro test files\n==================================\n\n"
+                             "48 kHz, 24-bit, 5.1 (L R C LFE Ls Rs): format \"5.1 ITU\" in the app. Loop each file.\n"
+                             "Each file isolates one thing. Load default_rooms.subguardrooms (File > Load rooms) to get the three rooms measured below.\n"
+                             "Lens 1 = \"Who gets bass, how much\" (filter All / L C R / LFE). Lens 2 = \"Why\" (filter Room / Speakers / Mix).\n"
+                             "\"Measured\" is what the engine itself computes at the end of the file, level Strong, LFE +10 dB.\n\n");
+
+    // The three rooms the measurements are made in: load them with File > Load rooms
+    const auto rooms = ProRooms::defaults();
+
+    if (FILE* config = std::fopen ((proFolder + "/default_rooms.subguardrooms").c_str(), "w"))
+    {
+        const auto text = rooms.toText();
+        std::fwrite (text.data(), 1, text.size(), config);
+        std::fclose (config);
+    }
+
+    std::array<RoomPaths, ProRooms::count> paths;
+    std::vector<double> pathsGrid;
+    PlaybackSimulator simulator;
+
+    for (const auto& scene : pro)
+    {
+        const auto frames = (size_t) ((scene.seconds + leadIn) * sampleRate);
+        std::vector<float> audio (frames * 6, 0.0f);
+        auto generate = scene.make();
+
+        for (size_t i = (size_t) (leadIn * sampleRate); i < frames; ++i)
+        {
+            const auto f = generate ((double) i / sampleRate - leadIn);
+            audio[i * 6] = (float) f.l;
+            audio[i * 6 + 1] = (float) f.r;
+            audio[i * 6 + 2] = (float) f.c;
+            audio[i * 6 + 3] = (float) f.lfe;
+        }
+
+        writeWav (proFolder + "/" + scene.file + ".wav", audio);
+        const auto a = finalAnalysis (audio);
+        const auto t = simulator.compute (a, PlaybackSimulator::Level::strong);
+
+        if (a.grid != pathsGrid)
+        {
+            for (int k = 0; k < ProRooms::count; ++k)
+                paths[(size_t) k] = ProRoomModel::prepare (rooms.rooms[(size_t) k], a.grid);
+
+            pathsGrid = a.grid;
+        }
+
+        std::fprintf (proReadme, "%s.wav\n  %s\n  Look for: %s\n  Measured:\n", scene.file.c_str(), scene.title.c_str(), scene.lookFor.c_str());
+        std::printf ("%s\n", scene.file.c_str());
+
+        for (int k = 0; k < ProRooms::count; ++k)
+        {
+            const auto res = RoomSimulator::rate (paths[(size_t) k], a, t, simulator.tuning, PlaybackSimulator::Level::strong, 10.0);
+            const auto text = describe (res);
+            std::fprintf (proReadme, "    room %d, %s:\n%s", k + 1, rooms.rooms[(size_t) k].name.c_str(), text.c_str());
+
+            if (k == 1)
+                std::printf ("%s", text.c_str());
+        }
+
+        std::fprintf (proReadme, "\n");
+    }
+
+    std::fclose (proReadme);
+    std::printf ("\n%zu Room Sim Pro files and README.txt written to %s\n", pro.size(), proFolder.c_str());
     return 0;
 }

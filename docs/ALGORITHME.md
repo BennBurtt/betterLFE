@@ -1081,6 +1081,11 @@ diamètre : le tour de tête moyen d'ANSUR II (armée américaine, 2012 ;
 personnes), hommes et femmes à parts égales, divisé par π. C'est un repère
 visuel, sans effet sur le calcul.
 
+**Rien dans le mix.** Une bande où le mix a moins d'un millionième de son
+grave, infra compris, ne compte pas : un mix d'infra seul n'a entre 20 et
+120 Hz que la fuite de la fenêtre d'analyse, et ses causes sont alors
+« -- » plutôt qu'un calcul sur du bruit (vérifié sur le fichier de test P14).
+
 **Lecture au survol.** Quatre lignes, chaque nombre dit ce qu'il est et
 face à quoi : la place et la note montrée ; la sonie de son grave en phones,
 face à celle du mix validé, pour le tout, les LCR seuls et le LFE seul ; son

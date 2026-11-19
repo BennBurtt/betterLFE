@@ -534,7 +534,17 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
     //   room     = A / A0
     //   speakers = [(LCR + LFE) / A] / [(LCR0 + LFE0) / A0]
     //   mix      = [T / (LCR + LFE)] / [T0 / (LCR0 + LFE0)]
-    const double partFloor = 1e-6 * (approvedPowerTotal + 1e-60);
+    // "Nothing in the mix": under a millionth of its bass, infra included (a mix
+    // of infra alone has only the window's leakage between 20 and 120 Hz)
+    const double partFloor = 1e-6 * (std::max (approvedPowerTotal, approvedLayerPower[0]) + 1e-60);
+    double gatedApproved = 0.0, gatedApprovedPower = 0.0;      // the bands that hold something
+
+    for (int b = 0; b < numBands; ++b)
+        if (approvedPower[b] > partFloor)
+        {
+            gatedApproved += approved[b];
+            gatedApprovedPower += approvedPower[b];
+        }
     const bool hasAlone = room.pAlone.size() == room.p.size();
 
     double approvedAlone[numBands] = {}, approvedAloneLayer[numLayers] = {};
@@ -724,6 +734,9 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
 
         for (int b = 0; b < numBands; ++b)
         {
+            if (approvedPower[b] <= partFloor)
+                continue;       // nothing of the mix in this band
+
             totalActual += actual[b];
             totalPower += inPower[b];
             totalLcr += lcrBand[b];
@@ -770,8 +783,8 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
         const double penalty = room.lcrReference ? 1.0 - (1.0 - interference) * (1.0 - std::clamp (tuning.coverageWeight, 0.0, 1.0) * coverage)
                                                  : interference;
         const double seatPenalty = std::min (penalty, 1.0) * heardAtAll;
-        const double seatChange = totalPower > 0.0 ? limitedDb ((totalActual / totalPower) / (approvedTotal / (approvedPowerTotal + 1e-60) + 1e-30))
-                                                   : 0.0;
+        const double seatChange = totalPower > 0.0 && gatedApprovedPower > 0.0
+                                    ? limitedDb ((totalActual / totalPower) / (gatedApproved / gatedApprovedPower + 1e-30)) : 0.0;
 
         if (seat < room.seats)
         {
@@ -794,10 +807,10 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
                     r.seatLayerPhon[(size_t) part][(size_t) l][k] = layerPhon[part][l];
             }
 
-            if (totalPower > 0.0 && totalAlone > 0.0)
+            if (totalPower > 0.0 && totalAlone > 0.0 && gatedApprovedPower > 0.0)
             {
                 double c[numCauses];
-                causesOf (totalActual, totalPower, totalAlone, approvedTotal, approvedPowerTotal, approvedAloneTotal, c);
+                causesOf (totalActual, totalPower, totalAlone, gatedApproved, gatedApprovedPower, approvedAloneTotal, c);
 
                 for (int q = 0; q < numCauses; ++q)
                     r.seatCauseDb[(size_t) q][k] = c[q];
@@ -819,8 +832,8 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
                     phon = std::max (phon, PlaybackSimulator::iso226Phon (PlaybackSimulator::bandCentreHz[b], splAt (b, actual[b])));
 
             r.seatBassDb[k] = splOfPower (totalActual);
-            r.seatLevelDb.push_back (limitedDb (totalActual / (approvedTotal + 1e-60)));
-            r.seatPartDb[RoomResult::allParts][k] = r.seatLevelDb.back();
+            r.seatLevelDb.push_back (gatedApproved > 0.0 ? limitedDb (totalActual / gatedApproved) : 0.0);
+            r.seatPartDb[RoomResult::allParts][k] = gatedApproved > 0.0 ? r.seatLevelDb.back() : nothing;
             r.seatPartDb[RoomResult::lcrPart][k] = approvedLcrTotal > partFloor ? limitedDb (totalLcr / approvedLcrTotal) : nothing;
             r.seatPartDb[RoomResult::lfePart][k] = approvedLfeTotal > partFloor ? limitedDb (totalLfe / approvedLfeTotal) : nothing;
             r.seatHeardPhon[k] = phon;

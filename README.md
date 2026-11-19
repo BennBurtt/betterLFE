@@ -29,8 +29,11 @@ build/SubGuard_artefacts/Release/SubGuard.app/Contents/MacOS/SubGuard --demo
 
 Le logo et l'icône sont dans `assets/`.
 
-Le script crée aussi 18 fichiers de test 5.1 dans `test-files/`, avec ce que
+Le script crée aussi 22 fichiers de test 5.1 dans `test-files/`, avec ce que
 l'app doit afficher pour chacun : voir [`docs/FICHIERS_TEST.md`](docs/FICHIERS_TEST.md).
+Et 14 fichiers pour comprendre Room Sim Pro dans `test-files/room-sim-pro/`
+(une seule chose par fichier, mesurée dans les trois salles par défaut) : voir
+[`docs/FICHIERS_TEST_ROOM_SIM_PRO.md`](docs/FICHIERS_TEST_ROOM_SIM_PRO.md).
 
 ## Organisation
 

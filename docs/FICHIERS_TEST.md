@@ -4,6 +4,7 @@ Le générateur `subguard_testfiles` écrit 22 fichiers WAV et mesure chacun ave
 moteur d'analyse. `./build_mac.sh` les crée dans `test-files/` (environ 300 Mo,
 hors git), avec un `README.txt` qui reprend ce tableau.
 
+- Pour Room Sim Pro, une série à part : [FICHIERS_TEST_ROOM_SIM_PRO.md](FICHIERS_TEST_ROOM_SIM_PRO.md).
 - Format : 48 kHz, 24 bits, 5.1 dans l'ordre L R C LFE Ls Rs. Choisir « 5.1 ITU » dans l'app.
 - Chaque fichier commence par une seconde de silence. Le lire en boucle donne une lecture plus stable.
 - Réglages supposés : écoute à 85 dB(C), contrôle des transitoires allumé (panneau « Transients »), niveau « Strong », les deux polarités, case « LFE +10 dB » cochée.
