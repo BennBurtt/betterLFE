@@ -27,9 +27,11 @@
 //
 // FROM dB TO PERCEPTION
 //   The difference between a system and the reference is taken per band, in dB.
-//   ISO 226:2023 gives how many dB double the loudness of a low tone around
-//   80 phon: 5.0 dB at 25 Hz, 5.5 dB at 40 Hz, 6.4 dB at 70 Hz, 6.9 dB at 100 Hz
-//   (10 dB at 1 kHz). Each band is then rated
+//   ISO 226:2023 (phon to dB) and ISO 532-1:2017 (sone to phon) give how many
+//   dB double the loudness of a low tone: around 80 phon 5.0 dB at 25 Hz, 5.6 dB
+//   at 40 Hz, 6.4 dB at 70 Hz, 7.0 dB at 100 Hz (10 dB at 1 kHz); fewer near the
+//   threshold, where loudness grows faster (3.2 dB at 25 Hz, 20 phon). Each
+//   band is then rated
 //
 //     penalty = clamp ((|difference| - T) / (doubling - T), 0, 1)
 //
@@ -48,17 +50,17 @@
 //     dependence  = 1.0 x the penalty of the stereo downmix without LFE, i.e.
 //                   of what the bass loses wherever the LFE is missing or
 //                   wrongly set. Infra-bass is left out of it: below 25 Hz
-//                   it counts for a quarter, from 60 Hz up it counts fully.
+//                   it counts for 30 %, from 40 Hz up it counts fully.
 //
 //     robustness = 100 . (1 - interaction) . (1 - dependence) . (1 - 0.20 level dependence)
 //     (the weights are the Tuning defaults below, adjustable in the Dev panel)
 //
 //   Anchors: screen alone 100; LFE identical to the screen 0 (an inverted
-//   subwoofer cancels it); LFE alone about 22 (the room alone decides the
+//   subwoofer cancels it); LFE alone about 3 (the room alone decides the
 //   bass); 50 when the worst on-time system moves the bass half-way to a
 //   doubling or halving of loudness.
 //
-// LEVEL DEPENDENCE (a warning, and up to 15 % off the score)
+// LEVEL DEPENDENCE (a warning, and up to 20 % off the score)
 //   The same systems with the subwoofer 1, 2, 3 and 6 dB too loud or too
 //   quiet. With an LFE unrelated to the screen the bass follows the power
 //   sum: that is expected, and so is a bass 1 dB up when all of it is in an
@@ -204,8 +206,8 @@ public:
     // about 25 Hz a tone is close to the threshold of hearing (78.1 dB SPL at
     // 20 Hz, 68.7 dB at 25 Hz in ISO 226) and no television, soundbar or small
     // loudspeaker reproduces it: it is felt in a cinema, and its absence
-    // changes little in the downmix: it counts for a quarter. From about 60 Hz up (threshold 37.5 dB at
-    // 63 Hz; a television that reaches 60 Hz is already a good one) it counts
+    // changes little in the downmix: it counts for 30 %. From 40 Hz up (threshold 51.1 dB at
+    // 40 Hz; a television that reaches 60 Hz is already a good one) it counts
     // fully. In between, the weight rises linearly in octaves.
     static constexpr double infraLoHz = 25.0, infraHiHz = 40.0;
     static constexpr double infraWeight = 0.30;         // what the infra-bass still counts for: felt, and missed, but not heard
@@ -213,14 +215,15 @@ public:
     // The level dependence takes a little off the score: at most this share
     static constexpr double levelDependenceWeight = 0.20;
 
-    // Rating bands and, for each, the level change that doubles loudness
-    // (ISO 226:2023 around 80 phon, at 25, 40, 70 and 100 Hz).
+    // Rating bands and, for each, the level change that doubles loudness around
+    // 80 phon (ISO 226:2023, at 25, 40, 70 and 100 Hz); the score uses
+    // loudnessDoublingDb at the band's real level.
     static constexpr double bandLimits[ChainResult::numBands + 1] = { 20.0, 30.0, 60.0, 90.0, 120.0 };
     static constexpr double doublingDb[ChainResult::numBands] = { 5.0, 5.5, 6.4, 6.9 };
 
     // Relevance of each system, following the brief: a cinema subwoofer on time
-    // and bass-managed home systems count fully, a late subwoofer counts half,
-    // an early one a quarter. Both
+    // and bass-managed home systems count fully, a late or early subwoofer
+    // counts half. Both
     // polarities count alike. How often each fault occurs in practice is not
     // published, so these are engineering assumptions, kept in one place.
     static constexpr double delaySteps[5] = { -5.0, -2.5, 0.0, 2.5, 5.0 };
@@ -293,6 +296,12 @@ public:
     /** ISO 226:2023: sound pressure level of a pure tone at `hz` (20..125) heard at `phon`, and the reverse. */
     static double iso226Spl (double hz, double phon);
     static double iso226Phon (double hz, double splDb);
+
+    /** dB that double (or halve) the loudness of a tone at `hz` heard at `phon`: ISO 226:2023 for
+        the phon to dB step, ISO 532-1:2017 for loudness against loudness level (N = 2^((LN - 40) / 10)
+        sone from 40 phon, LN = 40 (N + 0.0005)^0.35 below: loudness grows faster near threshold).
+        The level is kept within 10..80 phon (ISO 226 is informative below 20 phon). */
+    static double loudnessDoublingDb (double hz, double phon);
 
     /** ISO 226:2023 threshold of hearing (Tf, as in ISO 389-7:2019), free field, binaural, 18-25 years: the median listener. */
     static double hearingThresholdDb (double hz);

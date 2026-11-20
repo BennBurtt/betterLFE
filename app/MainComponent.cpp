@@ -610,17 +610,20 @@ void MainComponent::buildCards()
 
         // Where each default comes from: sourced only when the value itself is published
         {
+            dTolSoft.setEvidence (true, tr ("Sourced: 3 dB is the tolerance a calibrated cinema is allowed around 25-120 Hz (SMPTE ST 202 6.3, "
+                                            "RP 2096-1 8.6): a change within it is one a conforming room may already make."));
             const auto tolerance = tr ("Hypothesis: the mixer's choice for the content (Soft / Medium / Strong). For scale: about 1 dB is the smallest "
                                        "change of level heard on a steady tone at moderate levels (Zwicker & Fastl, Psychoacoustics).");
-            dTolSoft.setEvidence (false, tolerance);
             dTolMedium.setEvidence (false, tolerance);
             dTolStrong.setEvidence (false, tolerance);
-            const auto place = tr ("Hypothesis: how likely a cinema subwoofer off its place is, against on time. No published survey of installed rooms found.");
+            const auto place = tr ("Hypothesis: how likely a cinema subwoofer off its place is, against on time. Calibration sets it in polarity and in phase "
+                                   "with the centre (SMPTE RP 200 A.4, RP 2096-1 7.11); no published survey says how often rooms miss it.");
             dLate.setEvidence (false, place);
             dEarly.setEvidence (false, place);
             dCeiling.setEvidence (false, tr ("Hypothesis for the amount. The principle is sourced: the LFE is optional at reception and must not carry "
                                              "the programme's bass (ITU-R BS.775)."));
-            const auto level = tr ("Hypothesis: how much a subwoofer set off its level counts. Red at 3 dB: half or twice the power.");
+            const auto level = tr ("Hypothesis: how much a subwoofer set off its level counts. Red at 3 dB: half or twice the power. The levels tried, "
+                                   "1 to 3 dB off, are within the 3 dB a calibrated cinema is allowed (SMPTE ST 202, RP 2096-1); 6 dB off is beyond and counts 0.3.");
             dLevelWeight.setEvidence (false, level);
             dLevelRed.setEvidence (false, level);
             const auto infra = tr ("Hypothesis: what bass under 25 to 40 Hz is worth when it lives only in the LFE (many systems stop above it).");
@@ -631,8 +634,9 @@ void MainComponent::buildCards()
             dWorstWeight.setEvidence (false, worst);
             dWorstShare.setEvidence (false, worst);
             dCoverage.setEvidence (false, tr ("Hypothesis: how much the bass level at each seat counts next to the interaction."));
-            dDips.setEvidence (true, tr ("Sourced: a dip is detected at a larger size than a peak (Bharitkar, Robinson & Poulain 2016; "
-                                         "Toole & Olive 1988; Olive et al. 1997)."));
+            dDips.setEvidence (false, tr ("Partly sourced: a dip is detected at a larger size than a peak (Bharitkar, Robinson & Poulain 2016, dips "
+                                          "at 63-500 Hz). The peak threshold it is set against (0.8 dB, Toole & Olive 1988) was measured higher "
+                                          "up; Olive et al. 1997, peaks and dips at low frequencies, not read yet."));
         }
 
         for (auto* slider : devSliders())

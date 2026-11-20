@@ -1226,10 +1226,15 @@ static void testPlaybackChains()
         check (t.levelDependence > 0.5 && t.levelMeanDb > 1.5 && std::abs (t.levelDeviationDb) > 20.0,
                "identical signals: a subwoofer level error swings the bass far beyond what is expected", t.levelMeanDb);
 
-        // Taken as recorded (no +10 dB), the LFE is 10 dB under the screen: nothing cancels any more
+        // Taken as recorded (no +10 dB), the LFE is 10 dB under the screen: an inverted subwoofer
+        // no longer cancels the bass; against the subwoofer in polarity it is 5.7 dB down
+        // (20 log ((1 - 0.316) / (1 + 0.316))). Still heard: near the threshold loudness grows
+        // fast (ISO 532-1), so the score stays low on this quiet noise.
         const auto asRecorded = sim.compute (e.result(), PlaybackSimulator::Level::strong, 0.0);
         check (asRecorded.lfeBalanceDb < -9.0 && asRecorded.lfeBalanceDb > -11.0, "LFE gain 0 dB: the LFE is weighed as recorded", asRecorded.lfeBalanceDb);
-        check (asRecorded.robustness > t.robustness + 5.0, "LFE gain 0 dB: the score follows", asRecorded.robustness);
+        check (cinema (asRecorded, 0.0, true).changeDb > -6.5 && cinema (asRecorded, 0.0, true).changeDb < -5.0
+                   && asRecorded.robustness >= t.robustness,
+               "LFE gain 0 dB: the inverted subwoofer is 5.7 dB down instead of cancelling", cinema (asRecorded, 0.0, true).changeDb);
 
         // The choices are adjustable
         PlaybackSimulator tuned;
@@ -1377,6 +1382,17 @@ static void testPlaybackChains()
         check (PlaybackSimulator::iso226Spl (25.0, 60.0) > PlaybackSimulator::iso226Spl (100.0, 60.0) + 15.0,
                "ISO 226: a low tone needs far more level for the same loudness",
                PlaybackSimulator::iso226Spl (25.0, 60.0) - PlaybackSimulator::iso226Spl (100.0, 60.0));
+
+        // ISO 532-1: from 40 phon a doubling of loudness is 10 phon; below, loudness grows
+        // faster, so fewer dB double it (25 Hz: 5.0 dB at 60 phon, 3.2 dB at 20 phon)
+        {
+            const double at60 = PlaybackSimulator::loudnessDoublingDb (25.0, 60.0);
+            const double tenPhon = PlaybackSimulator::iso226Spl (25.0, 70.0) - PlaybackSimulator::iso226Spl (25.0, 60.0);
+            const double at20 = PlaybackSimulator::loudnessDoublingDb (25.0, 20.0), at10 = PlaybackSimulator::loudnessDoublingDb (25.0, 10.0);
+            std::printf ("  dB doubling the loudness at 25 Hz: %.2f at 60 phon, %.2f at 20 phon, %.2f at 10 phon\n", at60, at20, at10);
+            check (std::abs (at60 - tenPhon) < 1e-9 && std::abs (at20 - 3.22) < 0.05 && at10 < at20 && at20 < at60,
+                   "ISO 532-1: 10 phon per doubling from 40 phon, fewer dB near the threshold", at20);
+        }
 
         // A 50 Hz tone peaking at -20 dBFS in the centre, i.e. -23 dBFS RMS: 3 dB under
         // the calibration level, 82 dB SPL at the cinema calibration

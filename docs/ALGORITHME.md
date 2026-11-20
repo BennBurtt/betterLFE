@@ -236,25 +236,28 @@ s'écarte-t-il de ce qui a été validé, selon la façon dont il est diffusé ?
 | Fait | Source | Conséquence dans l'algorithme |
 |---|---|---|
 | En salle, le canal sub est réglé 10 dB au-dessus d'un canal d'écran, dans sa bande | SMPTE RP 200 [9] | Le LFE est toujours compté à +10 dB |
-| Le même signal envoyé au centre et au sub doit donner +3 dB dans la bande commune | SMPTE RP 200 [9] | La norme suppose une addition en puissance : la relation de phase sub / écran n'est pas garantie |
+| Le calibrage met le sub en polarité avec le centre (bruit rose sur les deux, on garde la meilleure somme) et, au besoin, retarde le LFE pour l'aligner en phase sur le centre, afin qu'un son doublé du centre dans le LFE donne une réponse lisse | SMPTE RP 200:2012 annexe A.4 [9], RP 2096-1:2017 § 7.11 [53] | La référence est ce mix aligné ; les systèmes cinéma simulent une salle qui rate ce réglage |
+| Après réglage, le canal sub est plat à ±3 dB de 25 à 120 Hz, coupé raide au-dessus (au moins 24 dB/octave) | SMPTE ST 202:2010 § 6.3 [54], RP 2096-1 § 6 et 8.6 [53] | Écarts de niveau du sub essayés de ±1 à ±3 dB (dans la tolérance) et ±6 dB (au-delà) ; tolérance Soft de 3 dB ; filtres du LFE à 24 et 48 dB/octave |
+| Les interactions entre le LFE et l'écran dans leur bande commune ne font l'objet d'aucune pratique normalisée ; leur effet dépend des places | Toole 2015 [55], d'après le rapport SMPTE [10] | Raison d'être de Room Sim |
 | La restitution varie largement d'une salle à l'autre, et surtout entre l'auditorium et la salle ; l'écart est sévère dans le grave | Rapport SMPTE TC-25CSS 2014 [10], Hill et al. [11] | Le retard et la polarité du sub sont simulés. Le niveau du sub ne l'est pas : il varie d'une salle à l'autre, et c'est précisément pourquoi le grave ne doit pas reposer sur le LFE |
 | Le LFE est optionnel à la réception, ne doit porter que de l'information d'appoint, et ne doit pas porter tout le grave du programme | UIT-R BS.775 [12] | Un LFE qui porte l'essentiel du grave est un défaut du mix |
 | Les downmix deux canaux omettent le LFE | Dolby [13], UIT-R BS.775 [12] | La stéréo sans LFE est un système de lecture à part entière |
 | Dans le grave, les courbes d'isosonie sont resserrées : de petits écarts de niveau s'entendent beaucoup | ISO 226:2023 [14], Leembruggen & Newell [15] | Les dB sont convertis en sensation, bande par bande |
 | Un écart de niveau commence à s'entendre vers 1 dB | psychoacoustique classique [16] | En dessous de 1 dB, aucune pénalité |
+| Au-dessus de 40 phones, la sonie double tous les 10 phones ; en dessous, elle croît plus vite | ISO 532-1:2017 [38] | Près du seuil, moins de dB suffisent à doubler la sensation |
 
 ### 3.2 Des dB à la sensation (ISO 226:2023)
 
-La sonie double tous les 10 phones. À 1 kHz cela fait 10 dB ; dans le grave,
-bien moins. Calcul à partir de la formule et des paramètres de la norme, autour
-de 80 phones :
+Au-dessus de 40 phones, la sonie double tous les 10 phones (ISO 532-1 [38]).
+À 1 kHz cela fait 10 dB ; dans le grave, bien moins. Calcul à partir de la
+formule et des paramètres d'ISO 226, autour de 80 phones :
 
 | Fréquence | dB pour doubler (ou diviser par deux) la sensation |
 |---|---|
 | 25 Hz | 5,0 dB |
-| 40 Hz | 5,5 dB |
+| 40 Hz | 5,6 dB |
 | 63 Hz | 6,2 dB |
-| 80 Hz | 6,5 dB |
+| 80 Hz | 6,6 dB |
 | 100 Hz | 6,9 dB |
 | 1 000 Hz | 10,0 dB |
 
@@ -287,13 +290,21 @@ la norme s'arrête à 90 phones).
    20 Hz est descendu de 78,5 à 78,1 dB, comme ISO 389-7:2019. Vérifié : au
    seuil, un son pur est à 2,4 phones à toutes les fréquences, et la formule
    (2) est bien l'inverse de la (1).
-4. Doubler la sensation, c'est monter de 10 phones : le nombre de dB par
-   doublement est `Lp(LN + 10) − Lp(LN)`, pris entre 20 et 80 phones (la norme
-   couvre 20 à 90).
+4. Doubler la sensation, c'est doubler la sonie `N` (en sones). ISO 532-1:2017
+   [38] relie la sonie au niveau d'isosonie : `N = 2^((LN − 40)/10)` à partir
+   de 40 phones (10 phones par doublement), `LN = 40·(N + 0,0005)^0,35` en
+   dessous, où la sonie croît plus vite. Le nombre de dB par doublement est
+   `Lp(LN') − Lp(LN)`, avec `LN'` le niveau d'isosonie de la sonie double,
+   pris entre 10 et 80 phones (ISO 226 est indicative sous 20 phones).
 
-En pratique ce nombre varie peu : à 25 Hz, de 5,9 dB vers 20 phones à 5,0 dB
-à partir de 60 phones ; à 100 Hz, de 8,4 à 6,9 dB. Le niveau d'écoute change
-donc peu la conversion ; il change surtout ce qui est audible (ci-dessous).
+Au-dessus de 40 phones, ce nombre varie peu : à 25 Hz, 5,0 dB à 60 phones ; à
+100 Hz, 7,0 dB. Près du seuil il tombe : à 25 Hz, 4,4 dB à 30 phones, 3,2 dB à
+20 phones, 2,0 dB à 10 phones ; à 100 Hz, 6,2 ; 4,6 ; 3,0 dB. Une sinusoïde à
+25 Hz jouée à 85 dB n'est qu'à 23,5 phones : dans la bande 20–30 Hz et sur les
+passages calmes, un écart compte donc près de deux fois plus que ne le dirait
+la règle des 10 phones. Une version précédente appliquait cette règle partout ;
+corrigée, elle fait perdre de 1 à 6 points aux fichiers de test 07, 08, 09, 10,
+15 et 16, et ne change pas les autres.
 Limites : la norme vaut pour des sons purs, de face, en champ libre, alors
 qu'on juge ici des bandes de bruit en salle ; et la lecture en dB(C) du bruit
 de calibrage est prise égale à son niveau de pression.
@@ -304,8 +315,8 @@ seuil compte pour la part des spectateurs qui l'entendent.
 1. Seuil : le seuil d'audition d'ISO 226:2023 [14] (colonne `Tf` : 78,1 dB SPL
    à 20 Hz, 68,7 à 25 Hz, 51,1 à 40 Hz, 37,5 à 63 Hz, 26,5 à 100 Hz). C'est
    le seuil médian de jeunes auditeurs otologiquement normaux, en champ libre
-   et binaural ; il est identique à celui d'ISO 389-7 [28], et de 20 à 250 Hz
-   le seuil en champ diffus (une salle) est le même qu'en champ libre [27].
+   et binaural ; il est identique à celui d'ISO 389-7 [28], qui donne aussi le
+   seuil en champ diffus (une salle), le même qu'en champ libre de 20 à 250 Hz.
 2. Point par point, sur un filtre auditif : le seuil varie trop à l'intérieur
    d'une bande de notation pour une seule valeur (il baisse d'environ 22 dB
    entre 31,5 et 63 Hz, dans la seule bande 30–60 Hz). À chaque point de la
@@ -333,7 +344,7 @@ seuil compte pour la part des spectateurs qui l'entendent.
 Conséquence : le même mix, joué plus bas, ou écouté à un niveau de calibrage
 plus faible, perd les problèmes devenus inaudibles. Mesuré : un LFE identique
 à la façade vaut 0 à −20 dBFS et 100 à −86 dBFS (inaudible à 85 dB(C)) ; à
-−54 dBFS, 27 à 85 dB(C) et 100 à 70 dB(C). La croissance très rapide de la
+−54 dBFS, 8 à 85 dB(C) et 97 à 70 dB(C). La croissance très rapide de la
 sonie juste au-dessus du seuil dans le grave [25] justifie qu'une bande
 nettement au-dessus du seuil compte entièrement.
 
@@ -433,7 +444,8 @@ Pour chaque système et chaque bande (20–30, 30–60, 60–90, 90–120 Hz) :
 2. `pénalité de bande = borne((|écart| − T) / (D − T), 0, 1)`, avec `D` le
    nombre de dB qui double la sonie dans cette bande, calculé par ISO 226 au
    niveau réel de la bande au niveau d'écoute choisi (voir 3.2 ; vers 80 phones
-   il vaut environ 5,0 ; 5,6 ; 6,4 ; 7,0 dans les quatre bandes), et
+   il vaut environ 5,0 ; 5,6 ; 6,4 ; 7,0 dans les quatre bandes, moins près du
+   seuil), et
    `T` la tolérance du niveau choisi (voir 3.6). Zéro jusqu'à `T`, 1 quand la
    bande est entendue deux fois plus forte ou deux fois plus faible.
 3. `pénalité du système = Σ part de la bande × pénalité de bande`, la part étant
@@ -509,8 +521,8 @@ vers 2 avec les réglages par défaut (plafond 1,00 ; un plafond de 0,80 environ
 | Score | Sens |
 |---|---|
 | 100 | Aucun système ne déplace le grave de façon audible, et il ne repose pas sur le LFE |
-| 50 | Dangereux mais passable : le pire système à l'heure déplace le grave à mi-chemin d'un doublement ou d'une division par deux de la sensation (environ 3,5 dB) |
-| 20–25 | Tout le grave est dans le LFE : la salle seule en décide |
+| 50 | Dangereux mais passable : le pire système à l'heure déplace le grave à mi-chemin d'un doublement ou d'une division par deux de la sensation (environ 3,5 dB au-dessus de 40 phones, moins près du seuil) |
+| 0–5 | Tout le grave est dans le LFE : la salle seule en décide |
 | 0 | Un système plausible annule le grave, ou le rend deux fois plus fort |
 
 Vérifiées par les tests, sur bruit blanc à −20 dBFS, au niveau Strong, écoute à 85 dB(C) avec audibilité (dans ce bruit, la bande 20–30 Hz est sous le seuil et ne compte pas) :
@@ -519,31 +531,35 @@ Vérifiées par les tests, sur bruit blanc à −20 dBFS, au niveau Strong, éco
 |---|---|
 | Façade seule, LFE muet | 100 |
 | LFE sans rapport avec la façade, 10 dB sous elle à l'écoute | 100 |
-| LFE 10 dB sous la façade, à 30 % copié sur elle | 94 |
-| LFE sans rapport, aussi fort que la façade | 56 |
-| LFE 10 dB sous la façade, à 60 % copié sur elle | 60 |
-| LFE seul | 2 |
-| LFE sans rapport, 6 dB au-dessus de la façade | 2 |
-| LFE aussi fort que la façade, à 60 % copié sur elle | 19 |
-| LFE 10 dB sous la façade, entièrement copié sur elle | 20 |
+| LFE 10 dB sous la façade, à 30 % copié sur elle | 89 |
+| LFE sans rapport, aussi fort que la façade | 29 |
+| LFE 10 dB sous la façade, à 60 % copié sur elle | 24 |
+| LFE seul | 3 |
+| LFE sans rapport, 6 dB au-dessus de la façade | 3 |
+| LFE aussi fort que la façade, à 60 % copié sur elle | 3 |
+| LFE 10 dB sous la façade, entièrement copié sur elle | 2 |
 | LFE identique à la façade | 0 |
 | LFE identique mais en retard de 5 ms | 0 |
 
 Même 10 dB sous la façade, un LFE entièrement copié sur elle fait varier le
-grave de près de 6 dB entre un sub en polarité et un sub inversé.
+grave de près de 6 dB entre un sub en polarité et un sub inversé. Ce bruit de
+test est faible dans le grave (20 à 45 phones selon la bande) : près du seuil,
+ISO 532-1 rend chaque écart plus audible, d'où des scores bas. Sur un grave
+de cinéma plus fort, les mêmes mix remontent.
 
 ### 3.8 Ce qui est établi et ce qui est supposé
 
 | Élément | Statut |
 |---|---|
 | LFE à +10 dB, omission du LFE en downmix, rôle d'appoint du LFE | Normes [9][12][13] |
-| Conversion dB → sensation (5,0 à 7,0 dB par doublement vers 80 phones) | Calculé depuis ISO 226:2023 [14] |
+| Conversion dB → sensation (5,0 à 7,0 dB par doublement vers 80 phones, moins près du seuil) | Calculé depuis ISO 226:2023 [14] et ISO 532-1:2017 [38] (relation sone / phone) |
 | Seuil d'audition | ISO 226:2023 [14] / ISO 389-7:2019 [28], point par point sur la grille, niveau pris sur un filtre auditif [29] |
 | Dispersion des seuils (écart-type 5 dB) | Ordre de grandeur publié [25][30] ; les niveaux d'isosonie mesurés qui fondent ISO 226:2023 ont eux-mêmes un écart-type d'environ 5 à 6 dB [37]. ISO 28961 [27] donne la distribution exacte des seuils, fréquence par fréquence : non consultée (payante), la valeur uniforme de 5 dB reste une approximation |
-| Tolérances des trois niveaux (3 ; 2 ; 1 dB) | Choix ; 1 dB est l'ordre de grandeur admis du plus petit écart audible [16] |
-| Filtres de bass management (Linkwitz-Riley 24 dB/oct) | Modèle courant, variable selon les appareils |
-| Filtre d'encodeur (Butterworth 8ᵉ ordre à 120 Hz) | Modèle : le filtre LFE de Dolby Digital Plus n'est pas public |
-| Étendue des défauts de salle (±5 ms, polarité) | **Hypothèse.** Le rapport SMPTE constate de larges écarts mais ses chiffres ne sont pas publics |
+| Tolérances des trois niveaux (3 ; 2 ; 1 dB) | Soft : la tolérance de ±3 dB permise à une salle calibrée [53][54]. Medium et Strong : choix ; 1 dB est l'ordre de grandeur admis du plus petit écart audible [16] |
+| Filtres de bass management (Linkwitz-Riley 24 dB/oct) | Pente : au moins 24 dB/octave au-dessus de 120 Hz pour le LFE [53]. Le filtre exact varie selon les appareils |
+| Filtre d'encodeur (Butterworth 8ᵉ ordre à 120 Hz) | Coupure « extrêmement raide » à 120 Hz [54] ; le filtre LFE de Dolby Digital Plus n'est pas public |
+| Écarts de niveau du sub (±1, ±2, ±3 dB ; ±6 dB) | ±3 dB : tolérance du canal sub [53][54] ; ±6 dB au-delà, compté 0,3 : hypothèse |
+| Étendue des défauts de salle (±5 ms, polarité) | **Hypothèse.** Le calibrage vise un sub en polarité et en phase avec le centre [9][53] ; ni ST 202 ni RP 2096-1 ne donnent de tolérance de délai, et le rapport SMPTE [10] n'est pas public |
 | Pertinences des systèmes, plafond de dépendance (1,00), bornes et poids de l'infra-grave (25 et 40 Hz, 30 %), poids de la dépendance au niveau (20 %) | **Hypothèse** d'ingénierie, suivant la consigne (0 ms ×2, avance ×0,5 ; LFE seul vers 20–25). Aucune statistique publiée sur la fréquence de ces défauts |
 | Acoustique de la salle (modes, places) | Hors des systèmes électriques ; simulée à part par Room Sim et Room Sim Pro (modèle modal) |
 | ISO 226 pour des bandes de bruit et de la musique | **Approximation** : ISO 226 décrit des sons purs continus. Un modèle de sonie pour sons complexes (ISO 532-3, Moore-Glasberg-Schlittenlacher) serait plus juste, au prix d'un calcul bien plus lourd |
@@ -558,20 +574,24 @@ voisine d'un chiffre publié reste une hypothèse.
 
 | Réglage | Défaut | Statut | Appui |
 |---|---|---|---|
-| Tolérances Soft, Medium, Strong | 3 ; 2 ; 1 dB | hypothèse | choix du mixeur selon le contenu ; 1 dB ≈ plus petit écart de niveau audible [16] |
-| Poids en retard, en avance | 0,5 ; 0,5 | hypothèse | aucune enquête publiée sur les caissons des salles installées |
+| Tolérance Soft | 3 dB | **sourcé** | la tolérance de ±3 dB permise à un cinéma calibré de 25 à 120 Hz (ST 202 § 6.3, RP 2096-1 § 8.6) [53][54] |
+| Tolérances Medium, Strong | 2 ; 1 dB | hypothèse | choix du mixeur selon le contenu ; 1 dB ≈ plus petit écart de niveau audible [16] |
+| Poids en retard, en avance | 0,5 ; 0,5 | hypothèse | le calibrage vise l'alignement [9][53] ; aucune enquête publiée sur les caissons des salles installées |
 | Plafond de dépendance au LFE | 1,00 | hypothèse | le principe est sourcé (le LFE ne porte pas le grave du programme [12]), la quantité non |
-| Dépendance au niveau : poids, rouge à | 0,20 ; 3 dB | hypothèse | 3 dB = la moitié ou le double de la puissance |
+| Dépendance au niveau : poids, rouge à | 0,20 ; 3 dB | hypothèse | 3 dB = la moitié ou le double de la puissance ; les écarts essayés jusqu'à ±3 dB sont la tolérance du canal sub [53][54] |
 | Infra-grave : poids, jusqu'à, plein poids dès | 0,30 ; 25 Hz ; 40 Hz | hypothèse | beaucoup de systèmes s'arrêtent au-dessus de 40 Hz |
 | Pires places : poids, part | 0,25 ; 10 % | hypothèse | — |
 | Couverture (Pro) : poids | 0,5 | hypothèse | — |
-| Creux contre pics : marge | 1,0 | **sourcé** | un creux n'est détecté qu'à une taille plus grande qu'un pic [44][45] |
+| Creux contre pics : marge | 1,0 | partiellement sourcé | un creux n'est détecté qu'à une taille plus grande qu'un pic [44][45] ; mais le seuil des creux (63–500 Hz [44]) est comparé à un seuil de pic mesuré plus haut en fréquence [45]. Olive et coll. 1997 [45], qui mesure pics et creux dans le grave, n'a pas pu être lu |
 
-Sources cherchées sans pouvoir être lues depuis la session de développement
-(accès réseau bloqué) : SMPTE ST 202:2010 (tolérances de la courbe X en salle),
-et l'étude de L-Acoustics sur l'audibilité d'un décalage façade / caissons
-(AES, 2024). Elles pourraient remplacer les tolérances et les poids en retard
-ou en avance.
+Lues depuis : SMPTE RP 200:2012 [9], ST 202:2010 [54], RP 2096-1:2017 [53],
+Toole 2015 [55]. Elles sourcent la tolérance Soft, les écarts de niveau du sub
+et les pentes de filtre ; aucune ne donne de tolérance de délai. RP 2054:2010
+(sonie des bandes-annonces) n'était qu'un extrait sans la méthode, et ne
+concerne pas le score. Toujours manquants (accès réseau bloqué) : l'étude de
+L-Acoustics sur l'audibilité d'un décalage façade / caissons (AES, 2024), qui
+pourrait remplacer les poids en retard ou en avance, et Olive et coll. 1997
+(seuils des pics et des creux dans le grave), pour la marge creux / pics.
 
 ### 3.8 bis Dépendance au LFE : ce que dit la littérature
 
@@ -1062,7 +1082,7 @@ couches :
 | Grave | 60–120 Hz | 120 Hz : limite haute du canal LFE (Dolby, ATSC A/52) |
 
 **L'infra dans le score de Room Sim Pro.** Sous 20 Hz, la bande 10–20 Hz
-est notée comme les autres, sur la base de Møller & Pedersen (2004) [38],
+est notée comme les autres, sur la base de Møller & Pedersen (2004) [25],
 la revue de référence sur l'audition aux basses fréquences et aux
 infrasons :
 
@@ -1105,7 +1125,7 @@ bleu vers 30, vert vers 60, orange vers 80, rouge puis magenta au-delà de 90),
 la valeur du mix marquée en blanc sur l'échelle. Dans la vue en couches, la
 couleur est la sonie de la couche, et la hauteur l'écart à la sonie du mix dans
 cette couche (le plan neutre est le mix). L'infra, sous 20 Hz, n'a pas de
-phones : il est donné en dB au-dessus du seuil de Møller & Pedersen [38].
+phones : il est donné en dB au-dessus du seuil de Møller & Pedersen [25].
 Filtre « Tout | LCR | LFE » : un trou en « LCR » vient des LCR, un trou en
 « LFE » des caissons ou des rappels LFE. Près du seuil, les
 courbes d'isosonie se resserrent : quelques dB de moins font beaucoup de
@@ -1637,6 +1657,11 @@ du son) : bruit blanc ou rose, aucune ; grondement grave (sous 90 Hz), 1 à 3.
 - Tout en bas (5–15 Hz), la résolution est limitée par la durée de la fenêtre :
   utiliser le mode « Ultra (2 s) » pour cette zone.
 - Les surrounds et hauteurs ne sont pas analysés (§ 3.4 bis).
+- Le coupe-bas optionnel du canal sub sous 25 Hz (12 dB/octave, RP 2096-1
+  [53]) n'est pas simulé dans les systèmes cinéma : l'infra-grave du LFE y est
+  supposé joué.
+- Le niveau de référence est pris à −20 dBFS RMS ; RP 200 le mesure avec un
+  appareil à réponse moyenne, ce qui donne environ 0,6 dB d'écart [9] (A.6).
 - Les systèmes de lecture sont des modèles électriques ; l'acoustique d'une
   salle n'est pas simulée. Voir 3.8 pour ce qui est établi et ce qui est supposé.
 
@@ -1659,8 +1684,10 @@ du son) : bruit blanc ou rose, aucune ; grondement grave (sous 90 Hz), 1 à 3.
    vol. 24, 1976.
 8. G. C. Carter, « Coherence and time delay estimation », *Proc. IEEE*,
    vol. 75, 1987.
-9. SMPTE RP 200, *Relative and Absolute Sound Pressure Levels for
-   Motion-Picture Multichannel Sound Systems*.
+9. SMPTE RP 200:2012, *Relative and Absolute Sound Pressure Levels for
+   Motion-Picture Multichannel Sound Systems* (§ 5.7 : +10 dB dans la bande ;
+   § 6 : 85 dB(C) ; annexe A.4 : polarité du sub ; le « +3 dB » du § 5.8
+   concerne la *bass extension* du film optique, pas le LFE).
 10. SMPTE, *TC-25CSS B-Chain Frequency and Temporal Response Analysis of
     Theatres and Dubbing Stages*, 2014.
 11. A. J. Hill, M. O. J. Hawksford, P. Newell, « Enhanced Wide-Area
@@ -1693,7 +1720,7 @@ du son) : bruit blanc ou rose, aucune ; grondement grave (sous 90 Hz), 1 à 3.
     Transients Resulting from Point-source Motion or Astrometric Noise »,
     *Astron. J.*, 2024 (arXiv:2403.09771) ; code : github.com/ofersp/translient.
 25. H. Møller, C. S. Pedersen, « Hearing at low and infrasonic frequencies »,
-    *Noise & Health*, vol. 6, 2004.
+    *Noise & Health* 6(23), 37–57 (2004).
 26. RTINGS, méthodes de mesure « Low-Frequency Extension » des téléviseurs et
     barres de son.
 27. ISO 28961:2012, *Acoustics — Statistical distribution of hearing
@@ -1724,8 +1751,11 @@ du son) : bruit blanc ou rose, aucune ; grondement grave (sous 90 Hz), 1 à 3.
 37. Y. Suzuki, H. Takeshima, K. Kurakata, « Revision of ISO 226 "Normal
     Equal-Loudness-Level Contours" from 2003 to 2023 edition: the background
     and results », *Acoust. Sci. & Tech.* 45(1), 2024.
-38. H. Møller, C. S. Pedersen, « Hearing at low and infrasonic frequencies »,
-    *Noise & Health* 6(23), 37–57 (2004).
+38. ISO 532-1:2017, *Acoustics — Methods for calculating loudness — Part 1:
+    Zwicker method* (relation entre sonie et niveau d'isosonie : 10 phones par
+    doublement à partir de 40 phones, `LN = 40·(N + 0,0005)^0,35` en dessous).
+    Texte de la norme non consulté ; formule relevée dans la littérature qui la
+    cite.
 39. L. E. Kinsler, A. R. Frey, A. B. Coppens, J. V. Sanders, *Fundamentals of
     Acoustics*, 4e éd., Wiley, 2000 (piston bafflé, directivité) ; L. L.
     Beranek, T. J. Mellow, *Acoustics: Sound Fields and Transducers*,
@@ -1770,6 +1800,18 @@ du son) : bruit blanc ou rose, aucune ; grondement grave (sous 90 Hz), 1 à 3.
 52. A. Farina, « Simultaneous measurement of impulse response and distortion
     with a swept-sine technique », AES 108th Convention, Paris, 2000,
     paper 5093.
+53. SMPTE RP 2096-1:2017, *Cinema Sound System Baseline Setup and
+    Calibration* (§ 6 et 8.6 : LFE ±3 dB de 25 à 120 Hz, au moins 24 dB/octave
+    au-dessus, coupe-bas optionnel de 12 dB/octave sous 25 Hz ; § 7.11 : LFE
+    aligné en polarité et en phase sur le centre ; § 8.1 : les creux dus à une
+    annulation ne s'égalisent pas).
+54. SMPTE ST 202:2010, *Dubbing Stages (Mixing Rooms), Screening Rooms and
+    Indoor Theaters — B-Chain Electroacoustic Response* (§ 6.3 : canal sub plat
+    à ±3 dB de 25 à 120 Hz, coupure à 120 Hz extrêmement raide ; annexe A.2 :
+    la bonne polarité donne le plus de grave en somme ; A.6 : les écarts larges,
+    à faible Q, comptent plus que les étroits).
+55. F. E. Toole, « The Measurement and Calibration of Sound Reproducing
+    Systems », *J. Audio Eng. Soc.* 63(7/8), 512–541 (2015).
 
 
 ## Niveau du LFE et réglages

@@ -136,6 +136,19 @@ double PlaybackSimulator::iso226Phon (double hz, double splDb)
     return inner > 0.0 ? 100.0 / 3.0 * std::log10 (inner) : -100.0;      // far below the threshold of hearing
 }
 
+namespace
+{
+    // ISO 532-1:2017, loudness N (sone) against loudness level LN (phon)
+    double soneOf (double phon)  { return phon >= 40.0 ? std::pow (2.0, (phon - 40.0) / 10.0) : std::pow (phon / 40.0, 1.0 / 0.35) - 0.0005; }
+    double phonOf (double sone)  { return sone >= 1.0 ? 40.0 + 10.0 * std::log2 (sone) : 40.0 * std::pow (sone + 0.0005, 0.35); }
+}
+
+double PlaybackSimulator::loudnessDoublingDb (double hz, double phon)
+{
+    const double at = std::clamp (phon, 10.0, 80.0);
+    return iso226Spl (hz, phonOf (2.0 * soneOf (at))) - iso226Spl (hz, at);
+}
+
 double PlaybackSimulator::hearingThresholdDb (double hz)
 {
     return iso226At (hz).tf;
@@ -425,7 +438,7 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
     Translation t;
     const double tolerance = tuning.toleranceDb[(size_t) level];
 
-    // A quarter (by default) at 25 Hz and below, 1 from 60 Hz up, linear in octaves between
+    // 30 % (by default) at 25 Hz and below, 1 from 40 Hz up, linear in octaves between
     const auto stereoRelevance = [this] (double hz)
     {
         const double lo = tuning.infraLoHz, hi = std::max (tuning.infraHiHz, lo * 1.01);
@@ -590,9 +603,7 @@ Translation PlaybackSimulator::compute (const Analysis& a, Level level, double l
     {
         const double spl = splOf (b, reference[b]);
         const double phon = iso226Phon (bandCentreHz[b], spl);
-        const double at = std::clamp (phon, 20.0, 80.0);
-
-        doubling[b] = iso226Spl (bandCentreHz[b], at + 10.0) - iso226Spl (bandCentreHz[b], at);
+        doubling[b] = loudnessDoublingDb (bandCentreHz[b], phon);
         t.bandSplDb[(size_t) b] = spl;
         t.bandPhon[(size_t) b] = phon;
         t.bandDoublingDb[(size_t) b] = doubling[b];

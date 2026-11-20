@@ -524,12 +524,11 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
         return t.audibleAt (b, spl - t.bandSplDb[(size_t) b], tuning.thresholdSpreadDb, tuning.audibility);
     };
 
-    // dB that double the loudness of a band at the level it has at that seat (ISO 226)
+    // dB that double the loudness of a band at the level it has at that seat (ISO 226, ISO 532-1)
     const auto doublingAt = [] (int b, double spl)
     {
         const double hz = PlaybackSimulator::bandCentreHz[b];
-        const double phon = std::clamp (PlaybackSimulator::iso226Phon (hz, spl), 20.0, 80.0);
-        return PlaybackSimulator::iso226Spl (hz, phon + 10.0) - PlaybackSimulator::iso226Spl (hz, phon);
+        return PlaybackSimulator::loudnessDoublingDb (hz, PlaybackSimulator::iso226Phon (hz, spl));
     };
 
     r.seatChangeDb.assign ((size_t) room.seats, 0.0);
@@ -869,7 +868,7 @@ RoomResult RoomSimulator::rate (const RoomPaths& room, const Analysis& a, const 
             const double spl = splOfPower (std::max (approvedHere, actualLayer[0]));
             infraHeard = tuning.audibility ? 0.5 * std::erfc (-((spl - infraThreshold) / std::max (tuning.thresholdSpreadDb, 0.1)) / std::sqrt (2.0)) : 1.0;
 
-            const double doubling = PlaybackSimulator::iso226Spl (20.0, 30.0) - PlaybackSimulator::iso226Spl (20.0, 20.0);
+            const double doubling = PlaybackSimulator::loudnessDoublingDb (20.0, 20.0);
             const double allowed = std::min (toleranceDb, doubling - 0.5);
             const double dipShift = std::clamp (tuning.dipAllowance, 0.0, 1.0) * dipAllowanceDb (15.0);
             const auto rateDb = [&] (double db)
